@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
   mkdir,
   mkdtemp,
-  realpath,
+  readFile,
   rename,
   rm,
   symlink,
@@ -31,6 +31,7 @@ afterEach(async () => {
 describe("ServedRoot", () => {
   test("canonicalizes an alias before exposing its path", async () => {
     const alias = join(fixtureRoot, "alias");
+    await writeFile(join(servedPath, "marker.txt"), "served marker\n");
     await symlink(
       servedPath,
       alias,
@@ -38,8 +39,12 @@ describe("ServedRoot", () => {
     );
 
     const root = await Effect.runPromise(ServedRoot.make(alias));
+    await Effect.runPromise(root.verify());
 
-    expect(root.path).toBe(await realpath(servedPath));
+    expect(root.path).not.toBe(alias);
+    expect(await readFile(join(root.path, "marker.txt"), "utf8")).toBe(
+      "served marker\n"
+    );
   });
 
   test("keeps accepting live changes within the same directory", async () => {
@@ -48,7 +53,9 @@ describe("ServedRoot", () => {
 
     await Effect.runPromise(root.verify());
 
-    expect(root.path).toBe(await realpath(servedPath));
+    expect(await readFile(join(root.path, "uncommitted.txt"), "utf8")).toBe(
+      "live\n"
+    );
   });
 
   test("rejects a path rebound to another directory", async () => {
