@@ -74,4 +74,48 @@ describe("ServedRoot", () => {
       message: "served root changed after bridge start",
     });
   });
+
+  test("discards a read completed while the root is rebound", async () => {
+    await Promise.all([
+      writeFile(join(servedPath, "secret.txt"), "inside secret\n"),
+      writeFile(join(outsidePath, "secret.txt"), "outside secret\n"),
+    ]);
+    const root = await Effect.runPromise(ServedRoot.make(servedPath));
+    const entered = Promise.withResolvers<void>();
+    const resume = Promise.withResolvers<void>();
+    let observedContent = "";
+    const outcomePromise = root
+      .guard(async () => {
+        entered.resolve();
+        await resume.promise;
+        observedContent = await readFile(join(root.path, "secret.txt"), "utf8");
+        return observedContent;
+      })
+      .then(
+        (content) => ({ content, type: "success" as const }),
+        (error: unknown) => ({ error, type: "failure" as const })
+      );
+
+    await entered.promise;
+    await rename(servedPath, join(fixtureRoot, "original-served"));
+    await symlink(
+      outsidePath,
+      servedPath,
+      process.platform === "win32" ? "junction" : "dir"
+    );
+    resume.resolve();
+
+    const outcome = await outcomePromise;
+
+    expect(observedContent).toBe("outside secret\n");
+    expect(outcome).toMatchObject({
+      error: {
+        _tag: "ServedRootChangedError",
+        message: "served root changed after bridge start",
+      },
+      type: "failure",
+    });
+    expect(JSON.stringify(outcome)).not.toContain("outside secret");
+    expect(JSON.stringify(outcome)).not.toContain(outsidePath);
+  });
 });

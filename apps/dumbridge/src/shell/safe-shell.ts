@@ -1,7 +1,7 @@
 import { Buffer } from "node:buffer";
 import { Effect, Schema } from "effect";
 import { Bash, type CommandName, OverlayFs } from "just-bash";
-import type { ServedRoot } from "../files/served-root";
+import { type ServedRoot, ServedRootChangedError } from "../files/served-root";
 
 const virtualRoot = "/workspace";
 
@@ -131,21 +131,25 @@ class FilesystemLimitSignal extends Error {
 
 class RequestBudgetOverlayFs extends OverlayFs {
   limitExceeded: FilesystemLimit | undefined;
+  servedRootFailure: ServedRootChangedError | undefined;
 
   private overlayBytes = 0;
   private readBytes = 0;
   private readonly maximumOverlayBytes: number;
   private readonly maximumReadBytes: number;
+  private readonly servedRoot: ServedRoot;
   private signal: AbortSignal | undefined;
 
   constructor(
     options: ConstructorParameters<typeof OverlayFs>[0],
     maximumReadBytes: number,
-    maximumOverlayBytes: number
+    maximumOverlayBytes: number,
+    servedRoot: ServedRoot
   ) {
     super(options);
     this.maximumReadBytes = maximumReadBytes;
     this.maximumOverlayBytes = maximumOverlayBytes;
+    this.servedRoot = servedRoot;
   }
 
   begin(signal: AbortSignal) {
@@ -161,6 +165,33 @@ class RequestBudgetOverlayFs extends OverlayFs {
     const result = await operation();
     this.assertActive();
     return result;
+  }
+
+  private async whileGuarded<A>(operation: () => Promise<A>): Promise<A> {
+    try {
+      return await this.servedRoot.guard(() => this.whileActive(operation));
+    } catch (cause) {
+      if (cause instanceof ServedRootChangedError) {
+        this.servedRootFailure = cause;
+      }
+      throw cause;
+    }
+  }
+
+  private whileGuardedSync<A>(operation: () => A): A {
+    try {
+      return this.servedRoot.guardSync(() => {
+        this.assertActive();
+        const result = operation();
+        this.assertActive();
+        return result;
+      });
+    } catch (cause) {
+      if (cause instanceof ServedRootChangedError) {
+        this.servedRootFailure = cause;
+      }
+      throw cause;
+    }
   }
 
   private reserve(kind: FilesystemLimit, bytes: number) {
@@ -182,9 +213,10 @@ class RequestBudgetOverlayFs extends OverlayFs {
   override async readFileBuffer(
     ...args: Parameters<OverlayFs["readFileBuffer"]>
   ): ReturnType<OverlayFs["readFileBuffer"]> {
-    this.assertActive();
     try {
-      const content = await super.readFileBuffer(...args);
+      const content = await this.whileGuarded(() =>
+        super.readFileBuffer(...args)
+      );
       this.reserve("file-read", content.byteLength);
       return content;
     } catch (error) {
@@ -198,60 +230,113 @@ class RequestBudgetOverlayFs extends OverlayFs {
   override async writeFile(
     ...args: Parameters<OverlayFs["writeFile"]>
   ): ReturnType<OverlayFs["writeFile"]> {
-    this.reserve("overlay", fileContentSize(args[1], args[2]));
-    await super.writeFile(...args);
-    this.assertActive();
+    await this.whileGuarded(async () => {
+      this.reserve("overlay", fileContentSize(args[1], args[2]));
+      await super.writeFile(...args);
+    });
   }
 
   override async appendFile(
     ...args: Parameters<OverlayFs["appendFile"]>
   ): ReturnType<OverlayFs["appendFile"]> {
-    this.reserve("overlay", fileContentSize(args[1], args[2]));
-    await super.appendFile(...args);
-    this.assertActive();
+    await this.whileGuarded(async () => {
+      this.reserve("overlay", fileContentSize(args[1], args[2]));
+      await super.appendFile(...args);
+    });
+  }
+
+  override exists(
+    ...args: Parameters<OverlayFs["exists"]>
+  ): ReturnType<OverlayFs["exists"]> {
+    return this.whileGuarded(() => super.exists(...args));
   }
 
   override stat(
     ...args: Parameters<OverlayFs["stat"]>
   ): ReturnType<OverlayFs["stat"]> {
-    return this.whileActive(() => super.stat(...args));
+    return this.whileGuarded(() => super.stat(...args));
   }
 
   override lstat(
     ...args: Parameters<OverlayFs["lstat"]>
   ): ReturnType<OverlayFs["lstat"]> {
-    return this.whileActive(() => super.lstat(...args));
+    return this.whileGuarded(() => super.lstat(...args));
+  }
+
+  override mkdir(
+    ...args: Parameters<OverlayFs["mkdir"]>
+  ): ReturnType<OverlayFs["mkdir"]> {
+    return this.whileGuarded(() => super.mkdir(...args));
   }
 
   override readdir(
     ...args: Parameters<OverlayFs["readdir"]>
   ): ReturnType<OverlayFs["readdir"]> {
-    return this.whileActive(() => super.readdir(...args));
+    return this.whileGuarded(() => super.readdir(...args));
   }
 
   override readdirWithFileTypes(
     ...args: Parameters<OverlayFs["readdirWithFileTypes"]>
   ): ReturnType<OverlayFs["readdirWithFileTypes"]> {
-    return this.whileActive(() => super.readdirWithFileTypes(...args));
+    return this.whileGuarded(() => super.readdirWithFileTypes(...args));
   }
 
-  override async rm(
+  override rm(
     ...args: Parameters<OverlayFs["rm"]>
   ): ReturnType<OverlayFs["rm"]> {
-    await this.whileActive(() => super.rm(...args));
+    return this.whileGuarded(() => super.rm(...args));
   }
 
-  override async cp(
+  override cp(
     ...args: Parameters<OverlayFs["cp"]>
   ): ReturnType<OverlayFs["cp"]> {
-    await this.whileActive(() => super.cp(...args));
+    return this.whileGuarded(() => super.cp(...args));
+  }
+
+  override mv(
+    ...args: Parameters<OverlayFs["mv"]>
+  ): ReturnType<OverlayFs["mv"]> {
+    return this.whileGuarded(() => super.mv(...args));
+  }
+
+  override chmod(
+    ...args: Parameters<OverlayFs["chmod"]>
+  ): ReturnType<OverlayFs["chmod"]> {
+    return this.whileGuarded(() => super.chmod(...args));
+  }
+
+  override symlink(
+    ...args: Parameters<OverlayFs["symlink"]>
+  ): ReturnType<OverlayFs["symlink"]> {
+    return this.whileGuarded(() => super.symlink(...args));
+  }
+
+  override link(
+    ...args: Parameters<OverlayFs["link"]>
+  ): ReturnType<OverlayFs["link"]> {
+    return this.whileGuarded(() => super.link(...args));
+  }
+
+  override readlink(
+    ...args: Parameters<OverlayFs["readlink"]>
+  ): ReturnType<OverlayFs["readlink"]> {
+    return this.whileGuarded(() => super.readlink(...args));
+  }
+
+  override realpath(
+    ...args: Parameters<OverlayFs["realpath"]>
+  ): ReturnType<OverlayFs["realpath"]> {
+    return this.whileGuarded(() => super.realpath(...args));
+  }
+
+  override utimes(
+    ...args: Parameters<OverlayFs["utimes"]>
+  ): ReturnType<OverlayFs["utimes"]> {
+    return this.whileGuarded(() => super.utimes(...args));
   }
 
   override getAllPaths(): ReturnType<OverlayFs["getAllPaths"]> {
-    this.assertActive();
-    const paths = super.getAllPaths();
-    this.assertActive();
-    return paths;
+    return this.whileGuardedSync(() => super.getAllPaths());
   }
 }
 
@@ -308,6 +393,9 @@ const limitMessage = (limit: ShellLimit) =>
   `remote read shell ${limit} limit exceeded`;
 
 const executionError = (cause: unknown) => {
+  if (cause instanceof ServedRootChangedError) {
+    return cause;
+  }
   if (cause instanceof FilesystemLimitSignal) {
     return new ShellLimitExceededError({
       limit: cause.limit,
@@ -341,7 +429,8 @@ const makeExecute = (servedRoot: ServedRoot, limits: SafeShellLimits) =>
               root: servedRoot.path,
             },
             limits.maxFileReadBytes,
-            limits.maxOverlayBytes
+            limits.maxOverlayBytes,
+            servedRoot
           ),
       });
       yield* servedRoot.verify();
@@ -384,9 +473,13 @@ const makeExecute = (servedRoot: ServedRoot, limits: SafeShellLimits) =>
           return {
             execution,
             filesystemLimit: fs.limitExceeded,
+            servedRootFailure: fs.servedRootFailure,
           };
         },
       });
+      if (result.servedRootFailure !== undefined) {
+        return yield* result.servedRootFailure;
+      }
       yield* servedRoot.verify();
       const shellResult: ShellResult = {
         exitCode: result.execution.exitCode,

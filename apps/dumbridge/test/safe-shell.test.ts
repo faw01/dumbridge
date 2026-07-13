@@ -75,6 +75,56 @@ describe("SafeShell", () => {
     });
   });
 
+  test("never returns outside content when the root changes during a read", async () => {
+    await Promise.all([
+      writeFile(join(servedRoot, "secret.txt"), "inside secret\n"),
+      writeFile(join(outsideRoot, "secret.txt"), "outside secret\n"),
+    ]);
+    const root = await Effect.runPromise(ServedRoot.make(servedRoot));
+    const originalGuard = root.guard;
+    const entered = Promise.withResolvers<void>();
+    const resume = Promise.withResolvers<void>();
+    let pauseNextOperation = true;
+    const pausedGuard: typeof root.guard = (operation) =>
+      originalGuard(async () => {
+        if (pauseNextOperation) {
+          pauseNextOperation = false;
+          entered.resolve();
+          await resume.promise;
+        }
+        return operation();
+      });
+    Object.defineProperty(root, "guard", { value: pausedGuard });
+    const shell = await Effect.runPromise(SafeShell.make(root));
+    const outcomePromise = Effect.runPromise(
+      shell.execute("cat secret.txt")
+    ).then(
+      (result) => ({ result, type: "success" as const }),
+      (error: unknown) => ({ error, type: "failure" as const })
+    );
+
+    await entered.promise;
+    await rename(servedRoot, join(fixtureRoot, "original-served"));
+    await symlink(
+      outsideRoot,
+      servedRoot,
+      process.platform === "win32" ? "junction" : "dir"
+    );
+    resume.resolve();
+
+    const outcome = await outcomePromise;
+
+    expect(outcome).toMatchObject({
+      error: {
+        _tag: "ServedRootChangedError",
+        message: "served root changed after bridge start",
+      },
+      type: "failure",
+    });
+    expect(JSON.stringify(outcome)).not.toContain("outside secret");
+    expect(JSON.stringify(outcome)).not.toContain(outsideRoot);
+  });
+
   test("discards redirection, rm, and mv writes after each execution", async () => {
     await Promise.all([
       writeFile(join(servedRoot, "note.txt"), "host note\n"),

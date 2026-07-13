@@ -17,6 +17,11 @@ export class ServedRootChangedError extends Schema.TaggedErrorClass<ServedRootCh
   { message: Schema.String }
 ) {}
 
+const servedRootChanged = () =>
+  new ServedRootChangedError({
+    message: "served root changed after bridge start",
+  });
+
 const identityFrom = (stats: Stats): ServedRootIdentity => ({
   birthtimeMs: stats.birthtimeMs,
   device: stats.dev,
@@ -49,6 +54,46 @@ export class ServedRoot {
     this.identity = identity;
   }
 
+  private assertCurrent() {
+    try {
+      const stats = inspectDirectory(this.path);
+      const currentPath = realpathSync(this.path);
+      if (
+        currentPath !== this.path ||
+        !identitiesMatch(this.identity, identityFrom(stats))
+      ) {
+        throw new Error("served root identity changed");
+      }
+    } catch {
+      // biome-ignore lint/style/useErrorCause: The cause may expose a host path.
+      throw servedRootChanged();
+    }
+  }
+
+  readonly guard = async <A>(operation: () => Promise<A>): Promise<A> => {
+    this.assertCurrent();
+    try {
+      const result = await operation();
+      this.assertCurrent();
+      return result;
+    } catch (cause) {
+      this.assertCurrent();
+      throw cause;
+    }
+  };
+
+  readonly guardSync = <A>(operation: () => A): A => {
+    this.assertCurrent();
+    try {
+      const result = operation();
+      this.assertCurrent();
+      return result;
+    } catch (cause) {
+      this.assertCurrent();
+      throw cause;
+    }
+  };
+
   static readonly make = Effect.fn("ServedRoot.make")((path: string) =>
     Effect.try({
       catch: () =>
@@ -65,20 +110,8 @@ export class ServedRoot {
 
   readonly verify = Effect.fn("ServedRoot.verify")(() =>
     Effect.try({
-      catch: () =>
-        new ServedRootChangedError({
-          message: "served root changed after bridge start",
-        }),
-      try: () => {
-        const stats = inspectDirectory(this.path);
-        const currentPath = realpathSync(this.path);
-        if (
-          currentPath !== this.path ||
-          !identitiesMatch(this.identity, identityFrom(stats))
-        ) {
-          throw new Error("served root identity changed");
-        }
-      },
+      catch: servedRootChanged,
+      try: () => this.assertCurrent(),
     })
   );
 }
