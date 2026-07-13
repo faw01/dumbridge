@@ -1,18 +1,19 @@
 import { createHash } from "node:crypto";
-import { constants, type Stats } from "node:fs";
+import { constants, type Dirent, type Stats } from "node:fs";
 import {
   link,
   lstat,
   mkdir,
   mkdtemp,
   open,
+  opendir,
   readdir,
   realpath,
   rename,
   rm,
 } from "node:fs/promises";
 import { dirname, join, posix, relative, resolve, sep, win32 } from "node:path";
-import { Effect, Schema } from "effect";
+import { Effect, Exit, Schema, Stream } from "effect";
 
 const digestPattern = /^[0-9a-f]{64}$/;
 const windowsDrivePattern = /^[a-z]:/i;
@@ -55,8 +56,13 @@ export interface PullLimits {
 
 export interface PullSource {
   readonly manifest: PullManifest;
-  readonly read: (entry: PullFileEntry) => AsyncIterable<Uint8Array>;
+  readonly read: PullRead;
 }
+
+export type PullRead = (
+  entry: PullFileEntry,
+  signal: AbortSignal
+) => Stream.Stream<Uint8Array, PullError>;
 
 export interface PullResult {
   readonly bytes: number;
@@ -136,14 +142,22 @@ interface Fingerprint {
 }
 
 interface PlannedFile {
-  readonly absolutePath: string;
+  readonly displayPath: string;
   readonly entry: PullFileEntry;
   readonly fingerprint: Fingerprint;
+  readonly parts: readonly string[];
+  readonly root: string;
+}
+
+interface ScannedFile {
+  readonly digest: string;
+  readonly fingerprint: Fingerprint;
+  readonly size: number;
 }
 
 const defaultLimits: PullLimits = {
   chunkBytes: 64 * 1024,
-  maxEntries: 10_000,
+  maxEntries: 4096,
   maxFileBytes: 1024 * 1024 * 1024,
   maxTotalBytes: 2 * 1024 * 1024 * 1024,
 };
@@ -277,146 +291,226 @@ const totalLimit = (total: number, limits: PullLimits) => {
   }
 };
 
-const lstatRemote = async (absolutePath: string, remotePath: string) => {
+const changed = (path: string): PullSourceChangedError =>
+  new PullSourceChangedError({ path });
+
+const lstatRemote = async (
+  absolutePath: string,
+  remotePath: string,
+  sourceWasPlanned: boolean
+) => {
   try {
     return await lstat(absolutePath);
   } catch (cause) {
     if (hasCode(cause, "ENOENT")) {
-      // biome-ignore lint/style/useErrorCause: Host filesystem details stay local.
-      throw new PullNotFoundError({ path: remotePath });
+      throw sourceWasPlanned
+        ? changed(remotePath)
+        : new PullNotFoundError({ path: remotePath });
     }
     throw cause;
   }
 };
 
-const hashPlannedFile = async (
-  absolutePath: string,
-  remotePath: string,
-  limits: PullLimits
+const inspectSourcePath = async (
+  root: string,
+  parts: readonly string[],
+  sourceWasPlanned = false
 ) => {
-  const handle = await open(absolutePath, readOnlyNoFollow);
-  try {
-    const before = await handle.stat();
-    if (!before.isFile()) {
+  let absolutePath = root;
+  let stats: Stats | undefined;
+
+  for (let index = 0; index < parts.length; index += 1) {
+    const part = parts[index];
+    if (!part) {
       throw new PullPathError({
-        path: remotePath,
-        reason: "not a regular file",
+        path: parts.join("/"),
+        reason: "path must be canonical and relative",
       });
     }
-    fileLimit(before.size, limits);
+    absolutePath = join(absolutePath, part);
+    const remotePath = parts.slice(0, index + 1).join("/");
+    // biome-ignore lint/performance/noAwaitInLoops: Every path component must be checked in order.
+    stats = await lstatRemote(absolutePath, remotePath, sourceWasPlanned);
+    if (stats.isSymbolicLink()) {
+      throw new PullSymlinkError({ path: remotePath });
+    }
+  }
 
-    const hash = createHash("sha256");
-    const buffer = Buffer.allocUnsafe(limits.chunkBytes);
-    let bytesRead = buffer.byteLength;
-    let offset = 0;
-    while (bytesRead > 0) {
-      // biome-ignore lint/performance/noAwaitInLoops: File offsets are read sequentially.
-      ({ bytesRead } = await handle.read(buffer, 0, buffer.byteLength, offset));
-      if (bytesRead > 0) {
-        hash.update(buffer.subarray(0, bytesRead));
-        offset += bytesRead;
+  if (!stats) {
+    throw new PullPathError({
+      path: parts.join("/"),
+      reason: "path has no file name",
+    });
+  }
+
+  return { absolutePath, stats };
+};
+
+const scanSourceFile = async function* (options: {
+  readonly displayPath: string;
+  readonly expected?: {
+    readonly digest: string;
+    readonly fingerprint: Fingerprint;
+    readonly size: number;
+  };
+  readonly limits: PullLimits;
+  readonly parts: readonly string[];
+  readonly root: string;
+  readonly signal?: AbortSignal;
+}): AsyncGenerator<Uint8Array, ScannedFile> {
+  try {
+    const inspectedBefore = await inspectSourcePath(
+      options.root,
+      options.parts,
+      options.expected !== undefined
+    );
+    const handle = await open(inspectedBefore.absolutePath, readOnlyNoFollow);
+    try {
+      const before = await handle.stat();
+      if (!before.isFile()) {
+        throw new PullPathError({
+          path: options.displayPath,
+          reason: "not a regular file",
+        });
       }
-    }
+      fileLimit(before.size, options.limits);
 
-    const after = await handle.stat();
-    const beforeFingerprint = fingerprint(before);
-    if (
-      offset !== before.size ||
-      !fingerprintsMatch(beforeFingerprint, fingerprint(after))
-    ) {
-      throw new PullSourceChangedError({ path: remotePath });
-    }
+      const beforeFingerprint = fingerprint(before);
+      if (
+        !fingerprintsMatch(
+          beforeFingerprint,
+          fingerprint(inspectedBefore.stats)
+        ) ||
+        (options.expected !== undefined &&
+          (!fingerprintsMatch(
+            beforeFingerprint,
+            options.expected.fingerprint
+          ) ||
+            before.size !== options.expected.size))
+      ) {
+        throw changed(options.displayPath);
+      }
 
-    const pathStats = await lstatRemote(absolutePath, remotePath);
-    if (
-      pathStats.isSymbolicLink() ||
-      !fingerprintsMatch(beforeFingerprint, fingerprint(pathStats))
-    ) {
-      throw new PullSourceChangedError({ path: remotePath });
-    }
+      const hash = createHash("sha256");
+      const buffer = Buffer.allocUnsafe(options.limits.chunkBytes);
+      let bytesRead = buffer.byteLength;
+      let offset = 0;
+      while (bytesRead > 0) {
+        options.signal?.throwIfAborted();
+        // biome-ignore lint/performance/noAwaitInLoops: File offsets are read sequentially.
+        ({ bytesRead } = await handle.read(
+          buffer,
+          0,
+          buffer.byteLength,
+          offset
+        ));
+        if (bytesRead > 0) {
+          const nextOffset = offset + bytesRead;
+          fileLimit(nextOffset, options.limits);
+          if (
+            options.expected !== undefined &&
+            nextOffset > options.expected.size
+          ) {
+            throw changed(options.displayPath);
+          }
+          options.signal?.throwIfAborted();
+          const chunk = Uint8Array.from(buffer.subarray(0, bytesRead));
+          hash.update(chunk);
+          offset = nextOffset;
+          yield chunk;
+        }
+      }
 
-    return {
-      digest: hash.digest("hex"),
-      fingerprint: beforeFingerprint,
-      size: before.size,
-    };
-  } finally {
-    await handle.close();
+      const after = await handle.stat();
+      const inspectedAfter = await inspectSourcePath(
+        options.root,
+        options.parts,
+        options.expected !== undefined
+      );
+      const digest = hash.digest("hex");
+      if (
+        offset !== before.size ||
+        !fingerprintsMatch(beforeFingerprint, fingerprint(after)) ||
+        !fingerprintsMatch(
+          beforeFingerprint,
+          fingerprint(inspectedAfter.stats)
+        ) ||
+        (options.expected !== undefined &&
+          (offset !== options.expected.size ||
+            digest !== options.expected.digest))
+      ) {
+        throw changed(options.displayPath);
+      }
+
+      return {
+        digest,
+        fingerprint: beforeFingerprint,
+        size: before.size,
+      };
+    } finally {
+      await handle.close();
+    }
+  } catch (cause) {
+    throw mapPullError(cause, "read source file", options.displayPath);
   }
 };
 
-const changed = (path: string): PullSourceChangedError =>
-  new PullSourceChangedError({ path });
-
-const failedRead = async function* (
-  error: PullSourceChangedError
-): AsyncGenerator<Uint8Array> {
-  yield await Promise.reject<Uint8Array>(error);
-};
-
-const openPlannedFile = async (file: PlannedFile) => {
-  try {
-    return await open(file.absolutePath, readOnlyNoFollow);
-  } catch {
-    // biome-ignore lint/style/useErrorCause: Source paths and host errors stay local.
-    throw changed(file.entry.path);
+const planSourceFile = async (options: {
+  readonly displayPath: string;
+  readonly limits: PullLimits;
+  readonly parts: readonly string[];
+  readonly root: string;
+}) => {
+  const scanner = scanSourceFile(options);
+  let result = await scanner.next();
+  while (!result.done) {
+    // biome-ignore lint/performance/noAwaitInLoops: Planning must consume the stable file scan fully.
+    result = await scanner.next();
   }
+  return result.value;
 };
 
-const statPlannedPath = async (file: PlannedFile) => {
-  try {
-    return await lstat(file.absolutePath);
-  } catch {
-    // biome-ignore lint/style/useErrorCause: Source paths and host errors stay local.
-    throw changed(file.entry.path);
-  }
-};
-
-const readPlannedFile = async function* (
+const streamPlannedFile = (
   file: PlannedFile,
-  chunkBytes: number
-): AsyncGenerator<Uint8Array> {
-  const handle = await openPlannedFile(file);
+  limits: PullLimits,
+  signal: AbortSignal
+): Stream.Stream<Uint8Array, PullError> =>
+  Stream.fromAsyncIterable(
+    scanSourceFile({
+      displayPath: file.displayPath,
+      expected: {
+        digest: file.entry.digest,
+        fingerprint: file.fingerprint,
+        size: file.entry.size,
+      },
+      limits,
+      parts: file.parts,
+      root: file.root,
+      signal,
+    }),
+    (cause) => mapPullError(cause, "stream source file", file.displayPath)
+  );
+
+const readBoundedDirectory = async (
+  absoluteDirectory: string,
+  reserveEntry: () => void
+): Promise<Dirent[]> => {
+  const directory = await opendir(absoluteDirectory, { bufferSize: 1 });
+  const children: Dirent[] = [];
   try {
-    const before = await handle.stat();
-    if (
-      !(
-        before.isFile() &&
-        fingerprintsMatch(file.fingerprint, fingerprint(before))
-      )
-    ) {
-      throw changed(file.entry.path);
-    }
-
-    const hash = createHash("sha256");
-    const buffer = Buffer.allocUnsafe(chunkBytes);
-    let bytesRead = buffer.byteLength;
-    let offset = 0;
-    while (bytesRead > 0) {
-      // biome-ignore lint/performance/noAwaitInLoops: File offsets are read sequentially.
-      ({ bytesRead } = await handle.read(buffer, 0, buffer.byteLength, offset));
-      if (bytesRead > 0) {
-        const chunk = Uint8Array.from(buffer.subarray(0, bytesRead));
-        hash.update(chunk);
-        offset += bytesRead;
-        yield chunk;
-      }
-    }
-
-    const after = await handle.stat();
-    const pathStats = await statPlannedPath(file);
-    if (
-      offset !== file.entry.size ||
-      hash.digest("hex") !== file.entry.digest ||
-      pathStats.isSymbolicLink() ||
-      !fingerprintsMatch(file.fingerprint, fingerprint(after)) ||
-      !fingerprintsMatch(file.fingerprint, fingerprint(pathStats))
-    ) {
-      throw changed(file.entry.path);
+    let child = await directory.read();
+    while (child !== null) {
+      reserveEntry();
+      children.push(child);
+      // biome-ignore lint/performance/noAwaitInLoops: Directory reads stop at the configured hard bound.
+      child = await directory.read();
     }
   } finally {
-    await handle.close();
+    await directory.close();
   }
+
+  children.sort((left, right) => compareText(left.name, right.name));
+  return children;
 };
 
 const preparePullPromise = async (options: {
@@ -440,21 +534,31 @@ const preparePullPromise = async (options: {
     });
   }
 
-  const targetStats = await lstatRemote(target, options.remotePath);
-  if (targetStats.isSymbolicLink()) {
-    throw new PullSymlinkError({ path: options.remotePath });
-  }
+  const inspectedTarget = await inspectSourcePath(root, parts);
+  const targetStats = inspectedTarget.stats;
 
   const entries: PullManifestEntry[] = [];
   const files = new Map<string, PlannedFile>();
+  let discoveredEntries = 0;
   let totalBytes = 0;
 
+  const reserveEntry = () => {
+    const nextCount = discoveredEntries + 1;
+    entryLimit(nextCount, limits);
+    discoveredEntries = nextCount;
+  };
+
   const addFile = async (
-    absolutePath: string,
+    sourceParts: readonly string[],
     entryPath: string,
     displayPath: string
   ) => {
-    const planned = await hashPlannedFile(absolutePath, displayPath, limits);
+    const planned = await planSourceFile({
+      displayPath,
+      limits,
+      parts: sourceParts,
+      root,
+    });
     const entry: PullFileEntry = {
       digest: planned.digest,
       kind: "file",
@@ -462,23 +566,27 @@ const preparePullPromise = async (options: {
       size: planned.size,
     };
     entries.push(entry);
-    entryLimit(entries.length, limits);
     totalBytes += entry.size;
     totalLimit(totalBytes, limits);
     files.set(entry.path, {
-      absolutePath,
+      displayPath,
       entry,
       fingerprint: planned.fingerprint,
+      parts: sourceParts,
+      root,
     });
   };
 
   const walk = async (
-    absoluteDirectory: string,
+    directoryParts: readonly string[],
     relativeDirectory: string,
     displayDirectory: string
   ): Promise<void> => {
-    const children = await readdir(absoluteDirectory, { withFileTypes: true });
-    children.sort((left, right) => compareText(left.name, right.name));
+    const absoluteDirectory = join(root, ...directoryParts);
+    const children = await readBoundedDirectory(
+      absoluteDirectory,
+      reserveEntry
+    );
 
     for (const child of children) {
       const entryPath = relativeDirectory
@@ -486,18 +594,14 @@ const preparePullPromise = async (options: {
         : child.name;
       const displayPath = `${displayDirectory}/${child.name}`;
       pathParts(entryPath);
-      const absolutePath = join(absoluteDirectory, child.name);
+      const sourceParts = [...directoryParts, child.name];
       // biome-ignore lint/performance/noAwaitInLoops: Tree entries are planned in deterministic order.
-      const stats = await lstatRemote(absolutePath, displayPath);
-      if (stats.isSymbolicLink()) {
-        throw new PullSymlinkError({ path: displayPath });
-      }
+      const { stats } = await inspectSourcePath(root, sourceParts);
       if (stats.isDirectory()) {
         entries.push({ kind: "directory", path: entryPath });
-        entryLimit(entries.length, limits);
-        await walk(absolutePath, entryPath, displayPath);
+        await walk(sourceParts, entryPath, displayPath);
       } else if (stats.isFile()) {
-        await addFile(absolutePath, entryPath, displayPath);
+        await addFile(sourceParts, entryPath, displayPath);
       } else {
         throw new PullPathError({
           path: displayPath,
@@ -518,10 +622,11 @@ const preparePullPromise = async (options: {
   let kind: PullManifest["kind"];
   if (targetStats.isFile()) {
     kind = "file";
-    await addFile(target, name, options.remotePath);
+    reserveEntry();
+    await addFile(parts, name, options.remotePath);
   } else if (targetStats.isDirectory()) {
     kind = "directory";
-    await walk(target, "", options.remotePath);
+    await walk(parts, "", options.remotePath);
   } else {
     throw new PullPathError({
       path: options.remotePath,
@@ -540,16 +645,16 @@ const preparePullPromise = async (options: {
 
   return {
     manifest,
-    read: (entry) => {
+    read: (entry, signal) => {
       const file = files.get(entry.path);
       if (
         !file ||
         file.entry.digest !== entry.digest ||
         file.entry.size !== entry.size
       ) {
-        return failedRead(changed(entry.path));
+        return Stream.fail(changed(entry.path));
       }
-      return readPlannedFile(file, limits.chunkBytes);
+      return streamPlannedFile(file, limits, signal);
     },
   };
 };
@@ -645,156 +750,272 @@ const manifestFrom = (input: unknown, limits: PullLimits): PullManifest => {
   return manifest;
 };
 
-const destinationExists = async (path: string) => {
-  try {
-    await lstat(path);
-    return true;
-  } catch (cause) {
-    if (hasCode(cause, "ENOENT")) {
-      return false;
-    }
-    throw cause;
-  }
-};
+const fsEffect = <A>(
+  operation: string,
+  path: string,
+  run: () => PromiseLike<A>
+): Effect.Effect<A, PullError> =>
+  Effect.tryPromise({
+    catch: (cause) => mapPullError(cause, operation, path),
+    try: run,
+  });
 
-const writeChunk = async (
+const destinationExists = (path: string): Effect.Effect<boolean, PullError> =>
+  Effect.tryPromise({
+    catch: (cause) => mapPullError(cause, "inspect destination", path),
+    try: async () => {
+      try {
+        await lstat(path);
+        return true;
+      } catch (cause) {
+        if (hasCode(cause, "ENOENT")) {
+          return false;
+        }
+        throw cause;
+      }
+    },
+  });
+
+const writeChunk = (
   handle: Awaited<ReturnType<typeof open>>,
-  chunk: Uint8Array
-) => {
-  let offset = 0;
-  while (offset < chunk.byteLength) {
-    // biome-ignore lint/performance/noAwaitInLoops: Partial writes must preserve byte order.
-    const { bytesWritten } = await handle.write(
-      chunk,
-      offset,
-      chunk.byteLength - offset
-    );
-    if (bytesWritten === 0) {
-      throw new PullIOError({
-        operation: "write staged file",
-        path: "destination",
-      });
+  chunk: Uint8Array,
+  path: string
+): Effect.Effect<void, PullError> =>
+  fsEffect("write staged file", path, async () => {
+    let offset = 0;
+    while (offset < chunk.byteLength) {
+      // biome-ignore lint/performance/noAwaitInLoops: Partial writes must preserve byte order.
+      const { bytesWritten } = await handle.write(
+        chunk,
+        offset,
+        chunk.byteLength - offset
+      );
+      if (bytesWritten === 0) {
+        throw new PullIOError({
+          operation: "write staged file",
+          path,
+        });
+      }
+      offset += bytesWritten;
     }
-    offset += bytesWritten;
-  }
-};
+  });
 
-const writeEntry = async (
+const writeEntry = (
   target: string,
   entry: PullFileEntry,
-  read: (entry: PullFileEntry) => AsyncIterable<Uint8Array>,
+  read: PullRead,
   signal: AbortSignal
-) => {
-  const handle = await open(target, "wx", 0o600);
-  try {
-    const hash = createHash("sha256");
-    let bytes = 0;
-    for await (const chunk of read(entry)) {
-      signal.throwIfAborted();
-      if (!(chunk instanceof Uint8Array)) {
-        throw new PullIntegrityError({
-          actual: typeof chunk,
-          expected: "Uint8Array",
-          path: entry.path,
+): Effect.Effect<void, PullError> =>
+  Effect.acquireUseRelease(
+    fsEffect("open staged file", entry.path, () => open(target, "wx", 0o600)),
+    (handle) =>
+      Effect.gen(function* () {
+        const stream = yield* Effect.try({
+          catch: (cause) => mapPullError(cause, "open pull stream", entry.path),
+          try: () => read(entry, signal),
         });
-      }
-      bytes += chunk.byteLength;
-      if (bytes > entry.size) {
-        throw new PullIntegrityError({
-          actual: String(bytes),
-          expected: String(entry.size),
-          path: entry.path,
-        });
-      }
-      hash.update(chunk);
-      await writeChunk(handle, chunk);
-    }
+        const hash = createHash("sha256");
+        let bytes = 0;
 
-    const digest = hash.digest("hex");
-    if (bytes !== entry.size || digest !== entry.digest) {
-      throw new PullIntegrityError({
-        actual: `${bytes}:${digest}`,
-        expected: `${entry.size}:${entry.digest}`,
-        path: entry.path,
-      });
-    }
-  } finally {
-    await handle.close();
-  }
-};
+        yield* Stream.runForEach(
+          stream.pipe(
+            Stream.mapError((cause) =>
+              mapPullError(cause, "read pull stream", entry.path)
+            )
+          ),
+          (chunk): Effect.Effect<void, PullError> => {
+            if (!(chunk instanceof Uint8Array)) {
+              return new PullIntegrityError({
+                actual: typeof chunk,
+                expected: "Uint8Array",
+                path: entry.path,
+              });
+            }
+            bytes += chunk.byteLength;
+            if (bytes > entry.size) {
+              return new PullIntegrityError({
+                actual: String(bytes),
+                expected: String(entry.size),
+                path: entry.path,
+              });
+            }
+            hash.update(chunk);
+            return writeChunk(handle, chunk, entry.path);
+          }
+        );
 
-const commitDestination = async (
+        const digest = hash.digest("hex");
+        if (bytes !== entry.size || digest !== entry.digest) {
+          return yield* new PullIntegrityError({
+            actual: `${bytes}:${digest}`,
+            expected: `${entry.size}:${entry.digest}`,
+            path: entry.path,
+          });
+        }
+      }),
+    (handle) =>
+      fsEffect("close staged file", entry.path, () => handle.close()).pipe(
+        Effect.asVoid
+      )
+  );
+
+const destinationConflict = (cause: unknown, destination: string): PullError =>
+  hasCode(cause, "EEXIST") || hasCode(cause, "ENOTEMPTY")
+    ? new PullDestinationExistsError({ path: destination })
+    : mapPullError(cause, "commit destination", destination);
+
+const commitFile = (
+  payload: string,
+  destination: string
+): Effect.Effect<void, PullError> =>
+  Effect.tryPromise({
+    catch: (cause) => destinationConflict(cause, destination),
+    try: () => link(payload, destination),
+  });
+
+// Node and Bun expose no portable atomic rename-with-no-replace for directories.
+// An exclusive mkdir refuses creation races after verification; children become
+// visible only during the final commit moves rather than as one atomic rename.
+const commitDirectory = (
+  payload: string,
+  destination: string
+): Effect.Effect<void, PullError> =>
+  Effect.acquireUseRelease(
+    Effect.tryPromise({
+      catch: (cause) => destinationConflict(cause, destination),
+      try: () => mkdir(destination),
+    }),
+    () =>
+      Effect.gen(function* () {
+        const children = yield* fsEffect(
+          "read staged directory",
+          destination,
+          () => readdir(payload)
+        );
+        children.sort(compareText);
+        for (const child of children) {
+          yield* fsEffect("commit staged directory", destination, () =>
+            rename(join(payload, child), join(destination, child))
+          );
+        }
+      }),
+    (_, exit) =>
+      Exit.isSuccess(exit)
+        ? Effect.void
+        : fsEffect("remove incomplete destination", destination, () =>
+            rm(destination, { force: true, recursive: true })
+          )
+  );
+
+const commitDestination = (
   payload: string,
   destination: string,
   kind: PullManifest["kind"]
-) => {
-  if (await destinationExists(destination)) {
-    throw new PullDestinationExistsError({ path: destination });
-  }
-  try {
-    if (kind === "file") {
-      await link(payload, destination);
-    } else {
-      await rename(payload, destination);
-    }
-  } catch (cause) {
-    if (hasCode(cause, "EEXIST") || hasCode(cause, "ENOTEMPTY")) {
-      // biome-ignore lint/style/useErrorCause: Destination races expose no host details.
-      throw new PullDestinationExistsError({ path: destination });
-    }
-    throw cause;
-  }
-};
+): Effect.Effect<void, PullError> =>
+  kind === "file"
+    ? commitFile(payload, destination)
+    : commitDirectory(payload, destination);
 
-const materializePullPromise = async (
-  options: {
-    readonly destination: string;
-    readonly limits?: Partial<PullLimits>;
-    readonly manifest: unknown;
-    readonly read: (entry: PullFileEntry) => AsyncIterable<Uint8Array>;
-  },
-  signal: AbortSignal
-): Promise<PullResult> => {
-  const limits = limitsFrom(options.limits);
-  const manifest = manifestFrom(options.manifest, limits);
-  const destination = resolve(options.destination);
-  if (await destinationExists(destination)) {
-    throw new PullDestinationExistsError({ path: options.destination });
-  }
-
-  const parent = dirname(destination);
-  await mkdir(parent, { recursive: true });
-  const stage = await mkdtemp(join(parent, ".dumbridge-pull-"));
-  const payload = join(stage, "payload");
-
-  try {
-    if (manifest.kind === "directory") {
-      await mkdir(payload);
+const populateStage = (options: {
+  readonly destination: string;
+  readonly manifest: PullManifest;
+  readonly read: PullRead;
+  readonly signal: AbortSignal;
+  readonly stage: string;
+}): Effect.Effect<PullResult, PullError> =>
+  Effect.gen(function* () {
+    const payload = join(options.stage, "payload");
+    if (options.manifest.kind === "directory") {
+      yield* fsEffect("create staged directory", options.destination, () =>
+        mkdir(payload)
+      );
     }
 
     let files = 0;
-    for (const entry of manifest.entries) {
-      signal.throwIfAborted();
+    for (const entry of options.manifest.entries) {
       const target =
-        manifest.kind === "file"
+        options.manifest.kind === "file"
           ? payload
           : join(payload, ...entry.path.split("/"));
       if (entry.kind === "directory") {
-        // biome-ignore lint/performance/noAwaitInLoops: Manifest entries commit in declared order.
-        await mkdir(target);
+        yield* fsEffect("create staged directory", entry.path, () =>
+          mkdir(target)
+        );
       } else {
-        await mkdir(dirname(target), { recursive: true });
-        await writeEntry(target, entry, options.read, signal);
+        yield* fsEffect("create staged parent", entry.path, () =>
+          mkdir(dirname(target), { recursive: true })
+        );
+        yield* writeEntry(target, entry, options.read, options.signal);
         files += 1;
       }
     }
 
-    await commitDestination(payload, destination, manifest.kind);
-    return { bytes: manifest.totalBytes, files };
-  } finally {
-    await rm(stage, { force: true, recursive: true });
-  }
-};
+    yield* commitDestination(
+      payload,
+      options.destination,
+      options.manifest.kind
+    );
+    return { bytes: options.manifest.totalBytes, files };
+  });
+
+const materializePullEffect = (options: {
+  readonly destination: string;
+  readonly limits?: Partial<PullLimits>;
+  readonly manifest: unknown;
+  readonly read: PullRead;
+}): Effect.Effect<PullResult, PullError> =>
+  Effect.gen(function* () {
+    const limits = yield* Effect.try({
+      catch: (cause) =>
+        mapPullError(cause, "validate pull limits", options.destination),
+      try: () => limitsFrom(options.limits),
+    });
+    const manifest = yield* Effect.try({
+      catch: (cause) =>
+        mapPullError(cause, "validate pull manifest", options.destination),
+      try: () => manifestFrom(options.manifest, limits),
+    });
+    const destination = resolve(options.destination);
+    if (yield* destinationExists(destination)) {
+      return yield* new PullDestinationExistsError({
+        path: options.destination,
+      });
+    }
+
+    const parent = dirname(destination);
+    yield* fsEffect("create destination parent", parent, () =>
+      mkdir(parent, { recursive: true })
+    );
+
+    return yield* Effect.acquireUseRelease(
+      fsEffect("create pull staging directory", destination, () =>
+        mkdtemp(join(parent, ".dumbridge-pull-"))
+      ),
+      (stage) => {
+        const controller = new AbortController();
+
+        return Effect.acquireUseRelease(
+          Effect.succeed(controller),
+          ({ signal }) =>
+            populateStage({
+              destination,
+              manifest,
+              read: options.read,
+              signal,
+              stage,
+            }),
+          (activeController) =>
+            Effect.sync(() => {
+              activeController.abort();
+            })
+        );
+      },
+      (stage) =>
+        fsEffect("remove pull staging directory", destination, () =>
+          rm(stage, { force: true, recursive: true })
+        )
+    );
+  });
 
 export const preparePull = Effect.fn("PullTransfer.prepare")(
   (options: {
@@ -813,11 +1034,6 @@ export const materializePull = Effect.fn("PullTransfer.materialize")(
     readonly destination: string;
     readonly limits?: Partial<PullLimits>;
     readonly manifest: unknown;
-    readonly read: (entry: PullFileEntry) => AsyncIterable<Uint8Array>;
-  }) =>
-    Effect.tryPromise({
-      catch: (cause) =>
-        mapPullError(cause, "materialize pull", options.destination),
-      try: (signal) => materializePullPromise(options, signal),
-    })
+    readonly read: PullRead;
+  }) => materializePullEffect(options)
 );

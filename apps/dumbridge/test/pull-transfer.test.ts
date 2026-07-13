@@ -9,11 +9,13 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { Effect } from "effect";
+import { dirname, join } from "node:path";
+import { Effect, Fiber, Stream } from "effect";
 import {
   materializePull,
+  type PullFileEntry,
   type PullManifest,
+  type PullRead,
   preparePull,
 } from "../src/pull/transfer";
 
@@ -41,9 +43,7 @@ const withFixture = async <A>(
 const collectError = <A, E>(effect: Effect.Effect<A, E>) =>
   Effect.runPromise(Effect.flip(effect));
 
-const oneChunk = async function* (chunk: Uint8Array) {
-  yield await Promise.resolve(chunk);
-};
+const oneChunk = (chunk: Uint8Array) => Stream.make(chunk);
 
 describe("pull transfer", () => {
   test("plans and materializes a deterministic directory", () =>
@@ -116,6 +116,7 @@ describe("pull transfer", () => {
         "/etc/passwd",
         "C:secret",
         "C:\\secret",
+        "folder/secret\0.txt",
         "folder\\secret",
         "folder//secret",
         "folder/./secret",
@@ -162,6 +163,32 @@ describe("pull transfer", () => {
       });
     }));
 
+  test("refuses a selection below an outside-root ancestor symlink", () =>
+    withFixture(async ({ root }) => {
+      const outside = join(dirname(root), "outside-root");
+      const selected = join(root, "selected");
+      await mkdir(outside, { recursive: true });
+      await mkdir(selected);
+      await writeFile(join(outside, "secret.txt"), "secret");
+      await symlink(
+        outside,
+        join(selected, "escape"),
+        process.platform === "win32" ? "junction" : "dir"
+      );
+
+      const error = await collectError(
+        preparePull({
+          remotePath: "selected/escape/secret.txt",
+          servedRoot: root,
+        })
+      );
+
+      expect(error).toMatchObject({
+        _tag: "PullSymlinkError",
+        path: "selected/escape",
+      });
+    }));
+
   test("fails when the source changes after planning", () =>
     withFixture(async ({ root, workspace }) => {
       const sourcePath = join(root, "draft.txt");
@@ -186,6 +213,42 @@ describe("pull transfer", () => {
       expect(await readdir(workspace)).toEqual([]);
     }));
 
+  test("refuses an intermediate symlink introduced after planning", () =>
+    withFixture(async ({ root, workspace }) => {
+      const sourceDirectory = join(root, "selected", "nested");
+      const outside = join(dirname(root), "late-outside-root");
+      await mkdir(sourceDirectory, { recursive: true });
+      await mkdir(outside);
+      await writeFile(join(sourceDirectory, "file.txt"), "inside");
+      await writeFile(join(outside, "file.txt"), "outside");
+      const source = await Effect.runPromise(
+        preparePull({
+          remotePath: "selected/nested/file.txt",
+          servedRoot: root,
+        })
+      );
+      await rm(sourceDirectory, { recursive: true });
+      await symlink(
+        outside,
+        sourceDirectory,
+        process.platform === "win32" ? "junction" : "dir"
+      );
+
+      const error = await collectError(
+        materializePull({
+          destination: join(workspace, "file.txt"),
+          manifest: source.manifest,
+          read: source.read,
+        })
+      );
+
+      expect(error).toMatchObject({
+        _tag: "PullSymlinkError",
+        path: "selected/nested",
+      });
+      expect(await readdir(workspace)).toEqual([]);
+    }));
+
   test("fails when the source changes during streaming", () =>
     withFixture(async ({ root, workspace }) => {
       const sourcePath = join(root, "draft.txt");
@@ -198,18 +261,17 @@ describe("pull transfer", () => {
         })
       );
 
-      const readAndMutate = async function* (
-        entry: Parameters<typeof source.read>[0]
-      ) {
-        let first = true;
-        for await (const chunk of source.read(entry)) {
-          yield chunk;
-          if (first) {
+      let first = true;
+      const readAndMutate: PullRead = (entry, signal) =>
+        source.read(entry, signal).pipe(
+          Stream.tap(() => {
+            if (!first) {
+              return Effect.void;
+            }
             first = false;
-            await writeFile(sourcePath, "ghijkl");
-          }
-        }
-      };
+            return Effect.promise(() => writeFile(sourcePath, "ghijkl"));
+          })
+        );
 
       const error = await collectError(
         materializePull({
@@ -248,6 +310,64 @@ describe("pull transfer", () => {
       expect(await readdir(workspace)).toEqual([]);
     }));
 
+  test("maps a reader failure and removes its staging directory", () =>
+    withFixture(async ({ root, workspace }) => {
+      await writeFile(join(root, "broken.txt"), "broken");
+      const source = await Effect.runPromise(
+        preparePull({ remotePath: "broken.txt", servedRoot: root })
+      );
+
+      const error = await collectError(
+        materializePull({
+          destination: join(workspace, "broken.txt"),
+          manifest: source.manifest,
+          read: () => {
+            throw new Error("reader failed");
+          },
+        })
+      );
+
+      expect(error).toMatchObject({
+        _tag: "PullIOError",
+        operation: "open pull stream",
+        path: "broken.txt",
+      });
+      expect(await readdir(workspace)).toEqual([]);
+    }));
+
+  test("interrupts a stalled reader and removes its staging directory", () =>
+    withFixture(async ({ root, workspace }) => {
+      await writeFile(join(root, "stalled.txt"), "stalled");
+      const source = await Effect.runPromise(
+        preparePull({ remotePath: "stalled.txt", servedRoot: root })
+      );
+      let readerSignal: AbortSignal | undefined;
+      let readerStarted: (() => void) | undefined;
+      const started = new Promise<void>((resolveStarted) => {
+        readerStarted = resolveStarted;
+      });
+      const stalledRead = (_entry: PullFileEntry, signal: AbortSignal) => {
+        readerSignal = signal;
+        readerStarted?.();
+        return Stream.never;
+      };
+      const fiber = Effect.runFork(
+        materializePull({
+          destination: join(workspace, "stalled.txt"),
+          manifest: source.manifest,
+          read: stalledRead,
+        })
+      );
+
+      await started;
+      await Effect.runPromise(
+        Fiber.interrupt(fiber).pipe(Effect.timeout("1 second"))
+      );
+
+      expect(readerSignal?.aborted).toBe(true);
+      expect(await readdir(workspace)).toEqual([]);
+    }));
+
   test("refuses an existing destination", () =>
     withFixture(async ({ root, workspace }) => {
       await writeFile(join(root, "file.txt"), "new");
@@ -267,6 +387,39 @@ describe("pull transfer", () => {
 
       expect(error).toMatchObject({ _tag: "PullDestinationExistsError" });
       expect(await readFile(destination, "utf8")).toBe("keep");
+    }));
+
+  test("never replaces a directory created while bytes are staged", () =>
+    withFixture(async ({ root, workspace }) => {
+      await mkdir(join(root, "folder"));
+      await writeFile(join(root, "folder", "file.txt"), "new");
+      const source = await Effect.runPromise(
+        preparePull({ remotePath: "folder", servedRoot: root })
+      );
+      const destination = join(workspace, "folder");
+      let destinationCreated = false;
+      const racingRead: PullRead = (entry, signal) =>
+        Stream.unwrap(
+          Effect.promise(async () => {
+            if (!destinationCreated) {
+              destinationCreated = true;
+              await mkdir(destination);
+            }
+            return source.read(entry, signal);
+          })
+        );
+
+      const error = await collectError(
+        materializePull({
+          destination,
+          manifest: source.manifest,
+          read: racingRead,
+        })
+      );
+
+      expect(error).toMatchObject({ _tag: "PullDestinationExistsError" });
+      expect(await readdir(destination)).toEqual([]);
+      expect(await readdir(workspace)).toEqual(["folder"]);
     }));
 
   test("enforces manifest entry and byte limits", () =>
