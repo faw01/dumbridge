@@ -449,6 +449,62 @@ describe("pull transfer", () => {
       expect(await readFile(destination, "utf8")).toBe("keep");
     }));
 
+  test("preserves a directory created after the destination check", () =>
+    withFixture(async ({ root, workspace }) => {
+      await mkdir(join(root, "folder"));
+      await writeFile(join(root, "folder", "incoming.txt"), "incoming");
+      const source = await Effect.runPromise(
+        preparePull({ remotePath: "folder", servedRoot: root })
+      );
+      const destination = join(workspace, "folder");
+      let destinationCreated = false;
+      let destinationIdentity:
+        | {
+            readonly birthtimeMs: number;
+            readonly dev: number;
+            readonly ino: number;
+          }
+        | undefined;
+      const racingRead: PullRead = (entry, signal) =>
+        source.read(entry, signal).pipe(
+          Stream.tap(() => {
+            if (destinationCreated) {
+              return Effect.void;
+            }
+            destinationCreated = true;
+            return Effect.promise(async () => {
+              await mkdir(destination);
+              const stats = await lstat(destination);
+              destinationIdentity = {
+                birthtimeMs: stats.birthtimeMs,
+                dev: stats.dev,
+                ino: stats.ino,
+              };
+            });
+          })
+        );
+
+      const error = await collectError(
+        materializePull({
+          destination,
+          manifest: source.manifest,
+          read: racingRead,
+        })
+      );
+
+      expect(error).toMatchObject({ _tag: "PullDestinationExistsError" });
+      expect(await readdir(destination)).toEqual([]);
+      const destinationAfter = await lstat(destination);
+      if (destinationIdentity === undefined) {
+        throw new Error("the reader did not create the raced destination");
+      }
+      expect({
+        birthtimeMs: destinationAfter.birthtimeMs,
+        dev: destinationAfter.dev,
+        ino: destinationAfter.ino,
+      }).toEqual(destinationIdentity);
+    }));
+
   test("exposes a verified directory in one commit", () =>
     withFixture(async ({ root, workspace }) => {
       await mkdir(join(root, "folder"));

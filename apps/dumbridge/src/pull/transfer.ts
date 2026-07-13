@@ -8,12 +8,12 @@ import {
   open,
   opendir,
   realpath,
-  rename,
   rm,
   rmdir,
 } from "node:fs/promises";
 import { dirname, join, posix, relative, resolve, sep, win32 } from "node:path";
 import { Effect, Exit, Schema, Stream } from "effect";
+import { moveDirectoryNoReplace } from "./atomic-directory-move";
 
 const digestPattern = /^[0-9a-f]{64}$/;
 const windowsDeviceNamePattern =
@@ -143,18 +143,17 @@ interface Fingerprint {
   readonly size: number;
 }
 
-interface PlannedFile {
-  readonly displayPath: string;
-  readonly entry: PullFileEntry;
-  readonly fingerprint: Fingerprint;
-  readonly parts: readonly string[];
-  readonly root: string;
-}
-
-interface ScannedFile {
+interface FileRevision {
   readonly digest: string;
   readonly fingerprint: Fingerprint;
   readonly size: number;
+}
+
+interface PlannedFile {
+  readonly displayPath: string;
+  readonly parts: readonly string[];
+  readonly revision: FileRevision;
+  readonly root: string;
 }
 
 const defaultLimits: PullLimits = {
@@ -376,16 +375,12 @@ const inspectSourcePath = async (
 
 const scanSourceFile = async function* (options: {
   readonly displayPath: string;
-  readonly expected?: {
-    readonly digest: string;
-    readonly fingerprint: Fingerprint;
-    readonly size: number;
-  };
+  readonly expected?: FileRevision;
   readonly limits: PullLimits;
   readonly parts: readonly string[];
   readonly root: string;
   readonly signal?: AbortSignal;
-}): AsyncGenerator<Uint8Array, ScannedFile> {
+}): AsyncGenerator<Uint8Array, FileRevision> {
   try {
     const inspectedBefore = await inspectSourcePath(
       options.root,
@@ -506,11 +501,7 @@ const streamPlannedFile = (
   Stream.fromAsyncIterable(
     scanSourceFile({
       displayPath: file.displayPath,
-      expected: {
-        digest: file.entry.digest,
-        fingerprint: file.fingerprint,
-        size: file.entry.size,
-      },
+      expected: file.revision,
       limits,
       parts: file.parts,
       root: file.root,
@@ -598,9 +589,8 @@ const preparePullPromise = async (options: {
     totalLimit(totalBytes, limits);
     files.set(entry.path, {
       displayPath,
-      entry,
-      fingerprint: planned.fingerprint,
       parts: sourceParts,
+      revision: planned,
       root,
     });
   };
@@ -677,8 +667,8 @@ const preparePullPromise = async (options: {
       const file = files.get(entry.path);
       if (
         !file ||
-        file.entry.digest !== entry.digest ||
-        file.entry.size !== entry.size
+        file.revision.digest !== entry.digest ||
+        file.revision.size !== entry.size
       ) {
         return Stream.fail(changed(entry.path));
       }
@@ -986,10 +976,27 @@ const commitDirectory = (
   payload: string,
   destination: string
 ): Effect.Effect<void, PullError> =>
-  Effect.tryPromise({
-    catch: (cause) => destinationConflict(cause, destination),
-    try: () => rename(payload, destination),
-  });
+  Effect.try({
+    catch: (cause) => mapPullError(cause, "commit destination", destination),
+    try: () => moveDirectoryNoReplace(payload, destination),
+  }).pipe(
+    Effect.flatMap((moved) => {
+      if (moved) {
+        return Effect.void;
+      }
+      return destinationExists(destination).pipe(
+        Effect.flatMap((exists): Effect.Effect<void, PullError> => {
+          const error: PullError = exists
+            ? new PullDestinationExistsError({ path: destination })
+            : new PullIOError({
+                operation: "commit destination",
+                path: destination,
+              });
+          return Effect.fail(error);
+        })
+      );
+    })
+  );
 
 const commitDestination = (
   payload: string,
