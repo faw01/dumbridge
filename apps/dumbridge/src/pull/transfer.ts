@@ -7,13 +7,12 @@ import {
   mkdtemp,
   open,
   opendir,
-  readdir,
   realpath,
   rename,
   rm,
 } from "node:fs/promises";
 import { dirname, join, posix, relative, resolve, sep, win32 } from "node:path";
-import { Effect, Exit, Schema, Stream } from "effect";
+import { Effect, Schema, Stream } from "effect";
 
 const digestPattern = /^[0-9a-f]{64}$/;
 const windowsDrivePattern = /^[a-z]:/i;
@@ -241,7 +240,10 @@ const pathParts = (path: string) => {
 
   const parts = path.split("/");
   if (
-    parts.some((part) => part.length === 0 || part === "." || part === "..")
+    parts.some(
+      (part) =>
+        part.length === 0 || part === "." || part === ".." || part.includes(":")
+    )
   ) {
     throw new PullPathError({
       path,
@@ -249,6 +251,25 @@ const pathParts = (path: string) => {
     });
   }
   return parts;
+};
+
+export const resolvePullDestination = (
+  remotePath: string,
+  destination?: string
+): string => {
+  if (destination !== undefined) {
+    return destination;
+  }
+
+  const parts = pathParts(remotePath);
+  const name = parts.at(-1);
+  if (!name) {
+    throw new PullPathError({
+      path: remotePath,
+      reason: "path has no file name",
+    });
+  }
+  return `./${name}`;
 };
 
 const pathInside = (root: string, path: string) => {
@@ -873,39 +894,14 @@ const commitFile = (
     try: () => link(payload, destination),
   });
 
-// Node and Bun expose no portable atomic rename-with-no-replace for directories.
-// An exclusive mkdir refuses creation races after verification; children become
-// visible only during the final commit moves rather than as one atomic rename.
 const commitDirectory = (
   payload: string,
   destination: string
 ): Effect.Effect<void, PullError> =>
-  Effect.acquireUseRelease(
-    Effect.tryPromise({
-      catch: (cause) => destinationConflict(cause, destination),
-      try: () => mkdir(destination),
-    }),
-    () =>
-      Effect.gen(function* () {
-        const children = yield* fsEffect(
-          "read staged directory",
-          destination,
-          () => readdir(payload)
-        );
-        children.sort(compareText);
-        for (const child of children) {
-          yield* fsEffect("commit staged directory", destination, () =>
-            rename(join(payload, child), join(destination, child))
-          );
-        }
-      }),
-    (_, exit) =>
-      Exit.isSuccess(exit)
-        ? Effect.void
-        : fsEffect("remove incomplete destination", destination, () =>
-            rm(destination, { force: true, recursive: true })
-          )
-  );
+  Effect.tryPromise({
+    catch: (cause) => destinationConflict(cause, destination),
+    try: () => rename(payload, destination),
+  });
 
 const commitDestination = (
   payload: string,

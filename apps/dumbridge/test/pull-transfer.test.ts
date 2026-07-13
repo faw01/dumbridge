@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  lstat,
   mkdir,
   mkdtemp,
   readdir,
@@ -17,6 +18,7 @@ import {
   type PullManifest,
   type PullRead,
   preparePull,
+  resolvePullDestination,
 } from "../src/pull/transfer";
 
 const withFixture = async <A>(
@@ -45,7 +47,31 @@ const collectError = <A, E>(effect: Effect.Effect<A, E>) =>
 
 const oneChunk = (chunk: Uint8Array) => Stream.make(chunk);
 
+const pathExists = async (path: string) => {
+  try {
+    await lstat(path);
+    return true;
+  } catch (cause) {
+    if (
+      typeof cause === "object" &&
+      cause !== null &&
+      "code" in cause &&
+      cause.code === "ENOENT"
+    ) {
+      return false;
+    }
+    throw cause;
+  }
+};
+
 describe("pull transfer", () => {
+  test("defaults the destination to the remote basename", () => {
+    expect(resolvePullDestination("photos/cat.jpeg")).toBe("./cat.jpeg");
+    expect(resolvePullDestination("photos/cat.jpeg", "images/cat.jpeg")).toBe(
+      "images/cat.jpeg"
+    );
+  });
+
   test("plans and materializes a deterministic directory", () =>
     withFixture(async ({ root, workspace }) => {
       await mkdir(join(root, "project"), { recursive: true });
@@ -116,6 +142,8 @@ describe("pull transfer", () => {
         "/etc/passwd",
         "C:secret",
         "C:\\secret",
+        "folder/C:secret",
+        "folder/file.txt:stream",
         "folder/secret\0.txt",
         "folder\\secret",
         "folder//secret",
@@ -389,37 +417,52 @@ describe("pull transfer", () => {
       expect(await readFile(destination, "utf8")).toBe("keep");
     }));
 
-  test("never replaces a directory created while bytes are staged", () =>
+  test("exposes a verified directory in one commit", () =>
     withFixture(async ({ root, workspace }) => {
       await mkdir(join(root, "folder"));
-      await writeFile(join(root, "folder", "file.txt"), "new");
+      await Promise.all([
+        writeFile(join(root, "folder", "a.txt"), "alpha"),
+        writeFile(join(root, "folder", "b.txt"), "beta"),
+      ]);
       const source = await Effect.runPromise(
         preparePull({ remotePath: "folder", servedRoot: root })
       );
       const destination = join(workspace, "folder");
-      let destinationCreated = false;
-      const racingRead: PullRead = (entry, signal) =>
+      let releaseRead: (() => void) | undefined;
+      let readerStarted: (() => void) | undefined;
+      const mayRead = new Promise<void>((resolveRead) => {
+        releaseRead = resolveRead;
+      });
+      const started = new Promise<void>((resolveStarted) => {
+        readerStarted = resolveStarted;
+      });
+      const gatedRead: PullRead = (entry, signal) =>
         Stream.unwrap(
           Effect.promise(async () => {
-            if (!destinationCreated) {
-              destinationCreated = true;
-              await mkdir(destination);
-            }
+            readerStarted?.();
+            await mayRead;
             return source.read(entry, signal);
           })
         );
-
-      const error = await collectError(
+      const fiber = Effect.runFork(
         materializePull({
           destination,
           manifest: source.manifest,
-          read: racingRead,
+          read: gatedRead,
         })
       );
 
-      expect(error).toMatchObject({ _tag: "PullDestinationExistsError" });
-      expect(await readdir(destination)).toEqual([]);
-      expect(await readdir(workspace)).toEqual(["folder"]);
+      await started;
+      try {
+        expect(await pathExists(destination)).toBe(false);
+      } finally {
+        releaseRead?.();
+      }
+      await Effect.runPromise(Fiber.join(fiber));
+
+      expect((await readdir(destination)).sort()).toEqual(["a.txt", "b.txt"]);
+      expect(await readFile(join(destination, "a.txt"), "utf8")).toBe("alpha");
+      expect(await readFile(join(destination, "b.txt"), "utf8")).toBe("beta");
     }));
 
   test("enforces manifest entry and byte limits", () =>
