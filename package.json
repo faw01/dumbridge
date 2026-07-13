@@ -1,0 +1,24 @@
+{
+  "name": "dumbridge-workspace",
+  "private": true,
+  "type": "module",
+  "packageManager": "bun@1.3.14",
+  "workspaces": [
+    "apps/*"
+  ],
+  "scripts": {
+    "build": "turbo run build --cache-dir=.turbo/cache",
+    "check": "turbo run check --cache-dir=.turbo/cache && ultracite check .",
+    "fix": "turbo run fix --cache-dir=.turbo/cache && ultracite fix .",
+    "pack:check": "turbo run pack:check --cache-dir=.turbo/cache",
+    "test": "turbo run test --cache-dir=.turbo/cache",
+    "typecheck": "turbo run typecheck --cache-dir=.turbo/cache"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.5.3",
+    "@changesets/cli": "2.31.0",
+    "turbo": "2.10.5",
+    "typescript": "6.0.3",
+    "ultracite": "7.9.3"
+  }
+}
