@@ -11,7 +11,8 @@ import {
   type WirePullManifest,
 } from "../src/bridge/wire";
 
-const digest = "a".repeat(64);
+const digest =
+  "47ffa3ea45a70b8a41c2c0825df323c00a8b7a01c1ea06083cc41dddcc001123";
 const capabilityBytes = Uint8Array.from({ length: 32 }, (_, index) => index);
 const otherCapabilityBytes = Uint8Array.from(capabilityBytes, (byte, index) =>
   index === 31 ? (byte + 1) % 256 : byte
@@ -437,7 +438,7 @@ describe("run response session", () => {
 });
 
 describe("pull response session", () => {
-  test("round trips a lossless manifest and ordered file stream", () => {
+  test("round trips a lossless manifest and verified multi-chunk file", () => {
     const firstChunk = Uint8Array.from([0, 255]);
     const secondChunk = Uint8Array.of(1);
     const session = success(makePullResponseSession());
@@ -500,7 +501,7 @@ describe("pull response session", () => {
         encoded({ path: "assets/a.txt", size: 3, type: "file-start" }),
         encoded({
           offset: 0,
-          payload: Uint8Array.of(1, 2, 3),
+          payload: Uint8Array.of(0, 255, 1),
           type: "file-chunk",
         }),
         encoded({ digest, type: "file-end" }),
@@ -557,6 +558,30 @@ describe("pull response session", () => {
           type: "file-chunk",
         }),
         encoded({ digest: "b".repeat(64), type: "file-end" })
+      )
+    );
+
+    expect(Result.isFailure(result)).toBe(true);
+    if (Result.isFailure(result)) {
+      expect(result.failure).toMatchObject({
+        _tag: "IllegalFrameError",
+        reason: "manifest",
+      });
+    }
+  });
+
+  test("rejects corrupted bytes with the claimed manifest digest", () => {
+    const session = success(makePullResponseSession());
+    const result = session.push(
+      joinChunks(
+        encoded({ manifest, type: "manifest" }),
+        encoded({ path: "assets/a.txt", size: 3, type: "file-start" }),
+        encoded({
+          offset: 0,
+          payload: Uint8Array.of(0, 255, 2),
+          type: "file-chunk",
+        }),
+        encoded({ digest, type: "file-end" })
       )
     );
 

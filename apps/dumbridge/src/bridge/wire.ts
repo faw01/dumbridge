@@ -1,3 +1,4 @@
+import { createHash, type Hash } from "node:crypto";
 import { Result, Schema } from "effect";
 import {
   type Capability,
@@ -1261,6 +1262,7 @@ export const makePullResponseSession = (
 
   interface CurrentFile {
     readonly entry: WirePullFileEntry;
+    readonly hash: Hash;
     received: number;
   }
 
@@ -1318,7 +1320,11 @@ export const makePullResponseSession = (
           illegal("order", "File start does not match manifest order.")
         );
       }
-      currentFile = { entry: expected, received: 0 };
+      currentFile = {
+        entry: expected,
+        hash: createHash("sha256"),
+        received: 0,
+      };
       state = "file";
       return Result.succeed(
         emit({
@@ -1378,6 +1384,7 @@ export const makePullResponseSession = (
         limitExceeded("transfer-bytes", limits.maxTransferBytes, transferBytes)
       );
     }
+    file.hash.update(payload);
     file.received = fileBytes;
     transferredBytes = transferBytes;
     return Result.succeed(emit({ offset, payload, type: "file-chunk" }));
@@ -1396,6 +1403,11 @@ export const makePullResponseSession = (
     if (file.received !== file.entry.size || digest !== file.entry.digest) {
       return Result.fail(
         illegal("manifest", "File end does not match the manifest.")
+      );
+    }
+    if (file.hash.digest("hex") !== file.entry.digest) {
+      return Result.fail(
+        illegal("manifest", "File bytes do not match the manifest digest.")
       );
     }
     currentFile = undefined;
