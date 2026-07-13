@@ -15,6 +15,7 @@ import { dirname, join, posix, relative, resolve, sep, win32 } from "node:path";
 import { Effect, Schema } from "effect";
 
 const digestPattern = /^[0-9a-f]{64}$/;
+const windowsDrivePattern = /^[a-z]:/i;
 // biome-ignore lint/suspicious/noBitwiseOperators: POSIX open flags compose as a bitmask.
 const readOnlyNoFollow = constants.O_RDONLY | constants.O_NOFOLLOW;
 
@@ -215,6 +216,7 @@ const pathParts = (path: string) => {
     path.includes("\0") ||
     path.includes("\\") ||
     posix.isAbsolute(path) ||
+    windowsDrivePattern.test(path) ||
     win32.isAbsolute(path)
   ) {
     throw new PullPathError({

@@ -114,6 +114,7 @@ describe("pull transfer", () => {
       const paths = [
         "../secret",
         "/etc/passwd",
+        "C:secret",
         "C:\\secret",
         "folder\\secret",
         "folder//secret",
