@@ -476,6 +476,42 @@ describe("pull response session", () => {
     expect(Result.isSuccess(session.finish())).toBe(true);
   });
 
+  test("owns manifest checks independently of emitted values", () => {
+    const session = success(makePullResponseSession());
+    const [manifestEvent] = success(
+      session.push(encoded({ manifest, type: "manifest" }))
+    );
+    if (manifestEvent?.type !== "manifest") {
+      throw new Error("manifest event must be emitted first");
+    }
+    const emittedFile = manifestEvent.manifest.entries.find(
+      (entry) => entry.kind === "file"
+    );
+    if (emittedFile?.kind !== "file") {
+      throw new Error("test manifest must contain a file");
+    }
+
+    expect(Reflect.set(manifestEvent.manifest, "totalBytes", 999)).toBe(true);
+    expect(Reflect.set(emittedFile, "size", 999)).toBe(true);
+    expect(Reflect.set(emittedFile, "digest", "b".repeat(64))).toBe(true);
+
+    const transferred = session.push(
+      joinChunks(
+        encoded({ path: "assets/a.txt", size: 3, type: "file-start" }),
+        encoded({
+          offset: 0,
+          payload: Uint8Array.of(1, 2, 3),
+          type: "file-chunk",
+        }),
+        encoded({ digest, type: "file-end" }),
+        encoded({ type: "complete" })
+      )
+    );
+
+    expect(Result.isSuccess(transferred)).toBe(true);
+    expect(Result.isSuccess(session.finish())).toBe(true);
+  });
+
   test("rejects out-of-order files and incorrect chunk offsets", () => {
     const incompleteTransfer = success(makePullResponseSession());
     const earlyComplete = incompleteTransfer.push(

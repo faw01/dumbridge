@@ -460,6 +460,32 @@ const validateManifestEntries = (
   return Result.succeed({ files, totalBytes });
 };
 
+const cloneManifest = (manifest: WirePullManifest): WirePullManifest => ({
+  digestAlgorithm: manifest.digestAlgorithm,
+  entries: manifest.entries.map((entry) =>
+    entry.kind === "file"
+      ? {
+          digest: entry.digest,
+          kind: entry.kind,
+          path: entry.path,
+          size: entry.size,
+        }
+      : { kind: entry.kind, path: entry.path }
+  ),
+  kind: manifest.kind,
+  name: manifest.name,
+  totalBytes: manifest.totalBytes,
+});
+
+const ownManifest = (manifest: WirePullManifest): WirePullManifest => {
+  const owned = cloneManifest(manifest);
+  for (const entry of owned.entries) {
+    Object.freeze(entry);
+  }
+  Object.freeze(owned.entries);
+  return Object.freeze(owned);
+};
+
 const validateManifest = (
   input: WirePullManifest,
   limits: WireSessionLimits
@@ -475,7 +501,7 @@ const validateManifest = (
       illegal("manifest", "Pull manifest does not match the wire schema.")
     );
   }
-  const manifest = decoded.success;
+  const manifest = ownManifest(decoded.success);
   if (!canonicalPath(manifest.name, true)) {
     return Result.fail(
       illegal("manifest", "Pull manifest name is not canonical.")
@@ -1271,7 +1297,7 @@ export const makePullResponseSession = (
     files = manifestFiles;
     state = "between-files";
     return Result.succeed(
-      emit({ manifest: decodedManifest, type: "manifest" })
+      emit({ manifest: cloneManifest(decodedManifest), type: "manifest" })
     );
   };
 
