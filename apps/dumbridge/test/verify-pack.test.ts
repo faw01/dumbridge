@@ -2,7 +2,6 @@ import { describe, expect, test } from "bun:test";
 import { assessPackManifest } from "../scripts/verify-pack";
 
 const manifest = (paths: readonly string[]) => ({
-  entryCount: paths.length,
   files: paths.map((path) => ({ path })),
 });
 
@@ -13,13 +12,16 @@ describe("package manifest", () => {
     expect(assessPackManifest(manifest(cleanPaths))).toEqual([]);
   });
 
-  test("rejects source and secrets", () => {
+  test("rejects every file outside the allowlist", () => {
     const problems = assessPackManifest(
-      manifest([...cleanPaths, "src/cli.ts", ".env.local"])
+      manifest([...cleanPaths, "docs/example.md", "src/cli.ts", ".env.local"])
     );
 
-    expect(problems).toContain("forbidden package entry: src/cli.ts");
-    expect(problems).toContain("forbidden package entry: .env.local");
+    expect(problems).toEqual([
+      "unexpected package entry: docs/example.md",
+      "unexpected package entry: src/cli.ts",
+      "unexpected package entry: .env.local",
+    ]);
   });
 
   test("requires the executable", () => {
