@@ -27,7 +27,7 @@ const maxEntryCount = 20;
 const newlinePattern = /\r?\n/;
 const packedFilePattern = /^packed\s+\S+\s+(.+)$/;
 
-const run = (
+const spawnChecked = (
   command: string[],
   cwd: string,
   env?: Record<string, string | undefined>
@@ -98,7 +98,7 @@ const verifyInstalledArchive = async () => {
       `${JSON.stringify({ name: "pack-consumer", private: true })}\n`
     );
 
-    run(
+    spawnChecked(
       [
         "bun",
         "pm",
@@ -124,7 +124,7 @@ const verifyInstalledArchive = async () => {
       TMP: tempDirectory,
       TMPDIR: tempDirectory,
     };
-    run(
+    spawnChecked(
       ["bun", "add", archivePath, "--ignore-scripts"],
       consumerDirectory,
       packageManagerEnv
@@ -139,12 +139,12 @@ const verifyInstalledArchive = async () => {
       );
     }
 
-    const help = run(
+    const help = spawnChecked(
       ["bunx", "--no-install", "dumbridge", "--help"],
       consumerDirectory,
       packageManagerEnv
     );
-    const version = run(
+    const version = spawnChecked(
       ["bunx", "--no-install", "dumbridge", "--version"],
       consumerDirectory,
       packageManagerEnv
@@ -163,7 +163,7 @@ const verifyInstalledArchive = async () => {
 };
 
 const verifyPack = async () => {
-  const output = run(
+  const output = spawnChecked(
     ["bun", "pm", "pack", "--dry-run", "--ignore-scripts"],
     packageRoot
   );

@@ -11,7 +11,9 @@ const serve = Command.make("serve", {
 
 const run = Command.make("run", {
   script: Argument.string("script"),
-}).pipe(Command.withDescription("Run one remote read-shell script."));
+}).pipe(
+  Command.withDescription("Evaluate one script in the remote read shell.")
+);
 
 // biome-ignore assist/source/useSortedKeys: Effect CLI reads positional arguments in declaration order.
 const pull = Command.make("pull", {
