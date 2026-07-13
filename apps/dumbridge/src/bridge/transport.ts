@@ -13,7 +13,6 @@ const BridgeDeadlineOperation = Schema.Literals([
 export class BridgeAcceptError extends Schema.TaggedErrorClass<BridgeAcceptError>()(
   "BridgeAcceptError",
   {
-    cause: Schema.String,
     message: Schema.String,
   }
 ) {}
@@ -21,7 +20,6 @@ export class BridgeAcceptError extends Schema.TaggedErrorClass<BridgeAcceptError
 export class BridgeConnectError extends Schema.TaggedErrorClass<BridgeConnectError>()(
   "BridgeConnectError",
   {
-    cause: Schema.String,
     message: Schema.String,
   }
 ) {}
@@ -37,7 +35,6 @@ export class BridgeDeadlineExceededError extends Schema.TaggedErrorClass<BridgeD
 export class BridgeFinishError extends Schema.TaggedErrorClass<BridgeFinishError>()(
   "BridgeFinishError",
   {
-    cause: Schema.String,
     message: Schema.String,
   }
 ) {}
@@ -45,7 +42,6 @@ export class BridgeFinishError extends Schema.TaggedErrorClass<BridgeFinishError
 export class BridgeListenError extends Schema.TaggedErrorClass<BridgeListenError>()(
   "BridgeListenError",
   {
-    cause: Schema.String,
     message: Schema.String,
   }
 ) {}
@@ -72,10 +68,17 @@ export class BridgeProxyUnsupportedError extends Schema.TaggedErrorClass<BridgeP
   }
 ) {}
 
+export class BridgeProxyConfigurationError extends Schema.TaggedErrorClass<BridgeProxyConfigurationError>()(
+  "BridgeProxyConfigurationError",
+  {
+    message: Schema.String,
+    requested: Schema.Literals(["environment", "url"]),
+  }
+) {}
+
 export class BridgeReadError extends Schema.TaggedErrorClass<BridgeReadError>()(
   "BridgeReadError",
   {
-    cause: Schema.String,
     message: Schema.String,
   }
 ) {}
@@ -83,7 +86,6 @@ export class BridgeReadError extends Schema.TaggedErrorClass<BridgeReadError>()(
 export class BridgeWriteError extends Schema.TaggedErrorClass<BridgeWriteError>()(
   "BridgeWriteError",
   {
-    cause: Schema.String,
     message: Schema.String,
   }
 ) {}
@@ -143,6 +145,7 @@ export interface BridgeTransport {
     | BridgeConnectError
     | BridgeDeadlineExceededError
     | BridgeLocatorInvalidError
+    | BridgeProxyConfigurationError
     | BridgeProxyUnsupportedError,
     Scope.Scope
   >;
@@ -150,6 +153,7 @@ export interface BridgeTransport {
     BridgeListener,
     | BridgeDeadlineExceededError
     | BridgeListenError
+    | BridgeProxyConfigurationError
     | BridgeProxyUnsupportedError,
     Scope.Scope
   >;

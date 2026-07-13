@@ -1,10 +1,16 @@
 import { describe, expect, test } from "bun:test";
+import { EndpointAddr, EndpointId } from "@number0/iroh";
 import { Effect, Fiber, Option } from "effect";
-import { makeIrohTransport } from "../../src/bridge/adapters/iroh";
+import {
+  configureIrohProxy,
+  makeIrohTransport,
+  normalizeIrohAddress,
+} from "../../src/bridge/adapters/iroh";
 import {
   BridgeDeadlineExceededError,
   BridgeLocator,
   BridgeLocatorInvalidError,
+  BridgeProxyConfigurationError,
   BridgeProxyUnsupportedError,
   type BridgeReadError,
   type BridgeSession,
@@ -90,17 +96,56 @@ describe("Iroh bridge transport", () => {
     expect(reply).toEqual(payload);
   });
 
+  test("serializes complete concurrent logical writes", async () => {
+    const first = new Uint8Array(320_000).fill(0xa5);
+    const second = new Uint8Array(320_000).fill(0x5a);
+
+    const received = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const transport = makeLoopbackTransport();
+          const listener = yield* transport.listen;
+          const serverFiber = yield* listener.accept.pipe(
+            Effect.flatMap(readAll),
+            Effect.forkScoped
+          );
+          const client = yield* transport.connect(listener.locator);
+
+          yield* Effect.all([client.write(first), client.write(second)], {
+            concurrency: "unbounded",
+            discard: true,
+          });
+          yield* client.finish;
+
+          return yield* Fiber.join(serverFiber);
+        })
+      )
+    );
+    let transitions = 0;
+    for (let index = 1; index < received.byteLength; index += 1) {
+      if (received[index] !== received[index - 1]) {
+        transitions += 1;
+      }
+    }
+
+    expect(received.byteLength).toBe(first.byteLength + second.byteLength);
+    expect(transitions).toBe(1);
+  });
+
   test("rejects an invalid opaque locator with a typed failure", async () => {
     const transport = makeLoopbackTransport();
+    const secretLocator = "not-an-iroh-ticket-private-value";
     const error = await Effect.runPromise(
       Effect.scoped(
         transport
-          .connect(BridgeLocator.fromString("not-an-iroh-ticket"))
+          .connect(BridgeLocator.fromString(secretLocator))
           .pipe(Effect.flip)
       )
     );
 
     expect(error).toBeInstanceOf(BridgeLocatorInvalidError);
+    expect(JSON.stringify(error)).not.toContain(secretLocator);
+    expect(String(error)).not.toContain(secretLocator);
   });
 
   test("reports the current proxy binding gap explicitly", async () => {
@@ -118,7 +163,86 @@ describe("Iroh bridge transport", () => {
     }
   });
 
-  test("closes a listener whose accept deadline expires", async () => {
+  test("uses proxy methods when a patched binding exposes them", async () => {
+    const configured: string[] = [];
+
+    await Effect.runPromise(
+      configureIrohProxy(
+        {
+          proxyFromEnv: () => configured.push("environment"),
+          proxyUrl: (url: string) => configured.push(url),
+        },
+        { _tag: "FromEnvironment" }
+      )
+    );
+    await Effect.runPromise(
+      configureIrohProxy(
+        {
+          proxyFromEnv: () => configured.push("environment"),
+          proxyUrl: (url: string) => configured.push(url),
+        },
+        { _tag: "Url", url: "https://proxy.example" }
+      )
+    );
+
+    expect(configured).toEqual(["environment", "https://proxy.example"]);
+  });
+
+  test("does not expose a proxy URL when native configuration fails", async () => {
+    const secret = "proxy-secret-credential";
+    const error = await Effect.runPromise(
+      configureIrohProxy(
+        {
+          proxyUrl: () => {
+            throw new Error(`https://${secret}@proxy.example`);
+          },
+        },
+        { _tag: "Url", url: `https://${secret}@proxy.example` }
+      ).pipe(Effect.flip)
+    );
+
+    expect(error).toBeInstanceOf(BridgeProxyConfigurationError);
+    expect(JSON.stringify(error)).not.toContain(secret);
+    expect(String(error)).not.toContain(secret);
+  });
+
+  test("normalizes mixed locators to the selected reachability", async () => {
+    const id = EndpointId.fromBytes(new Array<number>(32).fill(1));
+    const directAddresses = ["127.0.0.1:4242", "[::1]:4242"];
+    const relayUrl = "https://relay.example";
+    const mixed = new EndpointAddr(id, relayUrl, directAddresses);
+    const [directOnly, relayOnly, directOrRelay] = await Effect.runPromise(
+      Effect.all([
+        normalizeIrohAddress(mixed, "direct-only"),
+        normalizeIrohAddress(mixed, "relay-only"),
+        normalizeIrohAddress(mixed, "direct-or-relay"),
+      ])
+    );
+
+    expect(directOnly.relayUrl()).toBeNull();
+    expect(directOnly.directAddresses()).toEqual(directAddresses);
+    expect(relayOnly.relayUrl()).toBe(relayUrl);
+    expect(relayOnly.directAddresses()).toEqual([]);
+    expect(directOrRelay.relayUrl()).toBe(relayUrl);
+    expect(directOrRelay.directAddresses()).toEqual(directAddresses);
+
+    const noRelayError = await Effect.runPromise(
+      normalizeIrohAddress(
+        new EndpointAddr(id, null, directAddresses),
+        "relay-only"
+      ).pipe(Effect.flip)
+    );
+    const noDirectError = await Effect.runPromise(
+      normalizeIrohAddress(
+        new EndpointAddr(id, relayUrl, []),
+        "direct-only"
+      ).pipe(Effect.flip)
+    );
+    expect(noRelayError).toBeInstanceOf(BridgeLocatorInvalidError);
+    expect(noDirectError).toBeInstanceOf(BridgeLocatorInvalidError);
+  });
+
+  test("keeps an idle listener open past its accept deadline", async () => {
     const transport = makeIrohTransport({
       deadlines: {
         accept: "20 millis",
@@ -128,19 +252,27 @@ describe("Iroh bridge transport", () => {
       },
       reachability: "direct-only",
     });
-    const error = await Effect.runPromise(
+    const payload = Uint8Array.of(7, 8, 9);
+    const received = await Effect.runPromise(
       Effect.scoped(
         Effect.gen(function* () {
           const listener = yield* transport.listen;
-          return yield* listener.accept.pipe(Effect.flip);
+          const serverFiber = yield* listener.accept.pipe(
+            Effect.flatMap(readAll),
+            Effect.forkScoped
+          );
+
+          yield* Effect.sleep("80 millis");
+          const client = yield* transport.connect(listener.locator);
+          yield* client.write(payload);
+          yield* client.finish;
+
+          return yield* Fiber.join(serverFiber);
         })
       )
     );
 
-    expect(error).toBeInstanceOf(BridgeDeadlineExceededError);
-    if (error instanceof BridgeDeadlineExceededError) {
-      expect(error.operation).toBe("accept");
-    }
+    expect(received).toEqual(payload);
   });
 
   test("closes a byte session whose read deadline expires", async () => {
@@ -157,15 +289,20 @@ describe("Iroh bridge transport", () => {
       Effect.scoped(
         Effect.gen(function* () {
           const listener = yield* transport.listen;
-          const serverFiber = yield* listener.accept.pipe(Effect.forkScoped);
+          const serverFiber = yield* listener.accept.pipe(
+            Effect.flatMap((server) =>
+              Effect.gen(function* () {
+                const firstChunk = yield* server.read;
+                expect(Option.isSome(firstChunk)).toBe(true);
+                return yield* server.read.pipe(Effect.flip);
+              })
+            ),
+            Effect.forkScoped
+          );
           const client = yield* transport.connect(listener.locator);
 
           yield* client.write(Uint8Array.of(7));
-          const server = yield* Fiber.join(serverFiber);
-          const firstChunk = yield* server.read;
-
-          expect(Option.isSome(firstChunk)).toBe(true);
-          return yield* server.read.pipe(Effect.flip);
+          return yield* Fiber.join(serverFiber);
         })
       )
     );
