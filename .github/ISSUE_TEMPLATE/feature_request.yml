@@ -1,7 +1,7 @@
 name: Feature request
 description: Propose a focused improvement to Dumbridge
 title: "feat: "
-labels: [enhancement]
+labels: [needs-triage]
 body:
   - type: textarea
     id: problem

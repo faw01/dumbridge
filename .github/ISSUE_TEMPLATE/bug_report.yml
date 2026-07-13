@@ -1,7 +1,7 @@
 name: Bug report
 description: Report a reproducible Dumbridge failure
 title: "bug: "
-labels: [bug]
+labels: [needs-triage]
 body:
   - type: markdown
     attributes:
