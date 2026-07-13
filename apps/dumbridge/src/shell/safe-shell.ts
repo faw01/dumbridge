@@ -156,20 +156,26 @@ class RequestBudgetOverlayFs extends OverlayFs {
     this.signal = signal;
   }
 
-  private assertActive() {
+  private assertRequestOpen() {
     this.signal?.throwIfAborted();
+    if (this.limitExceeded !== undefined) {
+      throw new FilesystemLimitSignal(this.limitExceeded);
+    }
   }
 
-  private async whileActive<A>(operation: () => Promise<A>): Promise<A> {
-    this.assertActive();
+  private async whileRequestOpen<A>(operation: () => Promise<A>): Promise<A> {
+    this.assertRequestOpen();
     const result = await operation();
-    this.assertActive();
+    this.assertRequestOpen();
     return result;
   }
 
   private async whileGuarded<A>(operation: () => Promise<A>): Promise<A> {
+    this.assertRequestOpen();
     try {
-      return await this.servedRoot.guard(() => this.whileActive(operation));
+      return await this.servedRoot.guard(() =>
+        this.whileRequestOpen(operation)
+      );
     } catch (cause) {
       if (cause instanceof ServedRootChangedError) {
         this.servedRootFailure = cause;
@@ -179,11 +185,12 @@ class RequestBudgetOverlayFs extends OverlayFs {
   }
 
   private whileGuardedSync<A>(operation: () => A): A {
+    this.assertRequestOpen();
     try {
       return this.servedRoot.guardSync(() => {
-        this.assertActive();
+        this.assertRequestOpen();
         const result = operation();
-        this.assertActive();
+        this.assertRequestOpen();
         return result;
       });
     } catch (cause) {
@@ -195,7 +202,7 @@ class RequestBudgetOverlayFs extends OverlayFs {
   }
 
   private reserve(kind: FilesystemLimit, bytes: number) {
-    this.assertActive();
+    this.assertRequestOpen();
     const consumed = kind === "file-read" ? this.readBytes : this.overlayBytes;
     const maximum =
       kind === "file-read" ? this.maximumReadBytes : this.maximumOverlayBytes;
@@ -214,13 +221,18 @@ class RequestBudgetOverlayFs extends OverlayFs {
     ...args: Parameters<OverlayFs["readFileBuffer"]>
   ): ReturnType<OverlayFs["readFileBuffer"]> {
     try {
-      const content = await this.whileGuarded(() =>
-        super.readFileBuffer(...args)
-      );
-      this.reserve("file-read", content.byteLength);
-      return content;
+      return await this.whileGuarded(async () => {
+        const stats = await super.stat(args[0]);
+        const reservedBytes = stats.isFile ? stats.size : 0;
+        this.reserve("file-read", reservedBytes);
+        const content = await super.readFileBuffer(...args);
+        if (content.byteLength > reservedBytes) {
+          this.reserve("file-read", content.byteLength - reservedBytes);
+        }
+        return content;
+      });
     } catch (error) {
-      if (String(error).includes("EFBIG")) {
+      if (error instanceof Error && error.message.startsWith("EFBIG:")) {
         this.limitExceeded = "file-read";
       }
       throw error;
@@ -240,7 +252,13 @@ class RequestBudgetOverlayFs extends OverlayFs {
     ...args: Parameters<OverlayFs["appendFile"]>
   ): ReturnType<OverlayFs["appendFile"]> {
     await this.whileGuarded(async () => {
-      this.reserve("overlay", fileContentSize(args[1], args[2]));
+      const appendedBytes = fileContentSize(args[1], args[2]);
+      let existingBytes = 0;
+      if (await super.exists(args[0])) {
+        const stats = await super.stat(args[0]);
+        existingBytes = stats.isFile ? stats.size : 0;
+      }
+      this.reserve("overlay", existingBytes + appendedBytes);
       await super.appendFile(...args);
     });
   }

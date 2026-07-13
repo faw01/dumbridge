@@ -1,4 +1,5 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { promises as hostFileSystem } from "node:fs";
 import {
   access,
   mkdir,
@@ -10,7 +11,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { Effect, Fiber } from "effect";
 import { ServedRoot } from "../src/files/served-root";
 import { SafeShell, type SafeShellLimits } from "../src/shell/safe-shell";
@@ -371,5 +372,52 @@ describe("SafeShell", () => {
       _tag: "ShellLimitExceededError",
       limit: "overlay",
     });
+  });
+
+  test("stops host reads after the aggregate read budget is exhausted", async () => {
+    await Promise.all([
+      writeFile(join(servedRoot, "a.txt"), "12345678"),
+      writeFile(join(servedRoot, "b.txt"), "abcdefgh"),
+      writeFile(join(servedRoot, "c.txt"), "ABCDEFGH"),
+    ]);
+    const shell = await makeShell({ maxFileReadBytes: 8 });
+    const open = spyOn(hostFileSystem, "open");
+    let openedFixtureFiles: string[] = [];
+    let error: unknown;
+    try {
+      error = await Effect.runPromise(
+        Effect.flip(shell.execute("cat a.txt; cat b.txt; cat c.txt"))
+      );
+      openedFixtureFiles = open.mock.calls
+        .map(([path]) => basename(String(path)))
+        .filter((path) => ["a.txt", "b.txt", "c.txt"].includes(path));
+    } finally {
+      open.mockRestore();
+    }
+
+    expect(error).toMatchObject({
+      _tag: "ShellLimitExceededError",
+      limit: "file-read",
+    });
+    expect(openedFixtureFiles).toEqual(["a.txt"]);
+  });
+
+  test("charges an existing host file when append materializes it", async () => {
+    const path = join(servedRoot, "host.txt");
+    await writeFile(path, "12345678");
+    const shell = await makeShell({
+      maxFileReadBytes: 16,
+      maxOverlayBytes: 8,
+    });
+
+    const error = await Effect.runPromise(
+      Effect.flip(shell.execute("printf x >> host.txt"))
+    );
+
+    expect(error).toMatchObject({
+      _tag: "ShellLimitExceededError",
+      limit: "overlay",
+    });
+    expect(await readFile(path, "utf8")).toBe("12345678");
   });
 });
