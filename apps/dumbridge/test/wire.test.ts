@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { Result } from "effect";
 import { encodeCapability, makeCapability } from "../src/bridge/link";
 import {
+  type BridgeRequest,
   encodeFrame,
   makePullResponseSession,
   makeRequestSession,
@@ -77,6 +78,23 @@ const manifest = {
 } satisfies WirePullManifest;
 
 describe("request session", () => {
+  test("decodes frames split across arbitrary input chunks", () => {
+    const session = success(makeRequestSession(capability));
+    const request = joinChunks(
+      encoded({ capability, type: "auth" }),
+      encoded({ script: "find .", type: "run" })
+    );
+    const events: BridgeRequest[] = [];
+
+    for (const byte of request) {
+      const pushed = success(session.push(Uint8Array.of(byte)));
+      events.push(...pushed);
+    }
+
+    expect(events).toEqual([{ script: "find .", type: "run" }]);
+    expect(Result.isSuccess(session.finish())).toBe(true);
+  });
+
   test("authenticates before parsing a coalesced request", () => {
     const session = success(makeRequestSession(capability));
     const pushed = session.push(
@@ -175,6 +193,36 @@ describe("request session", () => {
     if (Result.isFailure(unknown)) {
       expect(unknown.failure._tag).toBe("UnknownFrameTypeError");
       expect(JSON.stringify(unknown.failure)).not.toContain(secret);
+    }
+  });
+
+  test("rejects malformed and oversized frames before allocation or dispatch", () => {
+    const malformedSession = success(makeRequestSession(capability));
+    const malformed = malformedSession.push(rawFrameFromText("{"));
+    expect(Result.isFailure(malformed)).toBe(true);
+    if (Result.isFailure(malformed)) {
+      expect(malformed.failure._tag).toBe("MalformedFrameError");
+    }
+
+    const oversizedPrefix = new Uint8Array(4);
+    new DataView(oversizedPrefix.buffer).setUint32(0, 1024 * 1024 + 1, false);
+    const oversizedSession = success(makeRequestSession(capability));
+    const oversized = oversizedSession.push(oversizedPrefix);
+    expect(Result.isFailure(oversized)).toBe(true);
+    if (Result.isFailure(oversized)) {
+      expect(oversized.failure).toMatchObject({
+        _tag: "FrameTooLargeError",
+        maximumBytes: 1024 * 1024,
+      });
+    }
+
+    const encodedOversized = encodeFrame({
+      payload: new Uint8Array(1024 * 1024),
+      type: "stdout",
+    });
+    expect(Result.isFailure(encodedOversized)).toBe(true);
+    if (Result.isFailure(encodedOversized)) {
+      expect(encodedOversized.failure._tag).toBe("FrameTooLargeError");
     }
   });
 });

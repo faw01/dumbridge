@@ -106,4 +106,23 @@ describe("BridgeLink", () => {
     expect(redacted).not.toContain(link.success.slice("dumbridge1_".length));
     expect(redacted).not.toContain("iroh-secret-locator");
   });
+
+  test("rejects malformed and oversized bridge links with typed errors", () => {
+    const malformed = parseBridgeLink("dumbridge1_***");
+    const oversized = parseBridgeLink(`dumbridge1_${"a".repeat(16_384)}`);
+
+    expect(Result.isFailure(malformed)).toBe(true);
+    expect(Result.isFailure(oversized)).toBe(true);
+    if (Result.isFailure(malformed) && Result.isFailure(oversized)) {
+      expect(malformed.failure).toMatchObject({
+        _tag: "InvalidBridgeLinkError",
+        reason: "encoding",
+      });
+      expect(oversized.failure).toMatchObject({
+        _tag: "InvalidBridgeLinkError",
+        reason: "size",
+      });
+      expect(JSON.stringify(malformed.failure)).not.toContain("***");
+    }
+  });
 });
