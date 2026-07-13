@@ -452,6 +452,23 @@ describe("pull response session", () => {
     }
   });
 
+  test("keeps the protocol manifest ceiling aligned with pull planning", () => {
+    expect(
+      Result.isSuccess(makePullResponseSession({ maxManifestEntries: 4096 }))
+    ).toBe(true);
+    const abovePullCeiling = makePullResponseSession({
+      maxManifestEntries: 4097,
+    });
+
+    expect(Result.isFailure(abovePullCeiling)).toBe(true);
+    if (Result.isFailure(abovePullCeiling)) {
+      expect(abovePullCeiling.failure).toMatchObject({
+        _tag: "InvalidWireLimitError",
+        limit: "maxManifestEntries",
+      });
+    }
+  });
+
   test("rejects inconsistent manifest totals at both encode and decode seams", () => {
     const inconsistent = { ...manifest, totalBytes: 4 };
     const encoding = encodeFrame({ manifest: inconsistent, type: "manifest" });
