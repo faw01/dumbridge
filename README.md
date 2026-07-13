@@ -8,11 +8,7 @@ The repository is a Bun workspace orchestrated by Turborepo. The publishable CLI
 
 ```bash
 bun install --frozen-lockfile
-bun run check
-bun run typecheck
-bun run test
-bun run build
-bun run pack:check
+bun run verify
 ```
 
 See [the v1 design](docs/design/v1.md) for the product and security contract.

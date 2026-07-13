@@ -14,19 +14,19 @@ const run = Command.make("run", {
 }).pipe(Command.withDescription("Run one remote read-shell script."));
 
 // biome-ignore assist/source/useSortedKeys: Effect CLI reads positional arguments in declaration order.
-export const pull = Command.make("pull", {
-  path: Argument.string("path"),
+const pull = Command.make("pull", {
+  remotePath: Argument.string("remote-path"),
   destination: Argument.string("destination").pipe(Argument.optional),
 }).pipe(Command.withDescription("Pull one file or directory."));
 
-export const command = Command.make("dumbridge").pipe(
+const command = Command.make("dumbridge").pipe(
   Command.withDescription(
     "Give a cloud coding agent temporary, read-only access to one local directory."
   ),
   Command.withSubcommands([serve, run, pull])
 );
 
-export const runCli = Command.runWith(command, {
+const runCli = Command.runWith(command, {
   version: packageJson.version,
 });
 

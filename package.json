@@ -8,11 +8,13 @@
   ],
   "scripts": {
     "build": "turbo run build --cache-dir=.turbo/cache",
+    "changeset:status": "changeset status --since=origin/main",
     "check": "turbo run check --cache-dir=.turbo/cache && ultracite check .",
     "fix": "turbo run fix --cache-dir=.turbo/cache && ultracite fix .",
     "pack:check": "turbo run pack:check --cache-dir=.turbo/cache",
     "test": "turbo run test --cache-dir=.turbo/cache",
-    "typecheck": "turbo run typecheck --cache-dir=.turbo/cache"
+    "typecheck": "turbo run typecheck --cache-dir=.turbo/cache",
+    "verify": "bun run changeset:status && bun run check && bun run typecheck && bun run test && bun run build && bun run pack:check"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.3",

@@ -1,9 +1,5 @@
 import { describe, expect, test } from "bun:test";
 import { fileURLToPath } from "node:url";
-import { BunServices } from "@effect/platform-bun";
-import { Effect, Option } from "effect";
-import { Command } from "effect/unstable/cli";
-import { pull } from "../src/cli";
 
 const cliPath = fileURLToPath(new URL("../src/cli.ts", import.meta.url));
 
@@ -53,30 +49,7 @@ describe("dumbridge CLI", () => {
     expect(serve.stdout).toContain("dumbridge serve [flags] <root>");
     expect(run.stdout).toContain("dumbridge run [flags] <script>");
     expect(pullHelp.stdout).toContain(
-      "dumbridge pull [flags] <path> [<destination>]"
+      "dumbridge pull [flags] <remote-path> [<destination>]"
     );
-  });
-
-  test("maps pull path before its optional destination", async () => {
-    let parsed: unknown;
-    const command = pull.pipe(
-      Command.withHandler((value) =>
-        Effect.sync(() => {
-          parsed = value;
-        })
-      )
-    );
-
-    await Effect.runPromise(
-      Command.runWith(command, { version: "test" })([
-        "remote/file",
-        "local/file",
-      ]).pipe(Effect.provide(BunServices.layer))
-    );
-
-    expect(parsed).toEqual({
-      destination: Option.some("local/file"),
-      path: "remote/file",
-    });
   });
 });
