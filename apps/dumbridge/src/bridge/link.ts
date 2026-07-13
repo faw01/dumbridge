@@ -67,8 +67,8 @@ export const redactBridgeLink = (_link: string): string =>
   `${bridgeLinkPrefix}[REDACTED]`;
 
 export const capabilitiesEqual = (
-  left: Capability,
-  right: Capability
+  left: Uint8Array,
+  right: Uint8Array
 ): boolean =>
   left.byteLength === capabilityByteLength &&
   right.byteLength === capabilityByteLength &&

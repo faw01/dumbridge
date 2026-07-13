@@ -118,6 +118,7 @@ const CompleteHeaderSchema = Schema.Struct({
   protocol: Schema.Literal(protocol),
   type: Schema.Literal("complete"),
 });
+const RequestHeaderSchema = Schema.Union([RunHeaderSchema, PullHeaderSchema]);
 
 const WireHeaderSchema = Schema.Union([
   AuthHeaderSchema,
@@ -181,6 +182,7 @@ export type WireFrame =
 export interface WireSessionLimits {
   readonly maxFileBytes: number;
   readonly maxFramesPerPush: number;
+  readonly maxFramesPerSession: number;
   readonly maxInputBytes: number;
   readonly maxManifestEntries: number;
   readonly maxOutputBytes: number;
@@ -190,6 +192,7 @@ export interface WireSessionLimits {
 const defaultSessionLimits: WireSessionLimits = {
   maxFileBytes: 1024 * 1024 * 1024,
   maxFramesPerPush: 64,
+  maxFramesPerSession: 65_536,
   maxInputBytes: maximumFrameBytes + lengthPrefixBytes,
   maxManifestEntries: maximumManifestEntries,
   maxOutputBytes: 1024 * 1024,
@@ -199,6 +202,7 @@ const defaultSessionLimits: WireSessionLimits = {
 const sessionLimitNames = [
   "maxFileBytes",
   "maxFramesPerPush",
+  "maxFramesPerSession",
   "maxInputBytes",
   "maxManifestEntries",
   "maxOutputBytes",
@@ -208,6 +212,7 @@ const sessionLimitNames = [
 const LimitName = Schema.Literals([
   "file-bytes",
   "frames-per-push",
+  "frames-per-session",
   "input-bytes",
   "manifest-entries",
   "output-bytes",
@@ -604,11 +609,21 @@ const frameToRaw = (
         payload: empty,
       });
     case "stdout":
+      if (frame.payload.byteLength === 0) {
+        return Result.fail(
+          illegal("payload", "Standard output payload must not be empty.")
+        );
+      }
       return Result.succeed({
         header: { protocol, type: "stdout" },
         payload: frame.payload,
       });
     case "stderr":
+      if (frame.payload.byteLength === 0) {
+        return Result.fail(
+          illegal("payload", "Standard error payload must not be empty.")
+        );
+      }
       return Result.succeed({
         header: { protocol, type: "stderr" },
         payload: frame.payload,
@@ -698,9 +713,20 @@ export const encodeFrame = (
   return encodeRawFrame(raw.success);
 };
 
-const decodeFrameBody = (
+interface UndecodedFrame {
+  readonly body: Uint8Array;
+  readonly headerEnd: number;
+  readonly headerValue: unknown;
+  readonly type: string;
+}
+
+type FrameDecoder = (
   body: Uint8Array
-): Result.Result<RawFrame, WireDecodeError> => {
+) => Result.Result<RawFrame, WireDecodeError>;
+
+const decodeFrameEnvelope = (
+  body: Uint8Array
+): Result.Result<UndecodedFrame, WireDecodeError> => {
   if (body.byteLength < lengthPrefixBytes) {
     return Result.fail(
       malformed("length", "Frame body is shorter than its header prefix.")
@@ -760,19 +786,92 @@ const decodeFrameBody = (
     );
   }
 
-  const header = Schema.decodeUnknownResult(WireHeaderSchema)(json.success, {
-    onExcessProperty: "error",
+  return Result.succeed({
+    body,
+    headerEnd,
+    headerValue: json.success,
+    type: envelope.success.type,
   });
+};
+
+const makeRawFrame = (frame: UndecodedFrame, header: WireHeader): RawFrame => ({
+  header,
+  payload: frame.body.slice(frame.headerEnd),
+});
+
+const decodeFrameBody: FrameDecoder = (body) => {
+  const frame = decodeFrameEnvelope(body);
+  if (Result.isFailure(frame)) {
+    return Result.fail(frame.failure);
+  }
+
+  const header = Schema.decodeUnknownResult(WireHeaderSchema)(
+    frame.success.headerValue,
+    {
+      onExcessProperty: "error",
+    }
+  );
   if (Result.isFailure(header)) {
     return Result.fail(
       malformed("schema", "Frame header does not match the wire schema.")
     );
   }
 
-  return Result.succeed({
-    header: header.success,
-    payload: body.slice(headerEnd),
-  });
+  return Result.succeed(makeRawFrame(frame.success, header.success));
+};
+
+const decodeAuthenticatedRequestFrame = (
+  body: Uint8Array,
+  state: "auth" | "request" | "complete"
+): Result.Result<RawFrame, WireDecodeError> => {
+  const frame = decodeFrameEnvelope(body);
+  if (Result.isFailure(frame)) {
+    return Result.fail(frame.failure);
+  }
+
+  if (state === "auth") {
+    if (frame.success.type !== "auth") {
+      return Result.fail(
+        illegal("order", "Request session must start with authentication.")
+      );
+    }
+    const header = Schema.decodeUnknownResult(AuthHeaderSchema)(
+      frame.success.headerValue,
+      {
+        onExcessProperty: "error",
+      }
+    );
+    if (Result.isFailure(header)) {
+      return Result.fail(
+        malformed(
+          "schema",
+          "Authentication header does not match the wire schema."
+        )
+      );
+    }
+    return Result.succeed(makeRawFrame(frame.success, header.success));
+  }
+
+  if (
+    state === "complete" ||
+    (frame.success.type !== "run" && frame.success.type !== "pull")
+  ) {
+    return Result.fail(
+      illegal("order", "Request session contains an unexpected frame.")
+    );
+  }
+
+  const header = Schema.decodeUnknownResult(RequestHeaderSchema)(
+    frame.success.headerValue,
+    { onExcessProperty: "error" }
+  );
+  if (Result.isFailure(header)) {
+    return Result.fail(
+      malformed("schema", "Request header does not match the wire schema.")
+    );
+  }
+
+  return Result.succeed(makeRawFrame(frame.success, header.success));
 };
 
 type ReaderState =
@@ -792,6 +891,7 @@ type ReaderState =
     };
 
 class IncrementalFrameReader {
+  private frameCount = 0;
   private state: ReaderState = {
     _tag: "prefix",
     bytes: new Uint8Array(lengthPrefixBytes),
@@ -816,6 +916,7 @@ class IncrementalFrameReader {
   push<A>(
     chunk: Uint8Array,
     limits: WireSessionLimits,
+    decode: FrameDecoder,
     consume: (
       frame: RawFrame
     ) => Result.Result<SessionEvent<A>, WireDecodeError>
@@ -860,7 +961,17 @@ class IncrementalFrameReader {
           limitExceeded("frames-per-push", limits.maxFramesPerPush, frames)
         );
       }
-      const decoded = decodeFrameBody(this.state.bytes);
+      this.frameCount += 1;
+      if (this.frameCount > limits.maxFramesPerSession) {
+        return this.fail(
+          limitExceeded(
+            "frames-per-session",
+            limits.maxFramesPerSession,
+            this.frameCount
+          )
+        );
+      }
+      const decoded = decode(this.state.bytes);
       if (Result.isFailure(decoded)) {
         return this.fail(decoded.failure);
       }
@@ -916,6 +1027,7 @@ class IncrementalFrameReader {
 
 const makeSession = <A>(
   limits: WireSessionLimits,
+  decode: FrameDecoder,
   consume: (frame: RawFrame) => Result.Result<SessionEvent<A>, WireDecodeError>,
   complete: () => boolean
 ): WireSession<A> => {
@@ -943,7 +1055,7 @@ const makeSession = <A>(
       if (sessionError !== undefined) {
         return Result.fail(sessionError);
       }
-      return reader.push(chunk, limits, consume);
+      return reader.push(chunk, limits, decode, consume);
     },
   };
 };
@@ -957,6 +1069,7 @@ export const makeRequestSession = (
     return Result.fail(resolved.failure);
   }
   const limits = resolved.success;
+  const expectedCapabilitySnapshot = Uint8Array.from(expectedCapability);
   let state: "auth" | "request" | "complete" = "auth";
   const authenticate = (
     frame: RawFrame
@@ -974,7 +1087,7 @@ export const makeRequestSession = (
     const received = parseCapability(frame.header.capability);
     if (
       Result.isFailure(received) ||
-      !capabilitiesEqual(expectedCapability, received.success)
+      !capabilitiesEqual(expectedCapabilitySnapshot, received.success)
     ) {
       return Result.fail(
         new AuthenticationError({
@@ -1030,6 +1143,7 @@ export const makeRequestSession = (
 
   const session = makeSession<BridgeRequest>(
     limits,
+    (body) => decodeAuthenticatedRequestFrame(body, state),
     consume,
     () => state === "complete"
   );
@@ -1046,30 +1160,36 @@ export const makeRunResponseSession = (
   const limits = resolved.success;
   let state: "stdout" | "stderr" | "complete" = "stdout";
   let outputBytes = 0;
+  const acceptOutput = (
+    payload: Uint8Array,
+    type: "stdout" | "stderr"
+  ): Result.Result<SessionEvent<RunResponseEvent>, WireDecodeError> => {
+    if (payload.byteLength === 0) {
+      return Result.fail(
+        illegal("payload", "Run output payload must not be empty.")
+      );
+    }
+    outputBytes += payload.byteLength;
+    if (outputBytes > limits.maxOutputBytes) {
+      return Result.fail(
+        limitExceeded("output-bytes", limits.maxOutputBytes, outputBytes)
+      );
+    }
+    return Result.succeed(emit({ payload, type }));
+  };
   const session = makeSession<RunResponseEvent>(
     limits,
+    decodeFrameBody,
     (frame) => {
       if (frame.header.type === "stdout" && state === "stdout") {
-        outputBytes += frame.payload.byteLength;
-        if (outputBytes > limits.maxOutputBytes) {
-          return Result.fail(
-            limitExceeded("output-bytes", limits.maxOutputBytes, outputBytes)
-          );
-        }
-        return Result.succeed(emit({ payload: frame.payload, type: "stdout" }));
+        return acceptOutput(frame.payload, "stdout");
       }
       if (
         frame.header.type === "stderr" &&
         (state === "stdout" || state === "stderr")
       ) {
         state = "stderr";
-        outputBytes += frame.payload.byteLength;
-        if (outputBytes > limits.maxOutputBytes) {
-          return Result.fail(
-            limitExceeded("output-bytes", limits.maxOutputBytes, outputBytes)
-          );
-        }
-        return Result.succeed(emit({ payload: frame.payload, type: "stderr" }));
+        return acceptOutput(frame.payload, "stderr");
       }
       if (
         frame.header.type === "exit" &&
@@ -1291,6 +1411,7 @@ export const makePullResponseSession = (
 
   const session = makeSession<PullResponseEvent>(
     limits,
+    decodeFrameBody,
     consume,
     () => state === "complete"
   );

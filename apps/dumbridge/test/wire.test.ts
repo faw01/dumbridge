@@ -111,6 +111,38 @@ describe("request session", () => {
     expect(Result.isSuccess(session.finish())).toBe(true);
   });
 
+  test("does not decode request fields before authentication", () => {
+    const secret = "UNTRUSTED_LOCAL_SCRIPT";
+    const session = success(makeRequestSession(capability));
+    const pushed = session.push(
+      rawFrame({
+        protocol: "dumbridge/1",
+        script: "",
+        type: "run",
+        untrusted: secret,
+      })
+    );
+
+    expect(Result.isFailure(pushed)).toBe(true);
+    if (Result.isFailure(pushed)) {
+      expect(pushed.failure).toMatchObject({
+        _tag: "IllegalFrameError",
+        reason: "order",
+      });
+      expect(JSON.stringify(pushed.failure)).not.toContain(secret);
+    }
+  });
+
+  test("owns a snapshot of the expected capability", () => {
+    const mutableExpected = success(makeCapability(capabilityBytes));
+    const session = success(makeRequestSession(mutableExpected));
+    mutableExpected.fill(0);
+
+    const authenticated = session.push(encoded({ capability, type: "auth" }));
+
+    expect(Result.isSuccess(authenticated)).toBe(true);
+  });
+
   test("stops at failed authentication before parsing trailing bytes", () => {
     const session = success(makeRequestSession(capability));
     const pushed = session.push(
@@ -297,12 +329,38 @@ describe("run response session", () => {
 
     const incomplete = success(makeRunResponseSession());
     success(
-      incomplete.push(encoded({ payload: new Uint8Array(), type: "stdout" }))
+      incomplete.push(encoded({ payload: Uint8Array.of(1), type: "stdout" }))
     );
     const finished = incomplete.finish();
     expect(Result.isFailure(finished)).toBe(true);
     if (Result.isFailure(finished)) {
       expect(finished.failure._tag).toBe("IncompleteSessionError");
+    }
+  });
+
+  test("rejects empty output frames at encode and decode boundaries", () => {
+    const encoding = encodeFrame({
+      payload: new Uint8Array(),
+      type: "stdout",
+    });
+    expect(Result.isFailure(encoding)).toBe(true);
+    if (Result.isFailure(encoding)) {
+      expect(encoding.failure).toMatchObject({
+        _tag: "IllegalFrameError",
+        reason: "payload",
+      });
+    }
+
+    const session = success(makeRunResponseSession());
+    const decoding = session.push(
+      rawFrame({ protocol: "dumbridge/1", type: "stderr" })
+    );
+    expect(Result.isFailure(decoding)).toBe(true);
+    if (Result.isFailure(decoding)) {
+      expect(decoding.failure).toMatchObject({
+        _tag: "IllegalFrameError",
+        reason: "payload",
+      });
     }
   });
 
@@ -326,9 +384,9 @@ describe("run response session", () => {
     );
     const frames = frameLimited.push(
       joinChunks(
-        encoded({ payload: new Uint8Array(), type: "stdout" }),
-        encoded({ payload: new Uint8Array(), type: "stdout" }),
-        encoded({ payload: new Uint8Array(), type: "stdout" })
+        encoded({ payload: Uint8Array.of(1), type: "stdout" }),
+        encoded({ payload: Uint8Array.of(1), type: "stdout" }),
+        encoded({ payload: Uint8Array.of(1), type: "stdout" })
       )
     );
     expect(Result.isFailure(frames)).toBe(true);
@@ -336,6 +394,35 @@ describe("run response session", () => {
       expect(frames.failure).toMatchObject({
         _tag: "WireLimitExceededError",
         limit: "frames-per-push",
+      });
+    }
+
+    const sessionFrameLimited = success(
+      makeRunResponseSession({
+        maxFramesPerPush: 1,
+        maxFramesPerSession: 2,
+      })
+    );
+    success(
+      sessionFrameLimited.push(
+        encoded({ payload: Uint8Array.of(1), type: "stdout" })
+      )
+    );
+    success(
+      sessionFrameLimited.push(
+        encoded({ payload: Uint8Array.of(2), type: "stdout" })
+      )
+    );
+    const sessionFrames = sessionFrameLimited.push(
+      encoded({ payload: Uint8Array.of(3), type: "stdout" })
+    );
+    expect(Result.isFailure(sessionFrames)).toBe(true);
+    if (Result.isFailure(sessionFrames)) {
+      expect(sessionFrames.failure).toMatchObject({
+        _tag: "WireLimitExceededError",
+        limit: "frames-per-session",
+        maximum: 2,
+        observed: 3,
       });
     }
 
