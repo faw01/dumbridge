@@ -72,6 +72,23 @@ describe("pull transfer", () => {
     );
   });
 
+  test("accepts names close to Windows device names", () => {
+    const cases = [
+      ["console", "./console"],
+      ["folder/auxiliary.txt", "./auxiliary.txt"],
+      ["folder/com0.txt", "./com0.txt"],
+      ["folder/com10.txt", "./com10.txt"],
+      ["folder/lpt0", "./lpt0"],
+      ["folder/lpt10.log", "./lpt10.log"],
+      ["folder/nulled", "./nulled"],
+      ["folder/printer", "./printer"],
+    ] as const;
+
+    for (const [remotePath, expected] of cases) {
+      expect(resolvePullDestination(remotePath)).toBe(expected);
+    }
+  });
+
   test("plans and materializes a deterministic directory", () =>
     withFixture(async ({ root, workspace }) => {
       await mkdir(join(root, "project"), { recursive: true });
@@ -144,6 +161,14 @@ describe("pull transfer", () => {
         "C:\\secret",
         "folder/C:secret",
         "folder/file.txt:stream",
+        "CON",
+        "folder/PrN.txt",
+        "folder/aUx.JSON",
+        "folder/Nul",
+        "folder/cOm1.log",
+        "folder/COM9",
+        "folder/lPt1.tar.gz",
+        "folder/LPT9",
         "folder/secret\0.txt",
         "folder\\secret",
         "folder//secret",
@@ -500,31 +525,38 @@ describe("pull transfer", () => {
 
   test("rejects a malicious manifest path before writing", () =>
     withFixture(async ({ workspace }) => {
-      const manifest: PullManifest = {
-        digestAlgorithm: "sha256",
-        entries: [
-          {
-            digest:
-              "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-            kind: "file",
-            path: "../escape",
-            size: 0,
-          },
-        ],
-        kind: "directory",
-        name: "files",
-        totalBytes: 0,
-      };
+      const errors = await Promise.all(
+        ["../escape", "nested/CoM1.txt"].map(async (entryPath) => {
+          const manifest: PullManifest = {
+            digestAlgorithm: "sha256",
+            entries: [
+              {
+                digest:
+                  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                kind: "file",
+                path: entryPath,
+                size: 0,
+              },
+            ],
+            kind: "directory",
+            name: "files",
+            totalBytes: 0,
+          };
 
-      const error = await collectError(
-        materializePull({
-          destination: join(workspace, "files"),
-          manifest,
-          read: () => oneChunk(new Uint8Array()),
+          const error = await collectError(
+            materializePull({
+              destination: join(workspace, "files"),
+              manifest,
+              read: () => oneChunk(new Uint8Array()),
+            })
+          );
+
+          return { entryPath, error };
         })
       );
-
-      expect(error).toMatchObject({ _tag: "PullPathError", path: "../escape" });
+      for (const { entryPath, error } of errors) {
+        expect(error).toMatchObject({ _tag: "PullPathError", path: entryPath });
+      }
       expect(await readdir(workspace)).toEqual([]);
     }));
 });
