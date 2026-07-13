@@ -2,11 +2,11 @@ import { describe, expect, test } from "bun:test";
 import { Result } from "effect";
 import { encodeCapability, makeCapability } from "../src/bridge/link";
 import {
-  type BridgeRequest,
   encodeFrame,
   makePullResponseSession,
   makeRequestSession,
   makeRunResponseSession,
+  type WireDecodeError,
   type WireFrame,
   type WirePullManifest,
 } from "../src/bridge/wire";
@@ -84,15 +84,15 @@ describe("request session", () => {
       encoded({ capability, type: "auth" }),
       encoded({ script: "find .", type: "run" })
     );
-    const events: BridgeRequest[] = [];
 
     for (const byte of request) {
-      const pushed = success(session.push(Uint8Array.of(byte)));
-      events.push(...pushed);
+      success(session.push(Uint8Array.of(byte)));
     }
 
-    expect(events).toEqual([{ script: "find .", type: "run" }]);
-    expect(Result.isSuccess(session.finish())).toBe(true);
+    expect(success(session.finish())).toEqual({
+      script: "find .",
+      type: "run",
+    });
   });
 
   test("authenticates before parsing a coalesced request", () => {
@@ -105,10 +105,10 @@ describe("request session", () => {
     );
 
     expect(Result.isSuccess(pushed)).toBe(true);
-    if (Result.isSuccess(pushed)) {
-      expect(pushed.success).toEqual([{ script: "find .", type: "run" }]);
-    }
-    expect(Result.isSuccess(session.finish())).toBe(true);
+    expect(success(session.finish())).toEqual({
+      script: "find .",
+      type: "run",
+    });
   });
 
   test("does not decode request fields before authentication", () => {
@@ -158,6 +158,26 @@ describe("request session", () => {
       expect(JSON.stringify(pushed.failure)).not.toContain(
         success(encodeCapability(otherCapability))
       );
+    }
+  });
+
+  test("does not expose a request until the stream ends cleanly", () => {
+    const session = success(makeRequestSession(capability));
+    const accepted = session.push(
+      joinChunks(
+        encoded({ capability, type: "auth" }),
+        encoded({ script: "find .", type: "run" })
+      )
+    );
+    expect(accepted).toEqual(Result.succeed(undefined));
+
+    const trailing = session.push(rawFrameFromText("{"));
+    expect(Result.isFailure(trailing)).toBe(true);
+
+    const finished = session.finish();
+    expect(Result.isFailure(finished)).toBe(true);
+    if (Result.isFailure(finished)) {
+      expect(finished.failure._tag).toBe("MalformedFrameError");
     }
   });
 
@@ -338,7 +358,7 @@ describe("run response session", () => {
     }
   });
 
-  test("rejects empty output frames at encode and decode boundaries", () => {
+  test("rejects empty output frame floods at encode and decode boundaries", () => {
     const encoding = encodeFrame({
       payload: new Uint8Array(),
       type: "stdout",
@@ -351,9 +371,10 @@ describe("run response session", () => {
       });
     }
 
+    const emptyFrame = rawFrame({ protocol: "dumbridge/1", type: "stderr" });
     const session = success(makeRunResponseSession());
     const decoding = session.push(
-      rawFrame({ protocol: "dumbridge/1", type: "stderr" })
+      joinChunks(...Array.from({ length: 100 }, () => emptyFrame))
     );
     expect(Result.isFailure(decoding)).toBe(true);
     if (Result.isFailure(decoding)) {
@@ -364,7 +385,7 @@ describe("run response session", () => {
     }
   });
 
-  test("enforces aggregate output and per-push frame limits", () => {
+  test("enforces aggregate output and whole-session frame limits", () => {
     const outputLimited = success(
       makeRunResponseSession({ maxOutputBytes: 4 })
     );
@@ -379,61 +400,38 @@ describe("run response session", () => {
       });
     }
 
-    const frameLimited = success(
-      makeRunResponseSession({ maxFramesPerPush: 2 })
-    );
-    const frames = frameLimited.push(
-      joinChunks(
-        encoded({ payload: Uint8Array.of(1), type: "stdout" }),
-        encoded({ payload: Uint8Array.of(1), type: "stdout" }),
-        encoded({ payload: Uint8Array.of(1), type: "stdout" })
-      )
-    );
-    expect(Result.isFailure(frames)).toBe(true);
-    if (Result.isFailure(frames)) {
-      expect(frames.failure).toMatchObject({
-        _tag: "WireLimitExceededError",
-        limit: "frames-per-push",
-      });
-    }
-
-    const sessionFrameLimited = success(
-      makeRunResponseSession({
-        maxFramesPerPush: 1,
-        maxFramesPerSession: 2,
-      })
-    );
-    success(
-      sessionFrameLimited.push(
-        encoded({ payload: Uint8Array.of(1), type: "stdout" })
-      )
-    );
-    success(
-      sessionFrameLimited.push(
-        encoded({ payload: Uint8Array.of(2), type: "stdout" })
-      )
-    );
-    const sessionFrames = sessionFrameLimited.push(
+    const wireBytes = joinChunks(
+      encoded({ payload: Uint8Array.of(1), type: "stdout" }),
+      encoded({ payload: Uint8Array.of(2), type: "stdout" }),
       encoded({ payload: Uint8Array.of(3), type: "stdout" })
     );
-    expect(Result.isFailure(sessionFrames)).toBe(true);
-    if (Result.isFailure(sessionFrames)) {
-      expect(sessionFrames.failure).toMatchObject({
+    const coalescedSession = success(
+      makeRunResponseSession({ maxFramesPerSession: 2 })
+    );
+    const coalesced = coalescedSession.push(wireBytes);
+
+    const fragmentedSession = success(
+      makeRunResponseSession({ maxFramesPerSession: 2 })
+    );
+    const fragmentedFailures: WireDecodeError[] = [];
+    for (const byte of wireBytes) {
+      const pushed = fragmentedSession.push(Uint8Array.of(byte));
+      if (Result.isFailure(pushed)) {
+        fragmentedFailures.push(pushed.failure);
+        break;
+      }
+    }
+
+    expect(Result.isFailure(coalesced)).toBe(true);
+    expect(fragmentedFailures).toHaveLength(1);
+    if (Result.isFailure(coalesced)) {
+      expect(coalesced.failure).toMatchObject({
         _tag: "WireLimitExceededError",
         limit: "frames-per-session",
         maximum: 2,
         observed: 3,
       });
-    }
-
-    const inputLimited = success(makeRunResponseSession({ maxInputBytes: 8 }));
-    const input = inputLimited.push(new Uint8Array(9));
-    expect(Result.isFailure(input)).toBe(true);
-    if (Result.isFailure(input)) {
-      expect(input.failure).toMatchObject({
-        _tag: "WireLimitExceededError",
-        limit: "input-bytes",
-      });
+      expect(fragmentedFailures[0]).toEqual(coalesced.failure);
     }
   });
 });

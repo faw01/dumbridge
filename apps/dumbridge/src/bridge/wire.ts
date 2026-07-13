@@ -181,9 +181,7 @@ export type WireFrame =
 
 export interface WireSessionLimits {
   readonly maxFileBytes: number;
-  readonly maxFramesPerPush: number;
   readonly maxFramesPerSession: number;
-  readonly maxInputBytes: number;
   readonly maxManifestEntries: number;
   readonly maxOutputBytes: number;
   readonly maxTransferBytes: number;
@@ -191,9 +189,7 @@ export interface WireSessionLimits {
 
 const defaultSessionLimits: WireSessionLimits = {
   maxFileBytes: 1024 * 1024 * 1024,
-  maxFramesPerPush: 64,
   maxFramesPerSession: 65_536,
-  maxInputBytes: maximumFrameBytes + lengthPrefixBytes,
   maxManifestEntries: maximumManifestEntries,
   maxOutputBytes: 1024 * 1024,
   maxTransferBytes: 2 * 1024 * 1024 * 1024,
@@ -201,9 +197,7 @@ const defaultSessionLimits: WireSessionLimits = {
 
 const sessionLimitNames = [
   "maxFileBytes",
-  "maxFramesPerPush",
   "maxFramesPerSession",
-  "maxInputBytes",
   "maxManifestEntries",
   "maxOutputBytes",
   "maxTransferBytes",
@@ -211,9 +205,7 @@ const sessionLimitNames = [
 
 const LimitName = Schema.Literals([
   "file-bytes",
-  "frames-per-push",
   "frames-per-session",
-  "input-bytes",
   "manifest-entries",
   "output-bytes",
   "transfer-bytes",
@@ -312,7 +304,11 @@ export interface WireSession<A> {
   ) => Result.Result<readonly A[], WireDecodeError>;
 }
 
-export type RequestSession = WireSession<BridgeRequest>;
+export interface RequestSession {
+  readonly finish: () => Result.Result<BridgeRequest, WireDecodeError>;
+  readonly push: (chunk: Uint8Array) => Result.Result<void, WireDecodeError>;
+}
+
 export type RunResponseSession = WireSession<RunResponseEvent>;
 export type PullResponseSession = WireSession<PullResponseEvent>;
 
@@ -924,15 +920,9 @@ class IncrementalFrameReader {
     if (this.state._tag === "failed") {
       return Result.fail(this.state.error);
     }
-    if (chunk.byteLength > limits.maxInputBytes) {
-      return this.fail(
-        limitExceeded("input-bytes", limits.maxInputBytes, chunk.byteLength)
-      );
-    }
 
     const events: A[] = [];
     let chunkOffset = 0;
-    let frames = 0;
     while (chunkOffset < chunk.byteLength) {
       const available = this.state.bytes.byteLength - this.state.offset;
       const copied = Math.min(available, chunk.byteLength - chunkOffset);
@@ -955,12 +945,6 @@ class IncrementalFrameReader {
         continue;
       }
 
-      frames += 1;
-      if (frames > limits.maxFramesPerPush) {
-        return this.fail(
-          limitExceeded("frames-per-push", limits.maxFramesPerPush, frames)
-        );
-      }
       this.frameCount += 1;
       if (this.frameCount > limits.maxFramesPerSession) {
         return this.fail(
@@ -1071,9 +1055,10 @@ export const makeRequestSession = (
   const limits = resolved.success;
   const expectedCapabilitySnapshot = Uint8Array.from(expectedCapability);
   let state: "auth" | "request" | "complete" = "auth";
+  let request: BridgeRequest | undefined;
   const authenticate = (
     frame: RawFrame
-  ): Result.Result<SessionEvent<BridgeRequest>, WireDecodeError> => {
+  ): Result.Result<SessionEvent<never>, WireDecodeError> => {
     if (frame.header.type !== "auth") {
       return Result.fail(
         illegal("order", "Request session must start with authentication.")
@@ -1101,15 +1086,16 @@ export const makeRequestSession = (
 
   const acceptRequest = (
     frame: RawFrame
-  ): Result.Result<SessionEvent<BridgeRequest>, WireDecodeError> => {
+  ): Result.Result<SessionEvent<never>, WireDecodeError> => {
     if (frame.payload.byteLength !== 0) {
       return Result.fail(
         illegal("payload", "Request frame payload must be empty.")
       );
     }
     if (frame.header.type === "run") {
+      request = { script: frame.header.script, type: "run" };
       state = "complete";
-      return Result.succeed(emit({ script: frame.header.script, type: "run" }));
+      return Result.succeed(noEvent);
     }
     if (frame.header.type === "pull") {
       if (!canonicalPath(frame.header.remotePath)) {
@@ -1117,10 +1103,9 @@ export const makeRequestSession = (
           illegal("path", "Pull path must be canonical and relative.")
         );
       }
+      request = { remotePath: frame.header.remotePath, type: "pull" };
       state = "complete";
-      return Result.succeed(
-        emit({ remotePath: frame.header.remotePath, type: "pull" })
-      );
+      return Result.succeed(noEvent);
     }
     return Result.fail(
       illegal("order", "Request session contains an unexpected frame.")
@@ -1129,7 +1114,7 @@ export const makeRequestSession = (
 
   const consume = (
     frame: RawFrame
-  ): Result.Result<SessionEvent<BridgeRequest>, WireDecodeError> => {
+  ): Result.Result<SessionEvent<never>, WireDecodeError> => {
     if (state === "auth") {
       return authenticate(frame);
     }
@@ -1141,13 +1126,34 @@ export const makeRequestSession = (
     );
   };
 
-  const session = makeSession<BridgeRequest>(
+  const session = makeSession<never>(
     limits,
     (body) => decodeAuthenticatedRequestFrame(body, state),
     consume,
-    () => state === "complete"
+    () => request !== undefined
   );
-  return Result.succeed(session);
+  return Result.succeed({
+    finish: () => {
+      const finished = session.finish();
+      if (Result.isFailure(finished)) {
+        return Result.fail(finished.failure);
+      }
+      if (request === undefined) {
+        return Result.fail(
+          new IncompleteSessionError({
+            message: "Wire stream ended before the request completed.",
+          })
+        );
+      }
+      return Result.succeed(request);
+    },
+    push: (chunk) => {
+      const pushed = session.push(chunk);
+      return Result.isFailure(pushed)
+        ? Result.fail(pushed.failure)
+        : Result.succeed(undefined);
+    },
+  });
 };
 
 export const makeRunResponseSession = (
