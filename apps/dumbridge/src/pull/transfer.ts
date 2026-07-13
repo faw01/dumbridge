@@ -17,7 +17,7 @@ import { moveDirectoryNoReplace } from "./atomic-directory-move";
 
 const digestPattern = /^[0-9a-f]{64}$/;
 const windowsDeviceNamePattern =
-  /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\..*)?$/i;
+  /^(?:con|prn|aux|nul|com[1-9¹²³]|lpt[1-9¹²³])(?:\..*)?$/i;
 const windowsDrivePattern = /^[a-z]:/i;
 // biome-ignore lint/suspicious/noBitwiseOperators: POSIX open flags compose as a bitmask.
 const readOnlyNoFollow = constants.O_RDONLY | constants.O_NOFOLLOW;

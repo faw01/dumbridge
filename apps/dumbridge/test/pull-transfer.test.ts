@@ -78,8 +78,13 @@ describe("pull transfer", () => {
       ["folder/auxiliary.txt", "./auxiliary.txt"],
       ["folder/com0.txt", "./com0.txt"],
       ["folder/com10.txt", "./com10.txt"],
+      ["folder/com⁰.txt", "./com⁰.txt"],
+      ["folder/com⁴.txt", "./com⁴.txt"],
+      ["folder/com¹0.txt", "./com¹0.txt"],
       ["folder/lpt0", "./lpt0"],
       ["folder/lpt10.log", "./lpt10.log"],
+      ["folder/lpt⁹.log", "./lpt⁹.log"],
+      ["folder/lpt²backup", "./lpt²backup"],
       ["folder/nulled", "./nulled"],
       ["folder/printer", "./printer"],
     ] as const;
@@ -173,6 +178,35 @@ describe("pull transfer", () => {
         "folder\\secret",
         "folder//secret",
         "folder/./secret",
+      ];
+
+      const errors = await Promise.all(
+        paths.map(async (remotePath) => ({
+          error: await collectError(
+            preparePull({ remotePath, servedRoot: root })
+          ),
+          remotePath,
+        }))
+      );
+      for (const { error, remotePath } of errors) {
+        expect(error).toMatchObject({
+          _tag: "PullPathError",
+          path: remotePath,
+        });
+      }
+    }));
+
+  test("refuses superscript Windows device names in every component", () =>
+    withFixture(async ({ root }) => {
+      const paths = [
+        "COM¹",
+        "com².txt",
+        "CoM³.tar.gz",
+        "LPT¹",
+        "lpt².txt",
+        "LpT³.tar.gz",
+        "nested/COM¹/file.txt",
+        "nested/lPt².log/file.txt",
       ];
 
       const errors = await Promise.all(
@@ -589,7 +623,12 @@ describe("pull transfer", () => {
   test("rejects a malicious manifest path before writing", () =>
     withFixture(async ({ workspace }) => {
       const errors = await Promise.all(
-        ["../escape", "nested/CoM1.txt"].map(async (entryPath) => {
+        [
+          "../escape",
+          "nested/CoM1.txt",
+          "nested/cOm¹.txt",
+          "nested/LpT².tar.gz",
+        ].map(async (entryPath) => {
           const manifest: PullManifest = {
             digestAlgorithm: "sha256",
             entries: [
