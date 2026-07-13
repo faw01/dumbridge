@@ -363,16 +363,19 @@ describe("pull transfer", () => {
       expect(await readdir(workspace)).toEqual([]);
     }));
 
-  test("maps a reader failure and removes its staging directory", () =>
+  test("removes new parent directories after a reader failure", () =>
     withFixture(async ({ root, workspace }) => {
       await writeFile(join(root, "broken.txt"), "broken");
+      const existingParent = join(workspace, "existing");
+      await mkdir(existingParent);
+      await writeFile(join(existingParent, "keep.txt"), "keep");
       const source = await Effect.runPromise(
         preparePull({ remotePath: "broken.txt", servedRoot: root })
       );
 
       const error = await collectError(
         materializePull({
-          destination: join(workspace, "broken.txt"),
+          destination: join(existingParent, "new", "deep", "broken.txt"),
           manifest: source.manifest,
           read: () => {
             throw new Error("reader failed");
@@ -385,10 +388,14 @@ describe("pull transfer", () => {
         operation: "open pull stream",
         path: "broken.txt",
       });
-      expect(await readdir(workspace)).toEqual([]);
+      expect(await readdir(workspace)).toEqual(["existing"]);
+      expect(await readdir(existingParent)).toEqual(["keep.txt"]);
+      expect(await readFile(join(existingParent, "keep.txt"), "utf8")).toBe(
+        "keep"
+      );
     }));
 
-  test("interrupts a stalled reader and removes its staging directory", () =>
+  test("removes new parent directories after interruption", () =>
     withFixture(async ({ root, workspace }) => {
       await writeFile(join(root, "stalled.txt"), "stalled");
       const source = await Effect.runPromise(
@@ -406,7 +413,7 @@ describe("pull transfer", () => {
       };
       const fiber = Effect.runFork(
         materializePull({
-          destination: join(workspace, "stalled.txt"),
+          destination: join(workspace, "new", "deep", "stalled.txt"),
           manifest: source.manifest,
           read: stalledRead,
         })

@@ -10,9 +10,10 @@ import {
   realpath,
   rename,
   rm,
+  rmdir,
 } from "node:fs/promises";
 import { dirname, join, posix, relative, resolve, sep, win32 } from "node:path";
-import { Effect, Schema, Stream } from "effect";
+import { Effect, Exit, Schema, Stream } from "effect";
 
 const digestPattern = /^[0-9a-f]{64}$/;
 const windowsDeviceNamePattern =
@@ -803,6 +804,87 @@ const destinationExists = (path: string): Effect.Effect<boolean, PullError> =>
     },
   });
 
+const removeEmptyParents = async (paths: readonly string[]) => {
+  for (const path of [...paths].reverse()) {
+    try {
+      // biome-ignore lint/performance/noAwaitInLoops: Children must be removed before their parents.
+      await rmdir(path);
+    } catch (cause) {
+      if (
+        hasCode(cause, "ENOENT") ||
+        hasCode(cause, "ENOTEMPTY") ||
+        hasCode(cause, "EEXIST")
+      ) {
+        continue;
+      }
+      throw cause;
+    }
+  }
+};
+
+const findMissingParents = async (path: string): Promise<string[]> => {
+  try {
+    await lstat(path);
+    return [];
+  } catch (cause) {
+    if (!hasCode(cause, "ENOENT")) {
+      throw cause;
+    }
+    const ancestor = dirname(path);
+    if (ancestor === path) {
+      throw cause;
+    }
+    return [...(await findMissingParents(ancestor)), path];
+  }
+};
+
+const createParent = async (path: string) => {
+  try {
+    await mkdir(path);
+    return true;
+  } catch (cause) {
+    if (!hasCode(cause, "EEXIST")) {
+      throw cause;
+    }
+    const stats = await lstat(path);
+    if (!stats.isDirectory()) {
+      throw cause;
+    }
+    return false;
+  }
+};
+
+const createMissingParents = async (paths: readonly string[]) => {
+  const created: string[] = [];
+  try {
+    for (const path of paths) {
+      // biome-ignore lint/performance/noAwaitInLoops: Parents must exist before their children.
+      if (await createParent(path)) {
+        created.push(path);
+      }
+    }
+    return created;
+  } catch (cause) {
+    await removeEmptyParents(created);
+    throw cause;
+  }
+};
+
+const prepareDestination = (
+  parent: string
+): Effect.Effect<readonly string[], PullError> =>
+  fsEffect("create destination parent", parent, async () =>
+    createMissingParents(await findMissingParents(parent))
+  );
+
+const removeCreatedParents = (
+  paths: readonly string[],
+  parent: string
+): Effect.Effect<void, PullError> =>
+  fsEffect("remove destination parents", parent, () =>
+    removeEmptyParents(paths)
+  );
+
 const writeChunk = (
   handle: Awaited<ReturnType<typeof open>>,
   chunk: Uint8Array,
@@ -985,37 +1067,41 @@ const materializePullEffect = (options: {
     }
 
     const parent = dirname(destination);
-    yield* fsEffect("create destination parent", parent, () =>
-      mkdir(parent, { recursive: true })
-    );
-
     return yield* Effect.acquireUseRelease(
-      fsEffect("create pull staging directory", destination, () =>
-        mkdtemp(join(parent, ".dumbridge-pull-"))
-      ),
-      (stage) => {
-        const controller = new AbortController();
+      prepareDestination(parent),
+      () =>
+        Effect.acquireUseRelease(
+          fsEffect("create pull staging directory", destination, () =>
+            mkdtemp(join(parent, ".dumbridge-pull-"))
+          ),
+          (stage) => {
+            const controller = new AbortController();
 
-        return Effect.acquireUseRelease(
-          Effect.succeed(controller),
-          ({ signal }) =>
-            populateStage({
-              destination,
-              manifest,
-              read: options.read,
-              signal,
-              stage,
-            }),
-          (activeController) =>
-            Effect.sync(() => {
-              activeController.abort();
-            })
-        );
-      },
-      (stage) =>
-        fsEffect("remove pull staging directory", destination, () =>
-          rm(stage, { force: true, recursive: true })
-        )
+            return Effect.acquireUseRelease(
+              Effect.succeed(controller),
+              ({ signal }) =>
+                populateStage({
+                  destination,
+                  manifest,
+                  read: options.read,
+                  signal,
+                  stage,
+                }),
+              (activeController) =>
+                Effect.sync(() => {
+                  activeController.abort();
+                })
+            );
+          },
+          (stage) =>
+            fsEffect("remove pull staging directory", destination, () =>
+              rm(stage, { force: true, recursive: true })
+            )
+        ),
+      (createdParents, exit) =>
+        Exit.isSuccess(exit)
+          ? Effect.void
+          : removeCreatedParents(createdParents, parent)
     );
   });
 
