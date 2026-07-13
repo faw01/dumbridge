@@ -8,22 +8,12 @@ interface PackFile {
 }
 
 interface PackManifest {
-  readonly entryCount: number;
   readonly files: readonly PackFile[];
 }
 
 const packageRoot = fileURLToPath(new URL("..", import.meta.url));
-const requiredPaths = ["LICENSE", "README.md", "dist/cli.js", "package.json"];
-const forbiddenSegments = new Set([
-  ".env",
-  ".git",
-  ".repos",
-  "node_modules",
-  "scripts",
-  "src",
-  "test",
-]);
-const maxEntryCount = 20;
+const allowedPaths = ["LICENSE", "README.md", "dist/cli.js", "package.json"];
+const allowedPathSet = new Set(allowedPaths);
 const newlinePattern = /\r?\n/;
 const packedFilePattern = /^packed\s+\S+\s+(.+)$/;
 
@@ -52,26 +42,16 @@ export const assessPackManifest = (manifest: PackManifest) => {
   const paths = manifest.files.map((file) => file.path);
   const problems: string[] = [];
 
-  for (const requiredPath of requiredPaths) {
-    if (!paths.includes(requiredPath)) {
-      problems.push(`missing expected file: ${requiredPath}`);
+  for (const allowedPath of allowedPaths) {
+    if (!paths.includes(allowedPath)) {
+      problems.push(`missing expected file: ${allowedPath}`);
     }
   }
 
   for (const path of paths) {
-    const segments = path.split("/");
-    if (
-      segments.some((segment) => forbiddenSegments.has(segment)) ||
-      segments.some((segment) => segment.startsWith(".env"))
-    ) {
-      problems.push(`forbidden package entry: ${path}`);
+    if (!allowedPathSet.has(path)) {
+      problems.push(`unexpected package entry: ${path}`);
     }
-  }
-
-  if (manifest.entryCount > maxEntryCount) {
-    problems.push(
-      `entry count ${manifest.entryCount} exceeds ${maxEntryCount}`
-    );
   }
 
   return problems;
@@ -173,7 +153,6 @@ const verifyPack = async () => {
     return match?.[1] ? [match[1]] : [];
   });
   const manifest: PackManifest = {
-    entryCount: paths.length,
     files: paths.map((path) => ({ path })),
   };
 
