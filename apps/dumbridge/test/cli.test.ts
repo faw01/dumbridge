@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { fileURLToPath } from "node:url";
+import packageJson from "../package.json" with { type: "json" };
 
 const cliPath = fileURLToPath(new URL("../src/cli.ts", import.meta.url));
 
@@ -32,7 +33,7 @@ describe("dumbridge CLI", () => {
 
     expect(result.exitCode).toBe(0);
     expect(result.stderr).toBe("");
-    expect(result.stdout.trim()).toBe("dumbridge v0.0.0");
+    expect(result.stdout.trim()).toBe(`dumbridge v${packageJson.version}`);
   });
 
   test("advertises only the v1 commands", async () => {
