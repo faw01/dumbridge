@@ -1,0 +1,29 @@
+name: Bug report
+description: Report a reproducible Dumbridge failure
+title: "bug: "
+labels: [needs-triage]
+body:
+  - type: markdown
+    attributes:
+      value: Never include bridge links, capabilities, `.env` contents, or private paths.
+  - type: input
+    id: version
+    attributes:
+      label: Dumbridge version
+      placeholder: dumbridge --version
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, CPU architecture, Bun version, installation route, and local or cloud side.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction
+      description: Sanitized command, expected result, actual result, exit code, and stdout/stderr.
+    validations:
+      required: true

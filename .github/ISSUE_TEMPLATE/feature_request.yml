@@ -1,0 +1,26 @@
+name: Feature request
+description: Propose a focused improvement to Dumbridge
+title: "feat: "
+labels: [needs-triage]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What agent or local-to-cloud workflow is blocked today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed outcome
+      description: Describe the smallest interface change that solves the problem.
+    validations:
+      required: true
+  - type: checkboxes
+    id: boundaries
+    attributes:
+      label: V1 boundaries
+      options:
+        - label: This preserves local-to-cloud, read-only behavior.
+          required: true
