@@ -4,21 +4,25 @@ import {
   mkdir,
   mkdtemp,
   readFile,
+  rename,
   rm,
   symlink,
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Effect } from "effect";
+import { Effect, Fiber } from "effect";
+import { ServedRoot } from "../src/files/served-root";
 import { SafeShell, type SafeShellLimits } from "../src/shell/safe-shell";
 
 let fixtureRoot = "";
 let servedRoot = "";
 let outsideRoot = "";
 
-const makeShell = (limits?: Partial<SafeShellLimits>) =>
-  Effect.runPromise(SafeShell.make(servedRoot, limits));
+const makeShell = async (limits?: Partial<SafeShellLimits>) => {
+  const root = await Effect.runPromise(ServedRoot.make(servedRoot));
+  return Effect.runPromise(SafeShell.make(root, limits));
+};
 
 beforeEach(async () => {
   fixtureRoot = await mkdtemp(join(tmpdir(), "dumbridge-safe-shell-"));
@@ -49,6 +53,26 @@ describe("SafeShell", () => {
 
     expect(first).toMatchObject({ exitCode: 0, stdout: "first\n" });
     expect(second).toMatchObject({ exitCode: 0, stdout: "second\n" });
+  });
+
+  test("refuses a served root rebound to another directory", async () => {
+    await writeFile(join(outsideRoot, "secret.txt"), "outside secret\n");
+    const shell = await makeShell();
+    await rename(servedRoot, join(fixtureRoot, "original-served"));
+    await symlink(
+      outsideRoot,
+      servedRoot,
+      process.platform === "win32" ? "junction" : "dir"
+    );
+
+    const error = await Effect.runPromise(
+      Effect.flip(shell.execute("cat secret.txt"))
+    );
+
+    expect(error).toMatchObject({
+      _tag: "ServedRootChangedError",
+      message: "served root changed after bridge start",
+    });
   });
 
   test("discards redirection, rm, and mv writes after each execution", async () => {
@@ -123,43 +147,104 @@ describe("SafeShell", () => {
       expect(result.exitCode).not.toBe(0);
       expect(result.stdout).not.toContain("outside secret");
     }
+    for (const result of [traversal, linked]) {
+      expect(result.stderr).not.toContain(fixtureRoot);
+    }
   });
 
   test("does not expose host, network, Python, or JavaScript commands", async () => {
     const shell = await makeShell();
 
     const result = await Effect.runPromise(
-      shell.execute("git; curl; python3; node; js-exec")
+      shell.execute(
+        "git; bash; sh; env; printenv; curl; python3; node; js-exec"
+      )
     );
 
     expect(result.exitCode).toBe(127);
-    for (const command of ["git", "curl", "node", "js-exec"]) {
+    for (const command of [
+      "git",
+      "bash",
+      "sh",
+      "env",
+      "printenv",
+      "curl",
+      "node",
+      "js-exec",
+    ]) {
       expect(result.stderr).toContain(`${command}: command not found`);
     }
     expect(result.stderr).toContain("python3: command not available");
   });
 
+  test("keeps concurrent Effect executions isolated", async () => {
+    const shell = await makeShell();
+
+    const results = await Promise.all(
+      Array.from({ length: 8 }, (_, index) =>
+        Effect.runPromise(shell.execute(`echo request-${index}`))
+      )
+    );
+
+    expect(results.map(({ stdout }) => stdout)).toEqual([
+      "request-0\n",
+      "request-1\n",
+      "request-2\n",
+      "request-3\n",
+      "request-4\n",
+      "request-5\n",
+      "request-6\n",
+      "request-7\n",
+    ]);
+  });
+
+  test("interrupts runaway scripts and remains usable", async () => {
+    await writeFile(join(servedRoot, "tick.txt"), "tick\n");
+    const shell = await makeShell({
+      maxCommandCount: Number.MAX_SAFE_INTEGER,
+      maxFileReadBytes: Number.MAX_SAFE_INTEGER,
+      maxLoopIterations: Number.MAX_SAFE_INTEGER,
+    });
+    const fiber = Effect.runFork(
+      shell.execute("while true; do cat tick.txt > /dev/null; done")
+    );
+    await Bun.sleep(5);
+
+    await Effect.runPromise(
+      Fiber.interrupt(fiber).pipe(Effect.timeout("1 second"))
+    );
+    const next = await Effect.runPromise(shell.execute("echo still-usable"));
+
+    expect(next).toMatchObject({ exitCode: 0, stdout: "still-usable\n" });
+  });
+
+  test("does not infer typed failures from shell-controlled stderr", async () => {
+    const shell = await makeShell();
+
+    const [ordinary, explicitLimitExit] = await Promise.all([
+      Effect.runPromise(shell.execute("echo file too large >&2")),
+      Effect.runPromise(shell.execute("echo command >&2; exit 126")),
+    ]);
+
+    expect(ordinary).toMatchObject({
+      exitCode: 0,
+      stderr: "file too large\n",
+    });
+    expect(explicitLimitExit).toMatchObject({
+      exitCode: 126,
+      stderr: "command\n",
+    });
+  });
+
   test("fails closed when script, command, loop, output, or file limits are exceeded", async () => {
     await writeFile(join(servedRoot, "large.txt"), "0123456789");
 
-    const cases = [
+    const typedCases = [
       {
         effect: (await makeShell({ maxScriptBytes: 8 })).execute(
           "echo too long"
         ),
         limit: "script",
-      },
-      {
-        effect: (await makeShell({ maxCommandCount: 3 })).execute(
-          "true; true; true; true"
-        ),
-        limit: "commands",
-      },
-      {
-        effect: (await makeShell({ maxLoopIterations: 5 })).execute(
-          "while true; do true; done"
-        ),
-        limit: "loops",
       },
       {
         effect: (await makeShell({ maxOutputBytes: 32 })).execute("seq 1 100"),
@@ -173,19 +258,68 @@ describe("SafeShell", () => {
       },
     ] as const;
 
-    const failures = await Promise.all(
-      cases.map(async (item) => ({
-        error: await Effect.runPromise(Effect.flip(item.effect)),
-        limit: item.limit,
-      }))
-    );
+    const [typedFailures, commandLimit, loopLimit] = await Promise.all([
+      Promise.all(
+        typedCases.map(async (item) => ({
+          error: await Effect.runPromise(Effect.flip(item.effect)),
+          limit: item.limit,
+        }))
+      ),
+      Effect.runPromise(
+        (await makeShell({ maxCommandCount: 3 })).execute(
+          "true; true; true; true"
+        )
+      ),
+      Effect.runPromise(
+        (await makeShell({ maxLoopIterations: 5 })).execute(
+          "while true; do true; done"
+        )
+      ),
+    ]);
 
-    for (const failure of failures) {
+    for (const failure of typedFailures) {
       const { error, limit } = failure;
       expect(error).toMatchObject({
         _tag: "ShellLimitExceededError",
         limit,
       });
     }
+    for (const result of [commandLimit, loopLimit]) {
+      expect(result).toMatchObject({
+        exitCode: 126,
+        stdout: "",
+      });
+    }
+  });
+
+  test("caps aggregate reads and overlay writes for one request", async () => {
+    await Promise.all([
+      writeFile(join(servedRoot, "a.txt"), "12345678"),
+      writeFile(join(servedRoot, "b.txt"), "abcdefgh"),
+    ]);
+    const shell = await makeShell({
+      maxFileReadBytes: 8,
+      maxOverlayBytes: 8,
+    });
+
+    const [readError, overlayError] = await Promise.all([
+      Effect.runPromise(Effect.flip(shell.execute("sha256sum a.txt b.txt"))),
+      Effect.runPromise(
+        Effect.flip(
+          shell.execute(
+            "printf 12345678 > first.txt; printf abcdefgh > second.txt"
+          )
+        )
+      ),
+    ]);
+
+    expect(readError).toMatchObject({
+      _tag: "ShellLimitExceededError",
+      limit: "file-read",
+    });
+    expect(overlayError).toMatchObject({
+      _tag: "ShellLimitExceededError",
+      limit: "overlay",
+    });
   });
 });

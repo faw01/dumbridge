@@ -29,6 +29,19 @@ afterEach(async () => {
 });
 
 describe("ServedRoot", () => {
+  test("canonicalizes an alias before exposing its path", async () => {
+    const alias = join(fixtureRoot, "alias");
+    await symlink(
+      servedPath,
+      alias,
+      process.platform === "win32" ? "junction" : "dir"
+    );
+
+    const root = await Effect.runPromise(ServedRoot.make(alias));
+
+    expect(root.path).toBe(await realpath(servedPath));
+  });
+
   test("keeps accepting live changes within the same directory", async () => {
     const root = await Effect.runPromise(ServedRoot.make(servedPath));
     await writeFile(join(servedPath, "uncommitted.txt"), "live\n");
