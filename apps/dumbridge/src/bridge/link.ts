@@ -1,3 +1,4 @@
+import { randomBytes, timingSafeEqual } from "node:crypto";
 import { Encoding, Result, Schema } from "effect";
 
 const bridgeLinkPrefix = "dumbridge1_";
@@ -68,13 +69,10 @@ export const redactBridgeLink = (_link: string): string =>
 export const capabilitiesEqual = (
   left: Capability,
   right: Capability
-): boolean => {
-  let difference = 0;
-  for (let index = 0; index < capabilityByteLength; index += 1) {
-    difference += Math.abs((left[index] ?? 0) - (right[index] ?? 0));
-  }
-  return difference === 0;
-};
+): boolean =>
+  left.byteLength === capabilityByteLength &&
+  right.byteLength === capabilityByteLength &&
+  timingSafeEqual(left, right);
 
 export const makeCapability = (
   bytes: Uint8Array
@@ -91,6 +89,14 @@ export const makeCapability = (
     );
   }
   return Result.succeed(decoded.success);
+};
+
+export const mintCapability = (): Capability => {
+  const capability = makeCapability(randomBytes(capabilityByteLength));
+  if (Result.isFailure(capability)) {
+    throw capability.failure;
+  }
+  return capability.success;
 };
 
 export const encodeCapability = (

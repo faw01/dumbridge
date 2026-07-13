@@ -4,6 +4,7 @@ import {
   capabilitiesEqual,
   encodeBridgeLink,
   makeCapability,
+  mintCapability,
   parseBridgeLink,
   redactBridgeLink,
 } from "../src/bridge/link";
@@ -11,6 +12,15 @@ import {
 const capabilityBytes = Uint8Array.from({ length: 32 }, (_, index) => index);
 
 describe("BridgeLink", () => {
+  test("mints a fresh 32-byte capability", () => {
+    const first = mintCapability();
+    const second = mintCapability();
+
+    expect(first).toHaveLength(32);
+    expect(second).toHaveLength(32);
+    expect(capabilitiesEqual(first, second)).toBe(false);
+  });
+
   test("rejects capabilities that are not exactly 32 bytes", () => {
     const short = makeCapability(new Uint8Array(31));
     const long = makeCapability(new Uint8Array(33));
