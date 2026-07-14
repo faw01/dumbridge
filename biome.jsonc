@@ -18,6 +18,15 @@
           }
         }
       }
+    },
+    {
+      // Fallow parses .fallowrc.json as JSONC; its constraints live in comments.
+      "includes": [".fallowrc.json"],
+      "json": {
+        "parser": {
+          "allowComments": true
+        }
+      }
     }
   ]
 }

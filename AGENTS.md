@@ -6,6 +6,8 @@ Keep the product surface to `serve`, `run`, `pull`, and the read-only informatio
 
 Commits use one-line conventional commits with a required scope, for example `feat(bridge): stream pull responses`. Do not add commit bodies, footers, or co-authors.
 
+CI gates pull requests with `fallow audit` over changed files; `.fallowrc.json` is the policy. Dead-code analysis stays in default mode because exports-for-tests is repo policy; production mode flags six test-consumed exports. Never run `fallow fix --production` — it would strip those exports and break the suite; preview any fix with `fallow fix --dry-run`. Semantic-mode duplication stays out of CI (noisy against Effect Schema boilerplate); run `fallow dupes --mode semantic` manually per release.
+
 ## Agent skills
 
 ### Issue tracker
