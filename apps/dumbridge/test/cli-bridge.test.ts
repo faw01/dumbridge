@@ -6,6 +6,8 @@ import { fileURLToPath } from "node:url";
 
 const cli = fileURLToPath(new URL("../src/cli.ts", import.meta.url));
 const bridgeKeyLine = /^DUMBRIDGE_KEY=(\S+)\r?\n/m;
+const keyExpiryLine =
+  /^The key expires at \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z\./m;
 const proxyNames = new Set([
   "ALL_PROXY",
   "HTTPS_PROXY",
@@ -119,9 +121,7 @@ describe("dumbridge CLI bridge", () => {
       expect(startup.output.split("\n", 1)[0]).toBe(
         "Serving the selected directory read-only until Ctrl-C."
       );
-      expect(startup.output).toMatch(
-        /^The key expires at \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z\./m
-      );
+      expect(startup.output).toMatch(keyExpiryLine);
       expect(startup.output.match(/^DUMBRIDGE_KEY=/gm)).toHaveLength(1);
       expect(startup.output).not.toContain(servedRoot);
       expect(startup.output).not.toContain("counterfeit");
