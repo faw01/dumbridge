@@ -144,6 +144,12 @@ describe("dumbridge CLI", () => {
         path: "large.bin",
       })
     ).toBe("The remote pull exceeded a safety limit.");
+    expect(
+      publicErrorMessage({
+        _tag: "ServedRootChangedError",
+        message: "served root changed after bridge start",
+      })
+    ).toBe("The served root changed during the pull.");
     expect(publicErrorMessage({ message: "   " })).toBe("dumbridge failed.");
   });
 });

@@ -1,5 +1,9 @@
 import type { BridgeSession } from "@dumbridge/bridge-transport";
-import { type PullSource, preparePull } from "@dumbridge/pull-transfer";
+import {
+  type PullErrorTag,
+  type PullSource,
+  preparePull,
+} from "@dumbridge/pull-transfer";
 import {
   type SafeShell,
   ShellLimitExceededError,
@@ -146,34 +150,31 @@ const sendPullSource = (
     yield* session.finish;
   });
 
+// Client-side-only tags (destination exists, remote limit) cannot occur in
+// the server's pull path; they are mapped anyway so the compiler proves every
+// pull error owns a bounded wire code.
+const pullFailureCodes: Record<PullErrorTag, PullFailureCode> = {
+  PullDestinationExistsError: "io",
+  PullIntegrityError: "source-changed",
+  PullIOError: "io",
+  PullLimitError: "limit",
+  PullNotFoundError: "not-found",
+  PullPathError: "invalid-path",
+  PullRemoteLimitError: "limit",
+  PullSourceChangedError: "source-changed",
+  PullSymlinkError: "symlink",
+  ServedRootChangedError: "source-changed",
+};
+
 const pullFailureCode = (error: unknown): PullFailureCode | undefined => {
   if (typeof error !== "object" || error === null || !("_tag" in error)) {
     return;
   }
 
   const tag: unknown = error._tag;
-  if (typeof tag !== "string") {
-    return;
-  }
-
-  switch (tag) {
-    case "PullPathError":
-      return "invalid-path";
-    case "PullNotFoundError":
-      return "not-found";
-    case "PullSymlinkError":
-      return "symlink";
-    case "PullLimitError":
-      return "limit";
-    case "PullIntegrityError":
-    case "PullSourceChangedError":
-    case "ServedRootChangedError":
-      return "source-changed";
-    case "PullIOError":
-      return "io";
-    default:
-      return;
-  }
+  return typeof tag === "string" && Object.hasOwn(pullFailureCodes, tag)
+    ? pullFailureCodes[tag as PullErrorTag]
+    : undefined;
 };
 
 const sendPullFailure = (session: BridgeSession, code: PullFailureCode) =>

@@ -4,6 +4,7 @@ import {
   type IrohTransportOptions,
   makeIrohTransport,
 } from "@dumbridge/bridge-transport/iroh";
+import type { PullErrorTag } from "@dumbridge/pull-transfer";
 import { BunRuntime, BunServices } from "@effect/platform-bun";
 import { Config, Effect, Option, pipe, Schema } from "effect";
 import { Argument, Command } from "effect/unstable/cli";
@@ -145,7 +146,7 @@ const runCli = Command.runWith(command, {
   version: packageJson.version,
 });
 
-const pullErrorMessages: Readonly<Record<string, string>> = {
+const pullErrorMessages = {
   PullDestinationExistsError: "The pull destination already exists.",
   PullIntegrityError: "The pulled data failed integrity verification.",
   PullIOError: "The pull could not be completed.",
@@ -155,13 +156,14 @@ const pullErrorMessages: Readonly<Record<string, string>> = {
   PullRemoteLimitError: "The remote pull exceeded a safety limit.",
   PullSourceChangedError: "The remote source changed during the pull.",
   PullSymlinkError: "Symlinks cannot be pulled.",
-};
+  ServedRootChangedError: "The served root changed during the pull.",
+} satisfies Record<PullErrorTag, string>;
 
 export const publicErrorMessage = (error: unknown): string => {
   if (typeof error === "object" && error !== null && "_tag" in error) {
-    const pullMessage = pullErrorMessages[String(error._tag)];
-    if (pullMessage !== undefined) {
-      return pullMessage;
+    const tag = String(error._tag);
+    if (Object.hasOwn(pullErrorMessages, tag)) {
+      return pullErrorMessages[tag as PullErrorTag];
     }
   }
   if (
