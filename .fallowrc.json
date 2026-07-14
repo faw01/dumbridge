@@ -1,9 +1,5 @@
 {
   "$schema": "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json",
-  // dist/cli.js externalizes these packages, so apps/dumbridge must declare
-  // them for the published artifact while only bundled workspace packages
-  // import them. Without this, unused-dependency flags the deliberate listing.
-  "ignoreDependencies": ["@number0/iroh", "just-bash"],
   "rules": {
     "unresolved-imports": "error",
     "unlisted-dependencies": "error",
@@ -35,5 +31,17 @@
     // Inherited findings stay visible in reports; only findings introduced
     // by the pull request gate the merge.
     "gate": "new-only"
-  }
+  },
+  "overrides": [
+    {
+      // dist/cli.js externalizes @number0/iroh and just-bash, so apps/dumbridge
+      // declares them for the published artifact while only bundled workspace
+      // packages import them. Scoped to this manifest so unused- and
+      // unlisted-dependency detection stays fully active everywhere else.
+      "files": ["apps/dumbridge/package.json"],
+      "rules": {
+        "unused-dependencies": "warn"
+      }
+    }
+  ]
 }
