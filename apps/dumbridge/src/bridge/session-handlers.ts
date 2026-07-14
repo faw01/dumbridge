@@ -4,16 +4,8 @@ import {
   type PullSource,
   preparePull,
 } from "@dumbridge/pull-transfer";
-import {
-  type SafeShell,
-  ShellLimitExceededError,
-  type ShellResult,
-} from "@dumbridge/safe-shell";
-import {
-  type ServedRoot,
-  ServedRootChangedError,
-  ServedRootSourceChangedError,
-} from "@dumbridge/served-root";
+import type { SafeShell, ShellResult } from "@dumbridge/safe-shell";
+import type { ServedRoot } from "@dumbridge/served-root";
 import {
   encodeFrame,
   FrameTooLargeError,
@@ -69,21 +61,17 @@ const failedShellResult = (message: string): CompletedShellResult => ({
   truncated: true,
 });
 
+// The served root errors stay in the error channel so the session terminates
+// without a response; inference proves the pass-through.
 const executeShell = (shell: SafeShell, script: string) =>
   shell.execute(script).pipe(
     Effect.map((result) => ({ ...result, truncated: false })),
-    Effect.catch((error) =>
-      error instanceof ServedRootChangedError ||
-      error instanceof ServedRootSourceChangedError
-        ? Effect.fail(error)
-        : Effect.succeed(
-            failedShellResult(
-              error instanceof ShellLimitExceededError
-                ? error.message
-                : "remote read shell failed"
-            )
-          )
-    )
+    Effect.catchTags({
+      ShellExecutionError: () =>
+        Effect.succeed(failedShellResult("remote read shell failed")),
+      ShellLimitExceededError: (error) =>
+        Effect.succeed(failedShellResult(error.message)),
+    })
   );
 
 export const handleRun = (
