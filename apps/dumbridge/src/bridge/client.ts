@@ -12,7 +12,6 @@ import {
   materializePull,
   type PullError,
   type PullFileEntry,
-  PullPathError,
   type PullResult,
   resolvePullDestination,
 } from "@dumbridge/pull-transfer";
@@ -221,17 +220,9 @@ export const pullRemote = Effect.fn("BridgeClient.pull")(
     retryConnect(() =>
       Effect.scoped(
         Effect.gen(function* () {
-          const destination = yield* Effect.try({
-            catch: (cause) =>
-              cause instanceof PullPathError
-                ? cause
-                : new PullPathError({
-                    path: options.remotePath,
-                    reason: "path could not be validated",
-                  }),
-            try: () =>
-              resolvePullDestination(options.remotePath, options.destination),
-          });
+          const destination = yield* Effect.fromResult(
+            resolvePullDestination(options.remotePath, options.destination)
+          );
           const { capability, session } = yield* openSession(
             options.transport,
             options.link

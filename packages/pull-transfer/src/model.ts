@@ -86,20 +86,30 @@ export const pathParts = (path: string): readonly string[] => {
 export const resolvePullDestination = (
   remotePath: string,
   destination?: string
-): string => {
-  const parts = pathParts(remotePath);
+): Result.Result<string, PullPathError> => {
+  const parsed = parseRemotePath(remotePath);
+  if (Result.isFailure(parsed)) {
+    return Result.fail(
+      new PullPathError({
+        path: remotePath,
+        reason: "path must be canonical and relative",
+      })
+    );
+  }
   if (destination !== undefined) {
-    return destination;
+    return Result.succeed(destination);
   }
 
-  const name = parts.at(-1);
-  if (!name) {
-    throw new PullPathError({
-      path: remotePath,
-      reason: "path has no file name",
-    });
+  const name = parsed.success.segments.at(-1);
+  if (name === undefined) {
+    return Result.fail(
+      new PullPathError({
+        path: remotePath,
+        reason: "path has no file name",
+      })
+    );
   }
-  return `./${name}`;
+  return Result.succeed(`./${name}`);
 };
 
 export const fileLimit = (size: number, limits: PullLimits) => {

@@ -36,14 +36,8 @@ const candidates: readonly (readonly [string, boolean])[] = [
   [`folder/${"a".repeat(4096)}`, false],
 ];
 
-const receiverAcceptsPath = (remotePath: string) => {
-  try {
-    resolvePullDestination(remotePath, "ignored-destination");
-    return true;
-  } catch {
-    return false;
-  }
-};
+const receiverAcceptsPath = (remotePath: string) =>
+  Result.isSuccess(resolvePullDestination(remotePath, "ignored-destination"));
 
 describe("remote path alignment", () => {
   test("wire and receiver accept and reject identical pull paths", () => {
