@@ -3,6 +3,12 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  encodeBridgeKey,
+  mintCapability,
+  parseBridgeKey,
+} from "@dumbridge/bridge-key";
+import { Effect, Result } from "effect";
 
 const cli = fileURLToPath(new URL("../src/cli.ts", import.meta.url));
 const bridgeKeyLine = /^DUMBRIDGE_KEY=(\S+)\r?\n/m;
@@ -18,29 +24,40 @@ const proxyNames = new Set([
 let fixture = "";
 let servedRoot = "";
 let stateDirectory = "";
+// Only pids observed in a record written by a real `serve --detach` may be
+// killed in teardown; a pid from a hand-written fixture record could belong
+// to an unrelated host process.
+let spawnedServePids: number[] = [];
 
 beforeEach(async () => {
   fixture = await mkdtemp(join(tmpdir(), "dumbridge-detach-cli-"));
   servedRoot = join(fixture, "served");
   stateDirectory = join(fixture, "state");
+  spawnedServePids = [];
   await mkdir(servedRoot, { recursive: true });
 });
 
+// Tests must never leave an orphaned detached serve behind, even on failure.
 afterEach(async () => {
-  await killRecordedServe();
+  for (const pid of spawnedServePids) {
+    try {
+      process.kill(pid, "SIGKILL");
+    } catch {
+      // Already stopped.
+    }
+  }
   await rm(fixture, { force: true, recursive: true });
 });
 
-// Tests must never leave an orphaned detached serve behind, even on failure.
-const killRecordedServe = async () => {
-  try {
-    const record = JSON.parse(
-      await readFile(join(stateDirectory, "detached-serve.json"), "utf8")
-    );
-    process.kill(record.pid, "SIGKILL");
-  } catch {
-    // No record or the process is already gone.
-  }
+const readRecord = async () =>
+  JSON.parse(
+    await readFile(join(stateDirectory, "detached-serve.json"), "utf8")
+  );
+
+const trackSpawnedServe = async () => {
+  const record = await readRecord();
+  spawnedServePids.push(record.pid);
+  return record;
 };
 
 const cleanEnvironment = (extra: Record<string, string> = {}) => {
@@ -171,7 +188,7 @@ describe.skipIf(process.platform === "win32")(
         "utf8"
       );
       expect(recordText).not.toContain(key);
-      const record = JSON.parse(recordText);
+      const record = await trackSpawnedServe();
       expect(isAlive(record.pid)).toBe(true);
 
       await writeFile(join(servedRoot, "uncommitted.txt"), "not in git\n");
@@ -198,6 +215,42 @@ describe.skipIf(process.platform === "win32")(
       await expect(
         readFile(join(stateDirectory, "detached-serve.json"), "utf8")
       ).rejects.toThrow();
+    }, 60_000);
+
+    test("survives a session warning logged after its pipes close", async () => {
+      const detach = await runCli(["serve", "--detach", servedRoot]);
+      expect(detach.exitCode).toBe(0);
+      const key = bridgeKeyLine.exec(detach.stdout)?.[1];
+      if (key === undefined) {
+        throw new Error("serve --detach did not print a bridge key");
+      }
+      const record = await trackSpawnedServe();
+      await writeFile(join(servedRoot, "note.txt"), "alive\n");
+
+      // A same-locator key with a wrong capability forces the child's
+      // session-failure warning while its startup pipes are already destroyed;
+      // the write must not kill the detached serve.
+      const parsed = Effect.runSync(Effect.fromResult(parseBridgeKey(key)));
+      const forged = encodeBridgeKey({
+        capability: mintCapability(),
+        expiresAt: parsed.expiresAt,
+        locator: parsed.locator,
+        transport: "iroh",
+      });
+      if (Result.isFailure(forged)) {
+        throw new Error("could not build the wrong-capability key");
+      }
+      const denied = await runCli(["run", "cat note.txt"], {
+        DUMBRIDGE_KEY: forged.success,
+      });
+      expect(denied.exitCode).toBe(1);
+
+      expect(isAlive(record.pid)).toBe(true);
+      const run = await runCli(["run", "cat note.txt"], { DUMBRIDGE_KEY: key });
+      expect(run).toEqual({ exitCode: 0, stderr: "", stdout: "alive\n" });
+
+      const stop = await runCli(["serve", "--stop"]);
+      expect(stop.exitCode).toBe(0);
     }, 60_000);
 
     test("reports a failed startup instead of recording it", async () => {
