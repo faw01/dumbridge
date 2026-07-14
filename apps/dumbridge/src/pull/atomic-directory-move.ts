@@ -20,34 +20,67 @@ const windowsPath = (path: string) => {
   return Buffer.from(`${path}\0`, "utf16le");
 };
 
-const linuxMove = (): NativeMove => {
-  const usesGlibc = Boolean(
-    (
-      process.report.getReport() as unknown as {
-        readonly header: { readonly glibcVersionRuntime?: unknown };
-      }
-    ).header.glibcVersionRuntime
-  );
-  const library = dlopen(usesGlibc ? "libc.so.6" : "/usr/lib/libc.so", {
-    renameat2: {
-      args: [FFIType.i32, FFIType.ptr, FFIType.i32, FFIType.ptr, FFIType.u32],
-      returns: FFIType.i32,
-    },
-  });
+const muslArchitecture = (architecture: string) => {
+  switch (architecture) {
+    case "arm64":
+      return "aarch64";
+    case "x64":
+      return "x86_64";
+    default:
+      return;
+  }
+};
 
-  return (source, destination) => {
-    const sourcePath = posixPath(source);
-    const destinationPath = posixPath(destination);
-    return (
-      library.symbols.renameat2(
-        atWorkingDirectory,
-        ptr(sourcePath),
-        atWorkingDirectory,
-        ptr(destinationPath),
-        renameNoReplace
-      ) === 0
-    );
-  };
+export const linuxLibcCandidates = (architecture = process.arch) => {
+  const musl = muslArchitecture(architecture);
+  return [
+    "libc.so.6",
+    ...(musl === undefined
+      ? []
+      : [`/lib/libc.musl-${musl}.so.1`, `/lib/ld-musl-${musl}.so.1`]),
+  ];
+};
+
+const linuxMove = (): NativeMove => {
+  let loadFailure: unknown;
+
+  for (const candidate of linuxLibcCandidates()) {
+    try {
+      const library = dlopen(candidate, {
+        renameat2: {
+          args: [
+            FFIType.i32,
+            FFIType.ptr,
+            FFIType.i32,
+            FFIType.ptr,
+            FFIType.u32,
+          ],
+          returns: FFIType.i32,
+        },
+      });
+
+      return (source, destination) => {
+        const sourcePath = posixPath(source);
+        const destinationPath = posixPath(destination);
+        return (
+          library.symbols.renameat2(
+            atWorkingDirectory,
+            ptr(sourcePath),
+            atWorkingDirectory,
+            ptr(destinationPath),
+            renameNoReplace
+          ) === 0
+        );
+      };
+    } catch (cause) {
+      loadFailure = cause;
+    }
+  }
+
+  throw new Error(
+    `atomic directory moves are unavailable for Linux ${process.arch}`,
+    { cause: loadFailure }
+  );
 };
 
 const macosMove = (): NativeMove => {

@@ -1,4 +1,5 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
+import { promises as hostFileSystem } from "node:fs";
 import {
   lstat,
   mkdir,
@@ -10,7 +11,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { Effect, Fiber, Stream } from "effect";
 import {
   materializePull,
@@ -397,6 +398,32 @@ describe("pull transfer", () => {
       expect(await readdir(workspace)).toEqual([]);
     }));
 
+  test("rejects reader chunks above the receiver limit", () =>
+    withFixture(async ({ root, workspace }) => {
+      const bytes = new Uint8Array([0, 1, 2, 3, 4, 5, 6, 7]);
+      await writeFile(join(root, "large-frame.bin"), bytes);
+      const source = await Effect.runPromise(
+        preparePull({ remotePath: "large-frame.bin", servedRoot: root })
+      );
+
+      const error = await collectError(
+        materializePull({
+          destination: join(workspace, "large-frame.bin"),
+          limits: { chunkBytes: 4 },
+          manifest: source.manifest,
+          read: () => oneChunk(bytes),
+        })
+      );
+
+      expect(error).toMatchObject({
+        _tag: "PullLimitError",
+        limit: "chunk bytes",
+        maximum: 4,
+        observed: 8,
+      });
+      expect(await readdir(workspace)).toEqual([]);
+    }));
+
   test("removes new parent directories after a reader failure", () =>
     withFixture(async ({ root, workspace }) => {
       await writeFile(join(root, "broken.txt"), "broken");
@@ -585,6 +612,48 @@ describe("pull transfer", () => {
       expect((await readdir(destination)).sort()).toEqual(["a.txt", "b.txt"]);
       expect(await readFile(join(destination, "a.txt"), "utf8")).toBe("alpha");
       expect(await readFile(join(destination, "b.txt"), "utf8")).toBe("beta");
+    }));
+
+  test("keeps a published pull successful when staging cleanup fails", () =>
+    withFixture(async ({ root, workspace }) => {
+      await writeFile(join(root, "published.txt"), "published");
+      const source = await Effect.runPromise(
+        preparePull({ remotePath: "published.txt", servedRoot: root })
+      );
+      const destination = join(workspace, "published.txt");
+      const remove = hostFileSystem.rm;
+      const removeSpy = spyOn(hostFileSystem, "rm");
+      removeSpy.mockImplementation(async (path, options) => {
+        if (
+          basename(String(path)).startsWith(".dumbridge-pull-") &&
+          (await pathExists(destination))
+        ) {
+          throw Object.assign(new Error("staging cleanup failed"), {
+            code: "EACCES",
+          });
+        }
+        return remove(path, options);
+      });
+
+      try {
+        const result = await Effect.runPromise(
+          materializePull({
+            destination,
+            manifest: source.manifest,
+            read: source.read,
+          })
+        );
+
+        expect(result).toEqual({ bytes: 9, files: 1 });
+        expect(await readFile(destination, "utf8")).toBe("published");
+        expect(
+          (await readdir(workspace)).some((name) =>
+            name.startsWith(".dumbridge-pull-")
+          )
+        ).toBe(true);
+      } finally {
+        removeSpy.mockRestore();
+      }
     }));
 
   test("enforces manifest entry and byte limits", () =>

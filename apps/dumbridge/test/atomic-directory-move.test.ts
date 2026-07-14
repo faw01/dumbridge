@@ -10,7 +10,10 @@ import {
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { moveDirectoryNoReplace } from "../src/pull/atomic-directory-move";
+import {
+  linuxLibcCandidates,
+  moveDirectoryNoReplace,
+} from "../src/pull/atomic-directory-move";
 
 const withFixture = async <A>(use: (root: string) => Promise<A>) => {
   const root = await mkdtemp(join(tmpdir(), "dumbridge-atomic-move-test-"));
@@ -39,6 +42,20 @@ const pathExists = async (path: string) => {
 };
 
 describe("atomic directory move", () => {
+  test("discovers glibc and supported musl library names", () => {
+    expect(linuxLibcCandidates("x64")).toEqual([
+      "libc.so.6",
+      "/lib/libc.musl-x86_64.so.1",
+      "/lib/ld-musl-x86_64.so.1",
+    ]);
+    expect(linuxLibcCandidates("arm64")).toEqual([
+      "libc.so.6",
+      "/lib/libc.musl-aarch64.so.1",
+      "/lib/ld-musl-aarch64.so.1",
+    ]);
+    expect(linuxLibcCandidates("riscv64")).toEqual(["libc.so.6"]);
+  });
+
   test("moves a staged directory when the destination is absent", () =>
     withFixture(async (root) => {
       const source = join(root, "stage");

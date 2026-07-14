@@ -1,5 +1,10 @@
 import { createHash } from "node:crypto";
-import { constants, type Dirent, type Stats } from "node:fs";
+import {
+  constants,
+  type Dirent,
+  promises as hostFileSystem,
+  type Stats,
+} from "node:fs";
 import {
   link,
   lstat,
@@ -8,7 +13,6 @@ import {
   open,
   opendir,
   realpath,
-  rm,
   rmdir,
 } from "node:fs/promises";
 import { dirname, join, posix, relative, resolve, sep, win32 } from "node:path";
@@ -902,6 +906,7 @@ const writeChunk = (
 const writeEntry = (
   target: string,
   entry: PullFileEntry,
+  limits: PullLimits,
   read: PullRead,
   signal: AbortSignal
 ): Effect.Effect<void, PullError> =>
@@ -928,6 +933,13 @@ const writeEntry = (
                 actual: typeof chunk,
                 expected: "Uint8Array",
                 path: entry.path,
+              });
+            }
+            if (chunk.byteLength > limits.chunkBytes) {
+              return new PullLimitError({
+                limit: "chunk bytes",
+                maximum: limits.chunkBytes,
+                observed: chunk.byteLength,
               });
             }
             bytes += chunk.byteLength;
@@ -1009,6 +1021,7 @@ const commitDestination = (
 
 const populateStage = (options: {
   readonly destination: string;
+  readonly limits: PullLimits;
   readonly manifest: PullManifest;
   readonly read: PullRead;
   readonly signal: AbortSignal;
@@ -1036,7 +1049,13 @@ const populateStage = (options: {
         yield* fsEffect("create staged parent", entry.path, () =>
           mkdir(dirname(target), { recursive: true })
         );
-        yield* writeEntry(target, entry, options.read, options.signal);
+        yield* writeEntry(
+          target,
+          entry,
+          options.limits,
+          options.read,
+          options.signal
+        );
         files += 1;
       }
     }
@@ -1089,6 +1108,7 @@ const materializePullEffect = (options: {
               ({ signal }) =>
                 populateStage({
                   destination,
+                  limits,
                   manifest,
                   read: options.read,
                   signal,
@@ -1100,10 +1120,14 @@ const materializePullEffect = (options: {
                 })
             );
           },
-          (stage) =>
-            fsEffect("remove pull staging directory", destination, () =>
-              rm(stage, { force: true, recursive: true })
-            )
+          (stage, exit) => {
+            const cleanup = fsEffect(
+              "remove pull staging directory",
+              destination,
+              () => hostFileSystem.rm(stage, { force: true, recursive: true })
+            );
+            return Exit.isSuccess(exit) ? cleanup.pipe(Effect.ignore) : cleanup;
+          }
         ),
       (createdParents, exit) =>
         Exit.isSuccess(exit)
