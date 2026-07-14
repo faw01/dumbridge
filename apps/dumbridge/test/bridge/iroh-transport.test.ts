@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { fileURLToPath } from "node:url";
 import { EndpointAddr, EndpointId } from "@number0/iroh";
 import { Effect, Fiber, Option } from "effect";
+import { TestClock } from "effect/testing";
 import {
   configureIrohProxy,
   makeIrohTransport,
@@ -480,6 +481,47 @@ describe("Iroh bridge transport", () => {
           yield* client.finish;
 
           return yield* Fiber.join(serverFiber);
+        })
+      )
+    );
+
+    expect(received).toEqual(payload);
+  });
+
+  test("keeps a quiet default session open beyond thirty seconds", async () => {
+    const payload = Uint8Array.of(7, 8, 9);
+    const received = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const transport = makeIrohTransport({ reachability: "direct-only" });
+          const listener = yield* transport.listen;
+          const serverFiber = yield* listener.accept.pipe(Effect.forkScoped);
+          const client = yield* transport.connect(listener.locator);
+          yield* client.write(Uint8Array.of(1));
+          const server = yield* Fiber.join(serverFiber);
+          expect(Option.isSome(yield* server.read)).toBe(true);
+          yield* client.finish;
+
+          return yield* Effect.gen(function* () {
+            let readSettled = false;
+            const readFiber = yield* readAll(client).pipe(
+              Effect.ensuring(
+                Effect.sync(() => {
+                  readSettled = true;
+                })
+              ),
+              Effect.forkChild
+            );
+            yield* Effect.yieldNow;
+            yield* TestClock.adjust("31 seconds");
+            expect(readSettled).toBe(false);
+
+            yield* server.write(payload);
+            yield* server.finish;
+            return yield* Fiber.join(readFiber);
+          }).pipe(
+            Effect.provide(TestClock.layer({ warningDelay: "10 seconds" }))
+          );
         })
       )
     );

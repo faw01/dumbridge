@@ -1,9 +1,10 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { mkdir, mkdtemp, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type Duration, Effect, Fiber, Option, Result } from "effect";
 import { TestClock } from "effect/testing";
+import { Bash } from "just-bash";
 import { pullRemote, runRemote } from "../../src/bridge/client";
 import {
   encodeBridgeLink,
@@ -351,6 +352,78 @@ describe("bridge application supervision", () => {
     }
   });
 
+  test("honors configured run deadlines beyond thirty seconds", async () => {
+    const executionStarted = Promise.withResolvers<void>();
+    let executionWasAborted = false;
+    const execute = spyOn(Bash.prototype, "exec");
+    execute.mockImplementation((_script, options) => {
+      executionStarted.resolve();
+      return new Promise<never>((_resolve, reject) => {
+        const signal = options?.signal;
+        const abort = () => {
+          executionWasAborted = true;
+          reject(signal?.reason ?? new Error("execution aborted"));
+        };
+        if (signal?.aborted) {
+          abort();
+          return;
+        }
+        signal?.addEventListener("abort", abort, { once: true });
+      });
+    });
+
+    try {
+      const end = await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const accepts: BridgeListener["accept"][] = [];
+            const listener = listenerFrom(accepts);
+            const server = yield* openBridge({
+              deadlines: { run: "40 seconds" },
+              maxConcurrentSessions: 1,
+              root: fixture,
+              transport: listenerTransport(listener),
+            });
+            const request = requestFor(server.link, {
+              script: "cat note.txt",
+              type: "run",
+            });
+            const stalled = scriptedSession({ reads: [request] });
+            accepts.push(
+              Effect.succeed(stalled.session),
+              Effect.fail(
+                new BridgeListenerClosedError({ message: "listener closed" })
+              )
+            );
+            const fiber = yield* server.serve.pipe(
+              Effect.flip,
+              Effect.forkChild
+            );
+
+            yield* Effect.promise(() => executionStarted.promise);
+            yield* TestClock.adjust("31 seconds");
+            expect(stalled.state.writes).toHaveLength(0);
+            expect(stalled.state.finishCalls).toBe(0);
+            expect(stalled.state.closeCalls).toBe(0);
+            expect(executionWasAborted).toBe(false);
+
+            yield* TestClock.adjust("9 seconds");
+            const result = yield* Fiber.join(fiber);
+            expect(stalled.state.writes).toHaveLength(0);
+            expect(stalled.state.finishCalls).toBe(0);
+            expect(stalled.state.closeCalls).toBe(1);
+            expect(executionWasAborted).toBe(true);
+            return result;
+          })
+        ).pipe(Effect.provide(TestClock.layer({ warningDelay: "10 seconds" })))
+      );
+
+      expect(end).toBeInstanceOf(BridgeListenerClosedError);
+    } finally {
+      execute.mockRestore();
+    }
+  });
+
   test("interrupts and closes a pull that exceeds its total deadline", async () => {
     const accepts: BridgeListener["accept"][] = [];
     const listener = listenerFrom(accepts);
@@ -451,6 +524,58 @@ describe("bridge application supervision", () => {
     });
     expect(clientSession.state.closeCalls).toBe(1);
   });
+
+  test("returns a limit before an oversized pull manifest", async () => {
+    const wide = join(fixture, "wide");
+    await mkdir(wide);
+    const fileCount = 4096;
+    const batchSize = 128;
+    for (let start = 0; start < fileCount; start += batchSize) {
+      const end = Math.min(start + batchSize, fileCount);
+      // biome-ignore lint/performance/noAwaitInLoops: Batches avoid exhausting file descriptors.
+      await Promise.all(
+        Array.from({ length: end - start }, (_, offset) => {
+          const index = String(start + offset).padStart(4, "0");
+          const name = `${index}-${"x".repeat(145)}`;
+          return writeFile(join(wide, name), "");
+        })
+      );
+    }
+
+    const accepts: BridgeListener["accept"][] = [];
+    const listener = listenerFrom(accepts);
+    const server = await Effect.runPromise(
+      Effect.scoped(
+        openBridge({
+          maxConcurrentSessions: 1,
+          root: fixture,
+          transport: listenerTransport(listener),
+        })
+      )
+    );
+    const request = requestFor(server.link, {
+      remotePath: "wide",
+      type: "pull",
+    });
+    const serverSession = scriptedSession({ reads: [request] });
+    accepts.push(
+      Effect.succeed(serverSession.session),
+      Effect.fail(new BridgeListenerClosedError({ message: "listener closed" }))
+    );
+
+    await Effect.runPromise(Effect.scoped(server.serve.pipe(Effect.flip)));
+
+    const decoder = success(makePullResponseSession());
+    const events: PullResponseEvent[] = [];
+    for (const write of serverSession.state.writes) {
+      events.push(...success(decoder.push(write)));
+    }
+    success(decoder.finish());
+    expect(events).toEqual([{ code: "limit", type: "pull-error" }]);
+    expect(serverSession.state.writes).toHaveLength(1);
+    expect(serverSession.state.finishCalls).toBe(1);
+    expect(serverSession.state.closeCalls).toBe(1);
+  }, 30_000);
 
   test("rejects an invalid remote path before opening a session", async () => {
     let connectCalls = 0;

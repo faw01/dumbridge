@@ -229,7 +229,7 @@ const LimitName = Schema.Literals([
 ]);
 type LimitName = typeof LimitName.Type;
 
-class FrameTooLargeError extends Schema.TaggedErrorClass<FrameTooLargeError>()(
+export class FrameTooLargeError extends Schema.TaggedErrorClass<FrameTooLargeError>()(
   "FrameTooLargeError",
   {
     declaredBytes: NonNegativeInt,

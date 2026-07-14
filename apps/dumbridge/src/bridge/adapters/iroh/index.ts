@@ -35,7 +35,7 @@ const chunkSize = 64 * 1024;
 const defaultDeadlines: BridgeDeadlines = {
   accept: "30 seconds",
   connect: "15 seconds",
-  io: "30 seconds",
+  io: "3 hours",
   listen: "15 seconds",
 };
 

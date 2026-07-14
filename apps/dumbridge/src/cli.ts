@@ -60,7 +60,7 @@ const serve = Command.make(
         });
         yield* write(
           process.stdout,
-          `Serving ${root} read-only until Ctrl-C.\nDUMBRIDGE_LINK=${server.link}\n`
+          `Serving the selected directory read-only until Ctrl-C.\nDUMBRIDGE_LINK=${server.link}\n`
         );
         yield* server.serve;
       })

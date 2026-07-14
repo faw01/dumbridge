@@ -113,7 +113,10 @@ interface ServedRootReadView {
   readonly begin: (signal: AbortSignal) => void;
   readonly fileSystem: IFileSystem;
   readonly limitExceeded: ServedRootLimit | undefined;
-  readonly servedRootFailure: ServedRootChangedError | undefined;
+  readonly sourceFailure:
+    | ServedRootChangedError
+    | ServedRootSourceChangedError
+    | undefined;
   readonly workingDirectory: "/workspace";
 }
 
@@ -578,8 +581,8 @@ export class ServedRoot {
         get limitExceeded() {
           return fileSystem.limitExceeded;
         },
-        get servedRootFailure() {
-          return fileSystem.servedRootFailure;
+        get sourceFailure() {
+          return fileSystem.sourceFailure;
         },
         workingDirectory: virtualRoot,
       } satisfies ServedRootReadView);
@@ -1037,7 +1040,10 @@ class PullView {
 
 class RequestBudgetOverlayFs extends OverlayFs {
   limitExceeded: ServedRootLimit | undefined;
-  servedRootFailure: ServedRootChangedError | undefined;
+  sourceFailure:
+    | ServedRootChangedError
+    | ServedRootSourceChangedError
+    | undefined;
 
   private activeHostReads = 0;
   private readonly chargedEntryPaths = new Set([virtualRoot]);
@@ -1083,8 +1089,8 @@ class RequestBudgetOverlayFs extends OverlayFs {
 
   private assertRequestOpen() {
     this.signal?.throwIfAborted();
-    if (this.servedRootFailure !== undefined) {
-      throw this.servedRootFailure;
+    if (this.sourceFailure !== undefined) {
+      throw this.sourceFailure;
     }
     if (this.limitExceeded !== undefined) {
       throw new ServedRootLimitSignal(this.limitExceeded);
@@ -1108,8 +1114,11 @@ class RequestBudgetOverlayFs extends OverlayFs {
         this.whileRequestOpen(operation)
       );
     } catch (cause) {
-      if (cause instanceof ServedRootChangedError) {
-        this.servedRootFailure = cause;
+      if (
+        cause instanceof ServedRootChangedError ||
+        cause instanceof ServedRootSourceChangedError
+      ) {
+        this.sourceFailure = cause;
       }
       throw cause;
     }
@@ -1125,8 +1134,11 @@ class RequestBudgetOverlayFs extends OverlayFs {
         return result;
       });
     } catch (cause) {
-      if (cause instanceof ServedRootChangedError) {
-        this.servedRootFailure = cause;
+      if (
+        cause instanceof ServedRootChangedError ||
+        cause instanceof ServedRootSourceChangedError
+      ) {
+        this.sourceFailure = cause;
       }
       throw cause;
     }
@@ -1322,9 +1334,9 @@ class RequestBudgetOverlayFs extends OverlayFs {
       }
 
       if (offset < reserved) {
-        this.releaseRead(reserved - offset);
-        reserved = offset;
-        return Buffer.from(content.subarray(0, offset));
+        throw new ServedRootSourceChangedError({
+          path: location.normalized,
+        });
       }
       return content;
     } catch (error) {
@@ -1334,6 +1346,9 @@ class RequestBudgetOverlayFs extends OverlayFs {
       this.signal?.throwIfAborted();
       if (reserved > 0) {
         this.releaseRead(reserved);
+      }
+      if (error instanceof ServedRootSourceChangedError) {
+        throw error;
       }
       const { code } = error as NodeJS.ErrnoException;
       const safeCode =

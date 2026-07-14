@@ -5,6 +5,7 @@ import {
   ServedRootChangedError,
   type ServedRootLimit,
   ServedRootLimitSignal,
+  ServedRootSourceChangedError,
 } from "../files/served-root";
 
 const safeCommands = [
@@ -165,7 +166,10 @@ const limitMessage = (limit: ShellLimit) =>
   `remote read shell ${limit} limit exceeded`;
 
 const executionError = (cause: unknown) => {
-  if (cause instanceof ServedRootChangedError) {
+  if (
+    cause instanceof ServedRootChangedError ||
+    cause instanceof ServedRootSourceChangedError
+  ) {
     return cause;
   }
   if (cause instanceof ServedRootLimitSignal) {
@@ -233,8 +237,8 @@ const makeExecute = (servedRoot: ServedRoot, limits: SafeShellLimits) =>
       });
       const result = yield* Effect.tryPromise({
         catch: (cause) => {
-          if (view.servedRootFailure !== undefined) {
-            return view.servedRootFailure;
+          if (view.sourceFailure !== undefined) {
+            return view.sourceFailure;
           }
           if (view.limitExceeded !== undefined) {
             return new ShellLimitExceededError({
@@ -250,12 +254,12 @@ const makeExecute = (servedRoot: ServedRoot, limits: SafeShellLimits) =>
           return {
             execution,
             filesystemLimit: view.limitExceeded,
-            servedRootFailure: view.servedRootFailure,
+            sourceFailure: view.sourceFailure,
           };
         },
       });
-      if (result.servedRootFailure !== undefined) {
-        return yield* result.servedRootFailure;
+      if (result.sourceFailure !== undefined) {
+        return yield* result.sourceFailure;
       }
       yield* servedRoot.verify();
       const shellResult: ShellResult = {

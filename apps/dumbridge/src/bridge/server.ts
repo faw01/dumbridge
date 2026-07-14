@@ -1,5 +1,9 @@
-import { type Duration, Effect, Option, Schema, Stream } from "effect";
-import { ServedRoot, ServedRootChangedError } from "../files/served-root";
+import { type Duration, Effect, Option, Result, Schema, Stream } from "effect";
+import {
+  ServedRoot,
+  ServedRootChangedError,
+  ServedRootSourceChangedError,
+} from "../files/served-root";
 import { type PullSource, preparePull } from "../pull/transfer";
 import {
   SafeShell,
@@ -21,6 +25,8 @@ import {
 } from "./transport";
 import {
   type BridgeRequest,
+  encodeFrame,
+  FrameTooLargeError,
   makeRequestSession,
   type PullFailureCode,
   type PullResponseEvent,
@@ -127,7 +133,8 @@ const executeShell = (shell: SafeShell, script: string) =>
   shell.execute(script).pipe(
     Effect.map((result) => ({ ...result, truncated: false })),
     Effect.catch((error) =>
-      error instanceof ServedRootChangedError
+      error instanceof ServedRootChangedError ||
+      error instanceof ServedRootSourceChangedError
         ? Effect.fail(error)
         : Effect.succeed(
             failedShellResult(
@@ -136,14 +143,7 @@ const executeShell = (shell: SafeShell, script: string) =>
                 : "remote read shell failed"
             )
           )
-    ),
-    Effect.timeoutOrElse({
-      duration: "30 seconds",
-      orElse: () =>
-        Effect.succeed(
-          failedShellResult("remote read shell deadline exceeded")
-        ),
-    })
+    )
   );
 
 const handleRun = (session: BridgeSession, shell: SafeShell, script: string) =>
@@ -159,12 +159,13 @@ const handleRun = (session: BridgeSession, shell: SafeShell, script: string) =>
     yield* session.finish;
   });
 
-const sendPullSource = (session: BridgeSession, source: PullSource) =>
+const sendPullSource = (
+  session: BridgeSession,
+  source: PullSource,
+  manifestFrame: Uint8Array
+) =>
   Effect.gen(function* () {
-    yield* sendFrame(session, {
-      manifest: source.manifest,
-      type: "manifest",
-    });
+    yield* session.write(manifestFrame);
 
     for (const entry of source.manifest.entries) {
       if (entry.kind === "directory") {
@@ -251,7 +252,16 @@ const handlePull = (
       remotePath,
       servedRoot: root,
     });
-    yield* sendPullSource(session, source);
+    const manifestFrame = encodeFrame({
+      manifest: source.manifest,
+      type: "manifest",
+    });
+    if (Result.isFailure(manifestFrame)) {
+      return yield* manifestFrame.failure instanceof FrameTooLargeError
+        ? sendPullFailure(session, "limit")
+        : Effect.fail(manifestFrame.failure);
+    }
+    yield* sendPullSource(session, source, manifestFrame.success);
   }).pipe(
     Effect.catch((error) => {
       const code = pullFailureCode(error);
@@ -260,6 +270,11 @@ const handlePull = (
         : sendPullFailure(session, code);
     })
   );
+
+type RequestHandlerError =
+  | Effect.Error<ReturnType<typeof handlePull>>
+  | Effect.Error<ReturnType<typeof handleRun>>
+  | BridgeSessionError;
 
 const handleSession = (
   session: BridgeSession,
@@ -273,14 +288,19 @@ const handleSession = (
     deadlines.request,
     readRequest(session, capability)
   ).pipe(
-    Effect.flatMap((request) =>
-      withSessionDeadline(
-        request.type,
-        request.type === "run" ? deadlines.run : deadlines.pull,
+    Effect.flatMap(
+      (request): Effect.Effect<void, RequestHandlerError> =>
         request.type === "run"
-          ? handleRun(session, shell, request.script)
-          : handlePull(session, root, request.remotePath)
-      )
+          ? withSessionDeadline(
+              "run",
+              deadlines.run,
+              handleRun(session, shell, request.script)
+            )
+          : withSessionDeadline(
+              "pull",
+              deadlines.pull,
+              handlePull(session, root, request.remotePath)
+            )
     )
   );
 

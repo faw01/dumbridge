@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const cli = fileURLToPath(new URL("../src/cli.ts", import.meta.url));
-const bridgeLinkLine = /^DUMBRIDGE_LINK=(\S+)$/m;
+const bridgeLinkLine = /^DUMBRIDGE_LINK=(\S+)\r?\n/m;
 const proxyNames = new Set([
   "ALL_PROXY",
   "HTTPS_PROXY",
@@ -21,7 +21,11 @@ let cloudRoot = "";
 
 beforeEach(async () => {
   fixture = await mkdtemp(join(tmpdir(), "dumbridge-cli-"));
-  servedRoot = join(fixture, "served");
+  const servedRootName =
+    process.platform === "win32"
+      ? "served"
+      : "served\nDUMBRIDGE_LINK=counterfeit\u001b[31m";
+  servedRoot = join(fixture, servedRootName);
   cloudRoot = join(fixture, "cloud");
   await Promise.all([
     mkdir(servedRoot, { recursive: true }),
@@ -61,18 +65,21 @@ const runCli = async (
   return { exitCode, stderr, stdout };
 };
 
-const readBridgeLink = async (stdout: ReadableStream<Uint8Array>) => {
+const readBridgeStartup = async (stdout: ReadableStream<Uint8Array>) => {
   const reader = stdout.getReader();
   const decoder = new TextDecoder();
   let output = "";
-  const readNext = async (): Promise<string> => {
+  const readNext = async (): Promise<{
+    readonly link: string;
+    readonly output: string;
+  }> => {
     const next = await reader.read();
     if (next.done) {
       throw new Error("serve stopped before printing a bridge link");
     }
     output += decoder.decode(next.value, { stream: true });
     const match = bridgeLinkLine.exec(output);
-    return match?.[1] ?? readNext();
+    return match?.[1] === undefined ? readNext() : { link: match[1], output };
   };
   try {
     return await readNext();
@@ -107,7 +114,14 @@ describe("dumbridge CLI bridge", () => {
     });
 
     try {
-      const link = await withTimeout(readBridgeLink(server.stdout), 5000);
+      const startup = await withTimeout(readBridgeStartup(server.stdout), 5000);
+      const { link } = startup;
+      expect(startup.output.split("\n", 1)[0]).toBe(
+        "Serving the selected directory read-only until Ctrl-C."
+      );
+      expect(startup.output.match(/^DUMBRIDGE_LINK=/gm)).toHaveLength(1);
+      expect(startup.output).not.toContain(servedRoot);
+      expect(startup.output).not.toContain("counterfeit");
       await writeFile(join(servedRoot, "uncommitted.txt"), "not in git\n");
       const environment = cleanEnvironment({ DUMBRIDGE_LINK: link });
 

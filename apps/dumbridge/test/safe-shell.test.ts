@@ -206,6 +206,53 @@ describe("SafeShell", () => {
     expect(JSON.stringify(outcome)).not.toContain(outsideRoot);
   });
 
+  test("never returns partial content when a host file shrinks during a read", async () => {
+    const path = join(servedRoot, "changing.txt");
+    await writeFile(path, "inside secret\n");
+    const shell = await makeShell();
+    const originalOpen = hostFileSystem.open;
+    const open = spyOn(hostFileSystem, "open");
+    open.mockImplementation(async (...args) => {
+      const handle = await originalOpen(...args);
+      if (basename(String(args[0])) !== "changing.txt") {
+        return handle;
+      }
+      return new Proxy(handle, {
+        get(target, property) {
+          if (property === "read") {
+            return async (buffer: Uint8Array) => ({ buffer, bytesRead: 0 });
+          }
+          const value = Reflect.get(target, property, target);
+          return typeof value === "function" ? value.bind(target) : value;
+        },
+      });
+    });
+
+    try {
+      const outcome = await Effect.runPromise(
+        shell.execute("printf before; cat changing.txt; printf after")
+      ).then(
+        (result) => ({ result, type: "success" as const }),
+        (error: unknown) => ({ error, type: "failure" as const })
+      );
+
+      expect(outcome).toMatchObject({
+        error: {
+          _tag: "ServedRootSourceChangedError",
+          path: "/workspace/changing.txt",
+        },
+        type: "failure",
+      });
+      const serialized = JSON.stringify(outcome);
+      expect(serialized).not.toContain("before");
+      expect(serialized).not.toContain("after");
+      expect(serialized).not.toContain("inside secret");
+      expect(serialized).not.toContain(servedRoot);
+    } finally {
+      open.mockRestore();
+    }
+  });
+
   test("discards redirection, rm, and mv writes after each execution", async () => {
     await Promise.all([
       writeFile(join(servedRoot, "note.txt"), "host note\n"),
