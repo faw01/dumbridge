@@ -6,7 +6,7 @@ import {
 } from "@dumbridge/bridge-transport/iroh";
 import type { PullErrorTag } from "@dumbridge/pull-transfer";
 import { BunRuntime, BunServices } from "@effect/platform-bun";
-import { Config, Effect, Option, pipe, Schema } from "effect";
+import { Config, Effect, Option, pipe, Redacted, Schema } from "effect";
 import { Argument, Command } from "effect/unstable/cli";
 import skillGuide from "../../../skills/dumbridge/SKILL.md" with {
   type: "text",
@@ -19,7 +19,9 @@ export class CliError extends Schema.TaggedErrorClass<CliError>()("CliError", {
   message: Schema.String,
 }) {}
 
-const bridgeKey = Config.string("DUMBRIDGE_KEY").pipe(
+// The key embeds the bridge capability; Redacted keeps it out of any future
+// log or error interpolation, so it is unwrapped only at the request calls.
+const bridgeKey = Config.redacted("DUMBRIDGE_KEY").pipe(
   Effect.mapError(() => new CliError({ message: "DUMBRIDGE_KEY is not set." }))
 );
 
@@ -80,7 +82,7 @@ const run = Command.make(
   { script: Argument.string("script") },
   ({ script }) =>
     Effect.gen(function* () {
-      const link = yield* bridgeKey;
+      const link = Redacted.value(yield* bridgeKey);
       const result = yield* runRemote({
         link,
         script,
@@ -105,7 +107,7 @@ const pull = Command.make(
   },
   ({ destination, remotePath }) =>
     Effect.gen(function* () {
-      const link = yield* bridgeKey;
+      const link = Redacted.value(yield* bridgeKey);
       const request = {
         link,
         remotePath,
