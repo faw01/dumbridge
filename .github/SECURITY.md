@@ -2,6 +2,6 @@
 
 Only the latest commit on `main` receives security fixes.
 
-Use GitHub's private **Report a vulnerability** flow. Do not place exploit details, bridge links, capabilities, private paths, or secret contents in a public issue.
+This repository is private during the source-only prerelease. Authorized collaborators should contact the repository owner through an existing private channel. Before a public release, GitHub private vulnerability reporting must be enabled and this policy updated with that reporting link.
 
-Capability leakage, path or symlink escape, unauthorized reads, sandbox escape, and secret exposure are in scope. If private reporting is unavailable, contact the repository owner privately before sharing technical details.
+Capability leakage, path or symlink escape, unauthorized reads, sandbox escape, and secret exposure are in scope. Do not place exploit details, bridge links, capabilities, private paths, or secret contents in an issue.

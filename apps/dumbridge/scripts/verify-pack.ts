@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import packageJson from "../package.json" with { type: "json" };
@@ -14,8 +14,16 @@ interface PackManifest {
 const packageRoot = fileURLToPath(new URL("..", import.meta.url));
 const allowedPaths = ["LICENSE", "README.md", "dist/cli.js", "package.json"];
 const allowedPathSet = new Set(allowedPaths);
+const maxArchiveBytes = 2 * 1024 * 1024;
+const maxDistBytes = 5 * 1024 * 1024;
 const newlinePattern = /\r?\n/;
 const packedFilePattern = /^packed\s+\S+\s+(.+)$/;
+
+const assertWithinLimit = (label: string, bytes: number, limit: number) => {
+  if (bytes > limit) {
+    throw new Error(`${label} is ${bytes} bytes; limit is ${limit} bytes`);
+  }
+};
 
 const spawnChecked = (
   command: string[],
@@ -97,6 +105,8 @@ const verifyInstalledArchive = async () => {
       throw new Error("package build did not create exactly one tarball");
     }
     const archivePath = join(archiveDirectory, archives[0]);
+    const archive = await stat(archivePath);
+    assertWithinLimit("package archive", archive.size, maxArchiveBytes);
     const packageManagerEnv = {
       ...process.env,
       BUN_INSTALL_CACHE_DIR: cacheDirectory,
@@ -143,6 +153,9 @@ const verifyInstalledArchive = async () => {
 };
 
 const verifyPack = async () => {
+  const executable = await stat(join(packageRoot, "dist", "cli.js"));
+  assertWithinLimit("dist/cli.js", executable.size, maxDistBytes);
+
   const output = spawnChecked(
     ["bun", "pm", "pack", "--dry-run", "--ignore-scripts"],
     packageRoot

@@ -1,0 +1,41 @@
+diff --git a/iroh-js/index.d.ts b/iroh-js/index.d.ts
+--- a/iroh-js/index.d.ts
++++ b/iroh-js/index.d.ts
+@@ -145,6 +145,10 @@ export declare class EndpointBuilder {
+   alpns(alpns: Array<Array<number>>): void
+   /** Set the relay mode. */
+   relayMode(mode: RelayMode): void
++  /** Configure HTTP(S) proxying from standard proxy environment variables. */
++  proxyFromEnv(): void
++  /** Configure an explicit HTTP(S) proxy URL. */
++  proxyUrl(url: string): void
+   /** Set the address the endpoint binds to (`host:port`). */
+   bindAddr(addr: string): void
+   /** Bind the endpoint. */
+diff --git a/iroh-js/src/endpoint.rs b/iroh-js/src/endpoint.rs
+--- a/iroh-js/src/endpoint.rs
++++ b/iroh-js/src/endpoint.rs
+@@ -83,8 +83,22 @@ impl EndpointBuilder {
+     pub fn relay_mode(&self, mode: &RelayMode) {
+         let mode = mode.0.clone();
+         self.map(|b| b.relay_mode(mode));
+     }
+-
++
++    /// Configure HTTP(S) proxying from standard proxy environment variables.
++    #[napi]
++    pub fn proxy_from_env(&self) {
++        self.map(|b| b.proxy_from_env());
++    }
++
++    /// Configure an explicit HTTP(S) proxy URL.
++    #[napi]
++    pub fn proxy_url(&self, url: String) -> Result<()> {
++        let url = url::Url::parse(&url).map_err(anyhow::Error::from)?;
++        self.map(|b| b.proxy_url(url));
++        Ok(())
++    }
++
+     /// Set the address the endpoint binds to (`host:port`).
+     #[napi]
+     pub fn bind_addr(&self, addr: String) -> Result<()> {

@@ -29,6 +29,7 @@
     "check": "ultracite check src test scripts package.json tsconfig.json",
     "fix": "ultracite fix src test scripts package.json tsconfig.json",
     "pack:check": "bun scripts/verify-pack.ts",
+    "prepack": "bun run build && bun run pack:check",
     "test": "bun test",
     "typecheck": "tsc --noEmit"
   },

@@ -1,8 +1,10 @@
-# Runtime and CLI decision: Node, Bun, Effect, Iroh, and Just Bash
+# Initial runtime and CLI research: Node, Bun, Effect, Iroh, and Just Bash
 
 Date: 2026-07-14
 
-## Recommendation
+> **Superseded decision.** This document preserves the initial Node recommendation. The owner subsequently chose Bun as Dumbridge's published runtime with `@effect/platform-bun`. The [Bun and Iroh ADR](../adr/0002-use-bun-and-iroh.md) and [v1 design](../design/v1.md) are authoritative.
+
+## Initial recommendation
 
 Use this stack for Dumbridge v1:
 
