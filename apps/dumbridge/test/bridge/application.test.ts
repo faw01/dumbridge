@@ -62,7 +62,7 @@ const success = <A, E>(result: Result.Result<A, E>): A => {
   return result.success;
 };
 
-describe("Dumbridge application", () => {
+describe("dumbridge application", () => {
   test("discovers live files and pulls selected text, secrets, and binary data", async () => {
     const imageDestination = join(destinationRoot, "cat.jpg");
     const envDestination = join(destinationRoot, ".env.local");

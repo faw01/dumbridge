@@ -1,8 +1,8 @@
-# Dumbridge
+# dumbridge
 
-Dumbridge gives a disposable cloud coding agent temporary, live, read-only access to one local directory.
+dumbridge gives a disposable cloud coding agent temporary, live, read-only access to one local directory.
 
-Dumbridge currently requires Bun 1.3.14 or newer. Install Bun once, then run the package directly from npm.
+dumbridge currently requires Bun 1.3.14 or newer. Install Bun once, then run the package directly from npm.
 
 ```bash
 # On the computer that owns the files
@@ -25,7 +25,7 @@ The bridge link is a bearer secret. Anyone holding it while `serve` is running c
 
 ## Status
 
-Dumbridge is an early prerelease. The complete `serve` / `run` / `pull` flow works over direct Iroh connections and ordinary relay fallback. Proxy-only cloud agents still require the included Iroh binding patch to be built and published for each native platform; stock `@number0/iroh` does not expose that proxy configuration yet. See [the proxy patch](docs/patches/iroh-ffi-proxy.md) and [the release gates](docs/design/v1.md#release-gates).
+dumbridge is an early prerelease. The complete `serve` / `run` / `pull` flow works over direct Iroh connections and ordinary relay fallback. Proxy-only cloud agents still require the included Iroh binding patch to be built and published for each native platform; stock `@number0/iroh` does not expose that proxy configuration yet. See [the proxy patch](docs/patches/iroh-ffi-proxy.md) and [the release gates](docs/design/v1.md#release-gates).
 
 CI runs on GitHub-hosted macOS, Linux, and Windows runners. Exact CPU and libc support remains a native release gate.
 

@@ -1,4 +1,4 @@
 interface:
-  display_name: "Dumbridge"
+  display_name: "dumbridge"
   short_description: "Pull live local context into cloud agents"
   default_prompt: "Use $dumbridge to find, preview, and pull the local files needed for this task."

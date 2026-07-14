@@ -1,4 +1,4 @@
-# Dumbridge scaffolding research
+# dumbridge scaffolding research
 
 Research date: 2026-07-14
 
@@ -6,7 +6,7 @@ Research date: 2026-07-14
 
 ## Recommendation
 
-Dumbridge should begin as **one publishable TypeScript CLI package**, not a monorepo. Use Bun as the repository package manager and local task runner, but keep that choice separate from the runtime contract of the published CLI. If `npx dumbridge` must work on a clean cloud agent that has Node but not Bun, the shipped executable must retain a Node shebang and run on Node; using `bun install`, `bun test`, or `bun run` during development does not require shipping a Bun-only executable.
+dumbridge should begin as **one publishable TypeScript CLI package**, not a monorepo. Use Bun as the repository package manager and local task runner, but keep that choice separate from the runtime contract of the published CLI. If `npx dumbridge` must work on a clean cloud agent that has Node but not Bun, the shipped executable must retain a Node shebang and run on Node; using `bun install`, `bun test`, or `bun run` during development does not require shipping a Bun-only executable.
 
 Adopt the production hygiene from create-mf2-app selectively:
 
@@ -18,7 +18,7 @@ Adopt the production hygiene from create-mf2-app selectively:
 - CONTRIBUTING, SECURITY, issue/PR templates, Dependabot, an MIT license, and concise agent instructions.
 - npm trusted publishing through OIDC rather than a long-lived npm write token.
 
-Do **not** add Turborepo, workspaces, Husky, lint-staged, a documentation app, or the large mf2 skill/template tree yet. They do not deepen the interface of a single CLI and would make every contributor learn more configuration than Dumbridge currently needs.
+Do **not** add Turborepo, workspaces, Husky, lint-staged, a documentation app, or the large mf2 skill/template tree yet. They do not deepen the interface of a single CLI and would make every contributor learn more configuration than dumbridge currently needs.
 
 ## Reference repositories
 
@@ -38,7 +38,7 @@ Do **not** add Turborepo, workspaces, Husky, lint-staged, a documentation app, o
 | --- | --- |
 | [`faw01/mf2`](https://github.com/faw01/mf2) | Optional. It is the generated SaaS template output. Clone it only to compare what create-mf2-app emits; it does not add useful CLI/release machinery beyond the generator source. |
 | [`haydenbleasel/ultracite`](https://github.com/haydenbleasel/ultracite) | Use the released package and official setup docs. Its large source monorepo is not needed to configure one preset. |
-| [`vercel/turborepo`](https://github.com/vercel/turborepo) | Do not clone or install while Dumbridge is one package. |
+| [`vercel/turborepo`](https://github.com/vercel/turborepo) | Do not clone or install while dumbridge is one package. |
 | [`changesets/changesets`](https://github.com/changesets/changesets) and [`changesets/action`](https://github.com/changesets/action) | Use the published CLI/action and official documentation; their implementation source is not needed locally. |
 
 The existing networking reference set remains appropriate: `iroh`, `iroh-ffi`, `sendme`, and `dumbpipe` explain the transport and transfer layers, while these new references explain repository and CLI discipline.
@@ -58,9 +58,9 @@ Its [Changesets config](https://github.com/faw01/create-mf2-app/blob/main/.chang
 
 Three parts should **not** be copied verbatim:
 
-1. The root `apps/*` / `packages/*` workspace and `turbo.json` solve a many-app SaaS generator, not Dumbridge.
-2. Its CI currently uses `bun install` without a frozen-lockfile check. Dumbridge CI should use `bun install --frozen-lockfile`.
-3. Its `SECURITY.md` tells reporters to open an issue. Dumbridge handles local filesystem access and remote capabilities, so vulnerability details must be reported privately, never through a public issue. GitHub supports structured [private vulnerability reporting](https://docs.github.com/en/code-security/how-tos/report-and-fix-vulnerabilities/configure-vulnerability-reporting/configure-for-a-repository).
+1. The root `apps/*` / `packages/*` workspace and `turbo.json` solve a many-app SaaS generator, not dumbridge.
+2. Its CI currently uses `bun install` without a frozen-lockfile check. dumbridge CI should use `bun install --frozen-lockfile`.
+3. Its `SECURITY.md` tells reporters to open an issue. dumbridge handles local filesystem access and remote capabilities, so vulnerability details must be reported privately, never through a public issue. GitHub supports structured [private vulnerability reporting](https://docs.github.com/en/code-security/how-tos/report-and-fix-vulnerabilities/configure-vulnerability-reporting/configure-for-a-repository).
 
 ## Proposed repository shape
 
@@ -105,7 +105,7 @@ There should be no `apps/`, `packages/`, workspace declaration, or `turbo.json` 
 
 Bun officially supplies package installation, scripts, testing, bundling, npm publishing, and standalone compilation; it can also select platform-specific dependencies with `--cpu` and `--os`. Those capabilities make it a good package manager and development tool. Its [official repository](https://github.com/oven-sh/bun) and [standalone executable documentation](https://bun.sh/docs/bundler/executables) describe these roles.
 
-However, a Bun-only package with `#!/usr/bin/env bun` requires Bun to exist on the target machine. The current [effect-solutions package](https://github.com/kitlangton/effect-solutions/blob/main/packages/cli/package.json) deliberately makes that choice and additionally builds platform-specific executables. Dumbridge's stated installation path includes `npx`, so the safe default is:
+However, a Bun-only package with `#!/usr/bin/env bun` requires Bun to exist on the target machine. The current [effect-solutions package](https://github.com/kitlangton/effect-solutions/blob/main/packages/cli/package.json) deliberately makes that choice and additionally builds platform-specific executables. dumbridge's stated installation path includes `npx`, so the safe default is:
 
 - `packageManager: "bun@<pinned-version>"` and a committed `bun.lock`.
 - Bun for installation and developer scripts.
@@ -116,12 +116,12 @@ However, a Bun-only package with `#!/usr/bin/env bun` requires Bun to exist on t
 
 Effect CLI does not conflict with Iroh or Just Bash. They live at different seams:
 
-- Effect CLI parses Dumbridge's own commands and provides help/errors.
+- Effect CLI parses dumbridge's own commands and provides help/errors.
 - Effect manages lifecycle, cancellation, typed failures, configuration, and dependency layers.
 - Iroh carries network streams.
 - Just Bash evaluates the restricted remote command.
 
-The current effect.solutions guide installs `effect@beta` plus either `@effect/platform-bun@beta` or `@effect/platform-node@beta`, and imports the CLI from `effect/unstable/cli`; it also documents that flags precede positional arguments. See the first-party [Effect CLI guide](https://github.com/kitlangton/effect-solutions/blob/main/packages/website/docs/13-cli.md). That means Dumbridge should pin exact beta versions and test passthrough cases such as `dumbridge run -- rg -n foo .` before committing to the parser. This is a product-interface risk, not an incompatibility with Iroh or Just Bash.
+The current effect.solutions guide installs `effect@beta` plus either `@effect/platform-bun@beta` or `@effect/platform-node@beta`, and imports the CLI from `effect/unstable/cli`; it also documents that flags precede positional arguments. See the first-party [Effect CLI guide](https://github.com/kitlangton/effect-solutions/blob/main/packages/website/docs/13-cli.md). That means dumbridge should pin exact beta versions and test passthrough cases such as `dumbridge run -- rg -n foo .` before committing to the parser. This is a product-interface risk, not an incompatibility with Iroh or Just Bash.
 
 The [`betalyra/effect-skills`](https://github.com/betalyra/effect-skills/blob/main/effect-best-practices/SKILL.md) material should inform implementation style, but it is intentionally opinionated and is not a substitute for version-matched official Effect documentation.
 
@@ -129,7 +129,7 @@ The [`betalyra/effect-skills`](https://github.com/betalyra/effect-skills/blob/ma
 
 Ultracite is a preset over existing linters/formatters, and currently supports Biome, ESLint/Prettier, and Oxlint/Oxfmt. Its official initializer supports Bun and a Biome selection; its documented commands are `ultracite check`, `ultracite fix`, and `ultracite doctor`. See [Ultracite setup](https://github.com/haydenbleasel/ultracite/blob/main/apps/docs/setup.mdx).
 
-For Dumbridge:
+For dumbridge:
 
 ```jsonc
 {
@@ -151,11 +151,11 @@ Linting and formatting do not replace compiler typechecking. Install the tools a
 
 ### Turborepo: omit
 
-Turborepo officially supports [single-package workspaces](https://github.com/vercel/turborepo/blob/main/apps/docs/content/docs/guides/single-package-workspaces.mdx), where it can cache and orchestrate tasks. Support does not make it useful here. Dumbridge currently has one dependency graph node and short `check`, `typecheck`, `test`, and `build` commands. Turbo would add its own configuration, cache semantics, and debugging surface without removing real complexity.
+Turborepo officially supports [single-package workspaces](https://github.com/vercel/turborepo/blob/main/apps/docs/content/docs/guides/single-package-workspaces.mdx), where it can cache and orchestrate tasks. Support does not make it useful here. dumbridge currently has one dependency graph node and short `check`, `typecheck`, `test`, and `build` commands. Turbo would add its own configuration, cache semantics, and debugging surface without removing real complexity.
 
 Reconsider Turbo only when at least one of these becomes true:
 
-- Dumbridge owns two or more independently buildable/publishable packages.
+- dumbridge owns two or more independently buildable/publishable packages.
 - Native bindings are built as platform packages with a real dependency graph.
 - CI timings show repeated expensive tasks for which cache hits materially help.
 
@@ -167,7 +167,7 @@ Changesets explicitly supports a standalone project: `changeset init` creates `.
 
 Use:
 
-- `access: "public"` if Dumbridge will be public on npm.
+- `access: "public"` if dumbridge will be public on npm.
 - `baseBranch: "main"`.
 - A required changeset for user-visible changes, with a documented escape hatch for docs/tests/internal chores.
 - `changesets/action@v2` to maintain the version PR and publish after it merges. The current action supports OIDC trusted publishing; see its [official configuration](https://github.com/changesets/action/blob/main/_autodocs/configuration.md).
@@ -217,7 +217,7 @@ The release workflow must rebuild, test, verify the tarball, and publish the art
 
 ### `SECURITY.md`
 
-Write this specifically for Dumbridge rather than copying a generic template. It should state:
+Write this specifically for dumbridge rather than copying a generic template. It should state:
 
 - Supported versions.
 - That vulnerabilities must use GitHub's private **Report a vulnerability** flow.
@@ -249,13 +249,13 @@ Rewrite create-mf2-app's generic templates around a CLI. A bug report should req
 - OS, version, CPU architecture, Node/Bun version.
 - Which side failed (Mac/server or cloud/client).
 - Sanitized command, exit code, stdout/stderr, and whether direct or relay connectivity was used.
-- An explicit warning not to paste Dumbridge links, capabilities, `.env` contents, or private paths.
+- An explicit warning not to paste dumbridge links, capabilities, `.env` contents, or private paths.
 
 The PR checklist should require tests, a Changeset when user-visible, documentation for interface changes, three-platform consideration, and confirmation that no capability or fixture secret entered logs. Remove web-specific screenshot boilerplate.
 
 ### Additional small files
 
-- MIT `LICENSE`, with the correct Dumbridge copyright holder.
+- MIT `LICENSE`, with the correct dumbridge copyright holder.
 - `README.md` with installation, the three-command happy path, security model, supported platforms, and current limitations.
 - `CHANGELOG.md`, managed by Changesets.
 - Root `AGENTS.md` containing only the real commands, architectural seams, testing expectations, and pointers into `docs/`; avoid vendoring a large general-purpose skill library.
@@ -278,4 +278,4 @@ The scaffold is done when all of these are true:
 
 ## Bottom line
 
-Use create-mf2-app as a **hygiene donor**, effect-solutions as an **Effect CLI specimen**, and effect-skills as **agent guidance**. Keep Dumbridge itself boring: one package, plain scripts, reproducible Bun installs, a Node-compatible npm executable unless the distribution decision explicitly changes, Ultracite core, Changesets, and a real three-OS test matrix. Turborepo becomes justified only after the repository genuinely becomes a graph.
+Use create-mf2-app as a **hygiene donor**, effect-solutions as an **Effect CLI specimen**, and effect-skills as **agent guidance**. Keep dumbridge itself boring: one package, plain scripts, reproducible Bun installs, a Node-compatible npm executable unless the distribution decision explicitly changes, Ultracite core, Changesets, and a real three-OS test matrix. Turborepo becomes justified only after the repository genuinely becomes a graph.

@@ -1,5 +1,5 @@
 name: Bug report
-description: Report a reproducible Dumbridge failure
+description: Report a reproducible dumbridge failure
 title: "bug: "
 labels: [needs-triage]
 body:
@@ -9,7 +9,7 @@ body:
   - type: input
     id: version
     attributes:
-      label: Dumbridge version
+      label: dumbridge version
       placeholder: dumbridge --version
     validations:
       required: true

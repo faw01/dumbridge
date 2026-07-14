@@ -1,4 +1,4 @@
-# Dumbridge
+# dumbridge
 
 Use Bun for package management and runtime commands. Run `bun run verify` before committing.
 

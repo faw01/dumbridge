@@ -1,6 +1,6 @@
-# Dumbridge
+# dumbridge
 
-Dumbridge gives a disposable cloud agent temporary, live, read-only access to one local directory.
+dumbridge gives a disposable cloud agent temporary, live, read-only access to one local directory.
 
 ## Language
 
@@ -13,7 +13,7 @@ The foreground local process that owns access to a served root. Stopping it ends
 _Avoid_: Daemon, server account
 
 **Bridge link**:
-A secret, short-lived bearer value that tells a remote Dumbridge client how to reach and authenticate to a bridge process.
+A secret, short-lived bearer value that tells a remote dumbridge client how to reach and authenticate to a bridge process.
 _Avoid_: Share URL, API key, pairing
 
 **Remote read shell**:
