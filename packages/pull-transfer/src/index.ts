@@ -5,6 +5,7 @@ export type {
 } from "@dumbridge/wire";
 export {
   type PullError,
+  type PullErrorTag,
   PullIOError,
   PullNotFoundError,
   PullPathError,

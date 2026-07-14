@@ -81,6 +81,8 @@ export type PullError =
   | PullIOError
   | ServedRootChangedError;
 
+export type PullErrorTag = PullError["_tag"];
+
 export const changed = (path: string): PullSourceChangedError =>
   new PullSourceChangedError({ path });
 

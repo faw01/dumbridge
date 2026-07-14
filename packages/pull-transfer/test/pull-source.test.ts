@@ -13,7 +13,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
-import { Effect, Fiber, Stream } from "effect";
+import { Effect, Fiber, Result, Stream } from "effect";
 import {
   materializePull,
   PullPathError,
@@ -25,13 +25,17 @@ import { collectError, streamSource, waitUntil, withFixture } from "./support";
 
 describe("pull transfer source", () => {
   test("defaults the destination to the remote basename", () => {
-    expect(resolvePullDestination("photos/cat.jpeg")).toBe("./cat.jpeg");
-    expect(resolvePullDestination("photos/cat.jpeg", "images/cat.jpeg")).toBe(
-      "images/cat.jpeg"
+    expect(resolvePullDestination("photos/cat.jpeg")).toEqual(
+      Result.succeed("./cat.jpeg")
     );
-    expect(() => resolvePullDestination("../cat.jpeg", "cat.jpeg")).toThrow(
-      PullPathError
-    );
+    expect(
+      resolvePullDestination("photos/cat.jpeg", "images/cat.jpeg")
+    ).toEqual(Result.succeed("images/cat.jpeg"));
+    const rejected = resolvePullDestination("../cat.jpeg", "cat.jpeg");
+    expect(Result.isFailure(rejected)).toBe(true);
+    expect(
+      Result.isFailure(rejected) ? rejected.failure : undefined
+    ).toBeInstanceOf(PullPathError);
   });
 
   test("plans and materializes a deterministic directory", () =>

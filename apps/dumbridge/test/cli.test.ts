@@ -98,6 +98,20 @@ describe("dumbridge CLI", () => {
     expect(result.stderr).toBe("dumbridge: DUMBRIDGE_KEY is not set.\n");
   });
 
+  test("reports an invalid bridge key without echoing its value", async () => {
+    const rejectedPayload = "bm90LWEtcmVhbC1icmlkZ2Uta2V5";
+    const result = await invokeWithEnvironment(
+      { DUMBRIDGE_KEY: `dumbridge1_${rejectedPayload}` },
+      "run",
+      "true"
+    );
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toBe("");
+    expect(result.stderr).toBe("dumbridge: DUMBRIDGE_KEY is invalid.\n");
+    expect(result.stderr).not.toContain(rejectedPayload);
+  });
+
   test("reports an invalid pull path before attempting a connection", async () => {
     const link = Effect.runSync(
       Effect.fromResult(
@@ -144,6 +158,12 @@ describe("dumbridge CLI", () => {
         path: "large.bin",
       })
     ).toBe("The remote pull exceeded a safety limit.");
+    expect(
+      publicErrorMessage({
+        _tag: "ServedRootChangedError",
+        message: "served root changed after bridge start",
+      })
+    ).toBe("The served root changed during the pull.");
     expect(publicErrorMessage({ message: "   " })).toBe("dumbridge failed.");
   });
 });

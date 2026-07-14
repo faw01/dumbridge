@@ -15,6 +15,8 @@ import {
   type BridgeListener,
   BridgeListenerClosedError,
   BridgeLocator,
+  BridgeLocatorInvalidError,
+  BridgeProxyConfigurationError,
   type BridgeSession,
   type BridgeTransport,
 } from "@dumbridge/bridge-transport";
@@ -26,7 +28,15 @@ import {
   type RunResponseEvent,
   type WireFrame,
 } from "@dumbridge/wire";
-import { type Duration, Effect, Fiber, Option, Result } from "effect";
+import {
+  type Duration,
+  Effect,
+  Fiber,
+  Logger,
+  type LogLevel,
+  Option,
+  Result,
+} from "effect";
 import { TestClock } from "effect/testing";
 import { Bash } from "just-bash";
 import { pullRemote, runRemote } from "../../src/bridge/client";
@@ -332,6 +342,13 @@ describe("bridge application supervision", () => {
       Effect.succeed(changedRootSession.session),
       Effect.fail(new BridgeListenerClosedError({ message: "listener closed" }))
     );
+    const logEntries: {
+      readonly logLevel: LogLevel.LogLevel;
+      readonly message: unknown;
+    }[] = [];
+    const capturingLogger = Logger.make((options) => {
+      logEntries.push({ logLevel: options.logLevel, message: options.message });
+    });
     const originalRoot = `${fixture}-original`;
 
     try {
@@ -340,13 +357,22 @@ describe("bridge application supervision", () => {
       await writeFile(join(fixture, "note.txt"), "replacement secret\n");
 
       const end = await Effect.runPromise(
-        Effect.scoped(server.serve.pipe(Effect.flip))
+        Effect.scoped(server.serve.pipe(Effect.flip)).pipe(
+          Effect.provide(Logger.layer([capturingLogger]))
+        )
       );
 
       expect(end).toBeInstanceOf(BridgeListenerClosedError);
       expect(changedRootSession.state.writes).toHaveLength(0);
       expect(changedRootSession.state.finishCalls).toBe(0);
       expect(changedRootSession.state.closeCalls).toBe(1);
+      const warnings = logEntries.filter((entry) => entry.logLevel === "Warn");
+      expect(warnings).toHaveLength(1);
+      const logged = JSON.stringify(logEntries);
+      expect(logged).toContain("ServedRootChangedError");
+      expect(logged).not.toContain(fixture);
+      expect(logged).not.toContain("replacement secret");
+      expect(logged).not.toContain(server.link);
     } finally {
       await rm(originalRoot, { force: true, recursive: true });
     }
@@ -714,6 +740,78 @@ describe("bridge application supervision", () => {
     expect(connected.state.closeCalls).toBe(1);
   });
 
+  test("does not retry deterministic connect failures", async () => {
+    const capability = mintCapability();
+    const link = success(
+      encodeBridgeKey({
+        capability,
+        locator: "deterministic-client",
+        transport: "iroh",
+      })
+    );
+    const deterministicFailures = [
+      new BridgeLocatorInvalidError({
+        message: "The bridge transport locator is invalid.",
+      }),
+      new BridgeProxyConfigurationError({
+        message: "The bridge proxy configuration is invalid.",
+        requested: "environment",
+      }),
+    ] as const;
+
+    for (const failure of deterministicFailures) {
+      let connectCalls = 0;
+      const transport: BridgeTransport = {
+        connect: () => {
+          connectCalls += 1;
+          return Effect.fail(failure);
+        },
+        listen: Effect.die("listener is not used in this test"),
+      };
+
+      // biome-ignore lint/performance/noAwaitInLoops: Each failure kind is asserted independently.
+      const error = await Effect.runPromise(
+        runRemote({ link, script: "cat note.txt", transport }).pipe(Effect.flip)
+      );
+
+      expect(error).toBe(failure);
+      expect(connectCalls).toBe(1);
+    }
+  });
+
+  test("surfaces the transient cause after exhausting connect retries", async () => {
+    const capability = mintCapability();
+    const link = success(
+      encodeBridgeKey({
+        capability,
+        locator: "exhausted-client",
+        transport: "iroh",
+      })
+    );
+    let connectCalls = 0;
+    const transport: BridgeTransport = {
+      connect: () => {
+        connectCalls += 1;
+        return Effect.fail(
+          new BridgeConnectError({ message: "persistent handshake failure" })
+        );
+      },
+      listen: Effect.die("listener is not used in this test"),
+    };
+
+    const error = await Effect.runPromise(
+      runRemote({ link, script: "cat note.txt", transport }).pipe(Effect.flip)
+    );
+
+    expect(error).toMatchObject({
+      _tag: "BridgeClientError",
+      message: "Could not connect to the bridge process.",
+      operation: "connect",
+    });
+    expect(error.cause).toBeInstanceOf(BridgeConnectError);
+    expect(connectCalls).toBe(2);
+  });
+
   test("does not retry after request transmission starts", async () => {
     const capability = mintCapability();
     const link = success(
@@ -747,8 +845,33 @@ describe("bridge application supervision", () => {
       _tag: "BridgeClientError",
       operation: "request",
     });
+    expect(error.cause).toBeInstanceOf(BridgeFinishError);
     expect(connectCalls).toBe(1);
     expect(started.state.writes).toHaveLength(2);
     expect(started.state.closeCalls).toBe(1);
+  });
+
+  test("keeps the bridge key out of a remapped invalid-key error", async () => {
+    const rejectedPayload = "bm90LXJlYWxseS1hLWJyaWRnZS1rZXk";
+    const transport: BridgeTransport = {
+      connect: () => Effect.die("invalid keys must not connect"),
+      listen: Effect.die("listener is not used in this test"),
+    };
+
+    const error = await Effect.runPromise(
+      runRemote({
+        link: `dumbridge1_${rejectedPayload}`,
+        script: "cat note.txt",
+        transport,
+      }).pipe(Effect.flip)
+    );
+
+    expect(error).toMatchObject({
+      _tag: "BridgeClientError",
+      message: "DUMBRIDGE_KEY is invalid.",
+      operation: "bridge-key",
+    });
+    expect(error.cause).toMatchObject({ _tag: "InvalidBridgeKeyError" });
+    expect(JSON.stringify(error)).not.toContain(rejectedPayload);
   });
 });

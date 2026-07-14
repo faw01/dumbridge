@@ -210,9 +210,15 @@ export class ServedRoot {
   readonly verify = Effect.fn("ServedRoot.verify")(() =>
     Effect.try({
       catch: servedRootChanged,
-      try: () => this.#assertCurrent(),
+      try: () => this.verifySync(),
     })
   );
+
+  // The pull planner is a promise engine; it must verify the root identity
+  // without re-entering an Effect runtime from inside a running fiber.
+  readonly verifySync = (): void => {
+    this.#assertCurrent();
+  };
 
   readonly openPullView = () =>
     this.#guardPathsSync([], () => {

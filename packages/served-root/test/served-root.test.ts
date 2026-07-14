@@ -120,4 +120,21 @@ describe("ServedRoot", () => {
       message: "served root changed after bridge start",
     });
   });
+
+  test("verifies synchronously for the pull promise engine", async () => {
+    const root = await Effect.runPromise(ServedRoot.make(servedPath));
+
+    expect(() => root.verifySync()).not.toThrow();
+
+    await rename(servedPath, join(fixtureRoot, "original-served"));
+    await symlink(
+      outsidePath,
+      servedPath,
+      process.platform === "win32" ? "junction" : "dir"
+    );
+
+    expect(() => root.verifySync()).toThrow(
+      "served root changed after bridge start"
+    );
+  });
 });
