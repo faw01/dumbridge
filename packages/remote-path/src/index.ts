@@ -55,6 +55,10 @@ const isCanonicalRemotePath = (path: string, segments: readonly string[]) =>
   !windowsDrivePattern.test(path) &&
   segments.every(isCanonicalSegment);
 
+// The schema stays private so the brand can only be minted here, after the
+// canonical checks above have passed.
+const brandRemotePath = Schema.decodeUnknownSync(RemotePathSchema);
+
 export const parseRemotePath = (
   path: string
 ): Result.Result<ParsedRemotePath, InvalidRemotePathError> => {
@@ -62,9 +66,5 @@ export const parseRemotePath = (
   if (!isCanonicalRemotePath(path, segments)) {
     return Result.fail(new InvalidRemotePathError({ path }));
   }
-  const branded = Schema.decodeUnknownResult(RemotePathSchema)(path);
-  if (Result.isFailure(branded)) {
-    return Result.fail(new InvalidRemotePathError({ path }));
-  }
-  return Result.succeed({ path: branded.success, segments });
+  return Result.succeed({ path: brandRemotePath(path), segments });
 };
