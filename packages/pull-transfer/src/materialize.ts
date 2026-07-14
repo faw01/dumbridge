@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { promises as hostFileSystem } from "node:fs";
 import { lstat, mkdir, mkdtemp, open, rmdir } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
+import type { PullFileEntry, PullManifest } from "@dumbridge/wire";
 import { Effect, Exit, Stream } from "effect";
 import { publishPathNoReplace } from "./atomic-publish";
 import {
@@ -16,9 +17,7 @@ import {
 import {
   limitsFrom,
   manifestFrom,
-  type PullFileEntry,
   type PullLimits,
-  type PullManifest,
   type PullRead,
   type PullResult,
 } from "./model";

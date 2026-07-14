@@ -5,7 +5,6 @@ import {
   maximumTransferBytes,
   type PullFileEntry,
   type PullManifest,
-  type PullManifestEntry,
   type PullManifestViolation,
   validatePullManifest,
 } from "@dumbridge/wire";
@@ -16,8 +15,6 @@ import {
   PullLimitError,
   PullPathError,
 } from "./errors";
-
-export type { PullFileEntry, PullManifest, PullManifestEntry };
 
 export interface PullLimits {
   readonly chunkBytes: number;
