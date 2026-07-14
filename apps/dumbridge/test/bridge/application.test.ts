@@ -180,6 +180,9 @@ describe("dumbridge application", () => {
     expect(error).toMatchObject({
       _tag: "BridgeClientError",
     });
+    if (error._tag !== "BridgeClientError") {
+      throw new Error("expected a bridge client error");
+    }
     expect(["request", "run-response"]).toContain(error.operation);
     expect(JSON.stringify(error)).not.toContain("TOKEN=local-only");
   }, 10_000);

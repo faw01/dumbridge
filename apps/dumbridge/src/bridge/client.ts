@@ -5,6 +5,9 @@ import {
 } from "@dumbridge/bridge-key";
 import {
   BridgeLocator,
+  type BridgeLocatorInvalidError,
+  type BridgeProxyConfigurationError,
+  type BridgeProxyUnsupportedError,
   type BridgeSession,
   type BridgeTransport,
 } from "@dumbridge/bridge-transport";
@@ -49,6 +52,13 @@ class BridgeClientError extends Schema.TaggedErrorClass<BridgeClientError>()(
     operation: ClientOperation,
   }
 ) {}
+
+// Deterministic connect failures keep their transport identity so retryConnect
+// retries only transient connection errors.
+type DeterministicConnectError =
+  | BridgeLocatorInvalidError
+  | BridgeProxyConfigurationError
+  | BridgeProxyUnsupportedError;
 
 interface RemoteRunResult {
   readonly exitCode: number;
@@ -114,13 +124,20 @@ const openSession = (transport: BridgeTransport, link: string) =>
     const session = yield* transport
       .connect(BridgeLocator.fromString(decoded.locator))
       .pipe(
-        Effect.mapError((error) =>
-          clientError(
-            "connect",
-            "Could not connect to the bridge process.",
-            error
-          )
-        )
+        Effect.catchTags({
+          BridgeConnectError: (error) =>
+            clientError(
+              "connect",
+              "Could not connect to the bridge process.",
+              error
+            ),
+          BridgeDeadlineExceededError: (error) =>
+            clientError(
+              "connect",
+              "Could not connect to the bridge process.",
+              error
+            ),
+        })
       );
     return { capability: decoded.capability, session };
   });
@@ -159,7 +176,10 @@ export const runRemote = Effect.fn("BridgeClient.run")(
     readonly link: string;
     readonly script: string;
     readonly transport: BridgeTransport;
-  }): Effect.Effect<RemoteRunResult, BridgeClientError> =>
+  }): Effect.Effect<
+    RemoteRunResult,
+    BridgeClientError | DeterministicConnectError
+  > =>
     retryConnect(() =>
       Effect.scoped(
         Effect.gen(function* () {
@@ -232,7 +252,10 @@ export const pullRemote = Effect.fn("BridgeClient.pull")(
     readonly link: string;
     readonly remotePath: string;
     readonly transport: BridgeTransport;
-  }): Effect.Effect<RemotePullResult, BridgeClientError | PullError> =>
+  }): Effect.Effect<
+    RemotePullResult,
+    BridgeClientError | DeterministicConnectError | PullError
+  > =>
     retryConnect(() =>
       Effect.scoped(
         Effect.gen(function* () {

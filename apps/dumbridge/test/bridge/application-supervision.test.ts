@@ -15,6 +15,8 @@ import {
   type BridgeListener,
   BridgeListenerClosedError,
   BridgeLocator,
+  BridgeLocatorInvalidError,
+  BridgeProxyConfigurationError,
   type BridgeSession,
   type BridgeTransport,
 } from "@dumbridge/bridge-transport";
@@ -712,6 +714,78 @@ describe("bridge application supervision", () => {
     expect(connectCalls).toBe(2);
     expect(connected.state.finishCalls).toBe(1);
     expect(connected.state.closeCalls).toBe(1);
+  });
+
+  test("does not retry deterministic connect failures", async () => {
+    const capability = mintCapability();
+    const link = success(
+      encodeBridgeKey({
+        capability,
+        locator: "deterministic-client",
+        transport: "iroh",
+      })
+    );
+    const deterministicFailures = [
+      new BridgeLocatorInvalidError({
+        message: "The bridge transport locator is invalid.",
+      }),
+      new BridgeProxyConfigurationError({
+        message: "The bridge proxy configuration is invalid.",
+        requested: "environment",
+      }),
+    ] as const;
+
+    for (const failure of deterministicFailures) {
+      let connectCalls = 0;
+      const transport: BridgeTransport = {
+        connect: () => {
+          connectCalls += 1;
+          return Effect.fail(failure);
+        },
+        listen: Effect.die("listener is not used in this test"),
+      };
+
+      // biome-ignore lint/performance/noAwaitInLoops: Each failure kind is asserted independently.
+      const error = await Effect.runPromise(
+        runRemote({ link, script: "cat note.txt", transport }).pipe(Effect.flip)
+      );
+
+      expect(error).toBe(failure);
+      expect(connectCalls).toBe(1);
+    }
+  });
+
+  test("surfaces the transient cause after exhausting connect retries", async () => {
+    const capability = mintCapability();
+    const link = success(
+      encodeBridgeKey({
+        capability,
+        locator: "exhausted-client",
+        transport: "iroh",
+      })
+    );
+    let connectCalls = 0;
+    const transport: BridgeTransport = {
+      connect: () => {
+        connectCalls += 1;
+        return Effect.fail(
+          new BridgeConnectError({ message: "persistent handshake failure" })
+        );
+      },
+      listen: Effect.die("listener is not used in this test"),
+    };
+
+    const error = await Effect.runPromise(
+      runRemote({ link, script: "cat note.txt", transport }).pipe(Effect.flip)
+    );
+
+    expect(error).toMatchObject({
+      _tag: "BridgeClientError",
+      message: "Could not connect to the bridge process.",
+      operation: "connect",
+    });
+    expect(error.cause).toBeInstanceOf(BridgeConnectError);
+    expect(connectCalls).toBe(2);
   });
 
   test("does not retry after request transmission starts", async () => {
