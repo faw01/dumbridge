@@ -149,25 +149,43 @@ export const limitExceeded = (
     observed,
   });
 
-const manifestViolationMessage = (
-  violation: Exclude<PullManifestViolation, { readonly kind: "limit" }>
-): string => {
+const manifestViolationError = (
+  violation: PullManifestViolation
+): IllegalFrameError | WireLimitExceededError => {
   switch (violation.kind) {
+    case "limit":
+      return limitExceeded(
+        violation.limit,
+        violation.maximum,
+        violation.observed
+      );
     case "shape":
-      return "Pull manifest does not match the wire schema.";
+      return illegal(
+        "manifest",
+        "Pull manifest does not match the wire schema."
+      );
     case "name":
-      return "Pull manifest name is not canonical.";
+      return illegal("manifest", "Pull manifest name is not canonical.");
     case "entry-path":
     case "order":
-      return "Pull manifest paths are not canonical and ordered.";
+      return illegal(
+        "manifest",
+        "Pull manifest paths are not canonical and ordered."
+      );
     case "parents":
-      return "Pull manifest omits a parent directory.";
+      return illegal("manifest", "Pull manifest omits a parent directory.");
     case "totals":
-      return "Pull manifest total does not match its files.";
+      return illegal(
+        "manifest",
+        "Pull manifest total does not match its files."
+      );
     case "file-shape":
-      return "File manifest does not describe one named file.";
+      return illegal(
+        "manifest",
+        "File manifest does not describe one named file."
+      );
     default:
-      return "Pull manifest is invalid.";
+      return illegal("manifest", "Pull manifest is invalid.");
   }
 };
 
@@ -186,13 +204,7 @@ export const validateManifest = (
   if (Result.isSuccess(validated)) {
     return Result.succeed(validated.success);
   }
-  const violation = validated.failure;
-  if (violation.kind === "limit") {
-    return Result.fail(
-      limitExceeded(violation.limit, violation.maximum, violation.observed)
-    );
-  }
-  return Result.fail(illegal("manifest", manifestViolationMessage(violation)));
+  return Result.fail(manifestViolationError(validated.failure));
 };
 
 export const resolveLimits = (
