@@ -122,6 +122,11 @@ const frameToRaw = (
         header: { protocol, remotePath: frame.remotePath, type: "pull" },
         payload: empty,
       });
+    case "banner":
+      return Result.succeed({
+        header: { protocol, served: frame.served, type: "banner" },
+        payload: empty,
+      });
     case "stdout":
       if (frame.payload.byteLength === 0) {
         return Result.fail(
@@ -208,6 +213,11 @@ const frameToRaw = (
     case "pull-error":
       return Result.succeed({
         header: { code: frame.code, protocol, type: "pull-error" },
+        payload: empty,
+      });
+    case "reject":
+      return Result.succeed({
+        header: { code: frame.code, protocol, type: "reject" },
         payload: empty,
       });
     case "complete":

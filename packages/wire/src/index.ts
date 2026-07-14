@@ -14,6 +14,7 @@ export type {
   BridgeRequest,
   PullFailureCode,
   PullResponseEvent,
+  RejectCode,
   RunResponseEvent,
   WireFrame,
 } from "./protocol";

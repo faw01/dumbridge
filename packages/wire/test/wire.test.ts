@@ -452,6 +452,103 @@ describe("run response session", () => {
     }
   });
 
+  test("accepts a leading banner and reports its served display", () => {
+    const session = success(makeRunResponseSession());
+    const pushed = session.push(
+      joinChunks(
+        encoded({ served: "GitHub", type: "banner" }),
+        encoded({ payload: Uint8Array.of(1), type: "stdout" }),
+        encoded({ code: 0, truncated: false, type: "exit" })
+      )
+    );
+
+    expect(Result.isSuccess(pushed)).toBe(true);
+    if (Result.isSuccess(pushed)) {
+      expect(pushed.success[0]).toEqual({ served: "GitHub", type: "banner" });
+      expect(pushed.success).toHaveLength(3);
+    }
+    expect(Result.isSuccess(session.finish())).toBe(true);
+  });
+
+  test("rejects a banner after output and control characters in its display", () => {
+    const late = success(makeRunResponseSession());
+    const lateResult = late.push(
+      joinChunks(
+        encoded({ payload: Uint8Array.of(1), type: "stdout" }),
+        encoded({ served: "GitHub", type: "banner" })
+      )
+    );
+    expect(Result.isFailure(lateResult)).toBe(true);
+    if (Result.isFailure(lateResult)) {
+      expect(lateResult.failure).toMatchObject({
+        _tag: "IllegalFrameError",
+        reason: "order",
+      });
+    }
+
+    const escapeInjection = encodeFrame({
+      served: "evil\u001b[31m",
+      type: "banner",
+    });
+    expect(Result.isFailure(escapeInjection)).toBe(true);
+
+    const decodeInjection = success(makeRunResponseSession()).push(
+      rawFrame({
+        protocol: "dumbridge/1",
+        served: "evil\u001b[31m",
+        type: "banner",
+      })
+    );
+    expect(Result.isFailure(decodeInjection)).toBe(true);
+    if (Result.isFailure(decodeInjection)) {
+      expect(decodeInjection.failure).toMatchObject({
+        _tag: "MalformedFrameError",
+        reason: "schema",
+      });
+    }
+  });
+
+  test("accepts a reject only in place of the whole run response", () => {
+    const rejected = success(makeRunResponseSession());
+    const pushed = rejected.push(
+      encoded({ code: "invalid-key", type: "reject" })
+    );
+    expect(Result.isSuccess(pushed)).toBe(true);
+    if (Result.isSuccess(pushed)) {
+      expect(pushed.success).toEqual([{ code: "invalid-key", type: "reject" }]);
+    }
+    expect(Result.isSuccess(rejected.finish())).toBe(true);
+
+    const late = success(makeRunResponseSession());
+    const lateResult = late.push(
+      joinChunks(
+        encoded({ payload: Uint8Array.of(1), type: "stdout" }),
+        encoded({ code: "invalid-key", type: "reject" })
+      )
+    );
+    expect(Result.isFailure(lateResult)).toBe(true);
+    if (Result.isFailure(lateResult)) {
+      expect(lateResult.failure).toMatchObject({
+        _tag: "IllegalFrameError",
+        reason: "order",
+      });
+    }
+
+    const payloadResult = success(makeRunResponseSession()).push(
+      rawFrame(
+        { code: "invalid-key", protocol: "dumbridge/1", type: "reject" },
+        Uint8Array.of(1)
+      )
+    );
+    expect(Result.isFailure(payloadResult)).toBe(true);
+    if (Result.isFailure(payloadResult)) {
+      expect(payloadResult.failure).toMatchObject({
+        _tag: "IllegalFrameError",
+        reason: "payload",
+      });
+    }
+  });
+
   test("accepts valid frames independently of transport chunk coalescing", () => {
     const frames = [
       ...Array.from({ length: 100 }, () =>
@@ -583,6 +680,33 @@ describe("pull response session", () => {
       expect(code.failure).toMatchObject({
         _tag: "MalformedFrameError",
         reason: "schema",
+      });
+    }
+  });
+
+  test("accepts a reject only in place of the pull manifest", () => {
+    const rejected = success(makePullResponseSession());
+    const pushed = rejected.push(
+      encoded({ code: "invalid-key", type: "reject" })
+    );
+    expect(Result.isSuccess(pushed)).toBe(true);
+    if (Result.isSuccess(pushed)) {
+      expect(pushed.success).toEqual([{ code: "invalid-key", type: "reject" }]);
+    }
+    expect(Result.isSuccess(rejected.finish())).toBe(true);
+
+    const late = success(makePullResponseSession());
+    const lateResult = late.push(
+      joinChunks(
+        encoded({ manifest, type: "manifest" }),
+        encoded({ code: "invalid-key", type: "reject" })
+      )
+    );
+    expect(Result.isFailure(lateResult)).toBe(true);
+    if (Result.isFailure(lateResult)) {
+      expect(lateResult.failure).toMatchObject({
+        _tag: "IllegalFrameError",
+        reason: "order",
       });
     }
   });
