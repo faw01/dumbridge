@@ -115,6 +115,9 @@ const handleSession = (
         readRequest(session, key.capability)
       )
     ),
+    // The deadline can pass while the request is still arriving, so re-check
+    // after authentication: an expired key never reaches the shell or a pull.
+    Effect.tap(() => ensureKeyNotExpired(key)),
     Effect.flatMap(
       (request): Effect.Effect<void, RequestHandlerError> =>
         request.type === "run"

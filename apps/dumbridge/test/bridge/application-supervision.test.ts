@@ -876,6 +876,49 @@ describe("bridge application supervision", () => {
     expect(end).toBeInstanceOf(BridgeListenerClosedError);
   });
 
+  test("rejects a request that finishes arriving after the key deadline", async () => {
+    const end = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const accepts: BridgeListener["accept"][] = [];
+          const listener = listenerFrom(accepts);
+          const server = yield* openBridge({
+            deadlines: { request: "5 hours" },
+            maxConcurrentSessions: 1,
+            root: fixture,
+            transport: listenerTransport(listener),
+            ttl: "1 hour",
+          });
+
+          const request = requestFor(server.link, {
+            script: "cat note.txt",
+            type: "run",
+          });
+          const lateArrival = scriptedSession({
+            readDelay: "2 hours",
+            reads: [request],
+          });
+          accepts.push(
+            Effect.succeed(lateArrival.session),
+            Effect.fail(
+              new BridgeListenerClosedError({ message: "listener closed" })
+            )
+          );
+
+          const fiber = yield* server.serve.pipe(Effect.flip, Effect.forkChild);
+          yield* TestClock.adjust("4 hours");
+          const result = yield* Fiber.join(fiber);
+          expect(lateArrival.state.writes).toHaveLength(0);
+          expect(lateArrival.state.finishCalls).toBe(0);
+          expect(lateArrival.state.closeCalls).toBe(1);
+          return result;
+        })
+      ).pipe(Effect.provide(TestClock.layer({ warningDelay: "10 seconds" })))
+    );
+
+    expect(end).toBeInstanceOf(BridgeListenerClosedError);
+  });
+
   test("does not retry after request transmission starts", async () => {
     const capability = mintCapability();
     const link = success(
