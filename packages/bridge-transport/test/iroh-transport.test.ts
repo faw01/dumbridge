@@ -556,7 +556,14 @@ describe("Iroh bridge transport", () => {
           const client = yield* transport.connect(listener.locator);
 
           yield* client.write(Uint8Array.of(7));
-          return yield* Fiber.join(serverFiber);
+          const failure = yield* Fiber.join(serverFiber);
+
+          // Close only after the join. Without a later use of `client`, GC may
+          // finalize its native send stream mid-test, which implicitly
+          // finishes the QUIC stream; the server would then read EOF instead
+          // of reaching its deadline.
+          yield* client.close;
+          return failure;
         })
       )
     );
