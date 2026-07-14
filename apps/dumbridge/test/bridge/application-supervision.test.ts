@@ -29,7 +29,7 @@ import {
   type WireFrame,
 } from "@dumbridge/wire";
 import {
-  type Duration,
+  Duration,
   Effect,
   Fiber,
   Logger,
@@ -43,6 +43,9 @@ import { pullRemote, runRemote } from "../../src/bridge/client";
 import { openBridge } from "../../src/bridge/server";
 
 let fixture = "";
+
+// Real-clock client tests need keys that stay valid for the whole test run.
+const farFutureExpiry = Number.MAX_SAFE_INTEGER;
 
 beforeEach(async () => {
   fixture = await mkdtemp(join(tmpdir(), "dumbridge-supervision-"));
@@ -609,6 +612,7 @@ describe("bridge application supervision", () => {
     const link = success(
       encodeBridgeKey({
         capability,
+        expiresAt: farFutureExpiry,
         locator: "unused-client",
         transport: "iroh",
       })
@@ -641,6 +645,7 @@ describe("bridge application supervision", () => {
     const link = success(
       encodeBridgeKey({
         capability,
+        expiresAt: farFutureExpiry,
         locator: "limited-client",
         transport: "iroh",
       })
@@ -672,6 +677,7 @@ describe("bridge application supervision", () => {
     const link = success(
       encodeBridgeKey({
         capability,
+        expiresAt: farFutureExpiry,
         locator: "test-client",
         transport: "iroh",
       })
@@ -708,6 +714,7 @@ describe("bridge application supervision", () => {
     const link = success(
       encodeBridgeKey({
         capability,
+        expiresAt: farFutureExpiry,
         locator: "retry-client",
         transport: "iroh",
       })
@@ -745,6 +752,7 @@ describe("bridge application supervision", () => {
     const link = success(
       encodeBridgeKey({
         capability,
+        expiresAt: farFutureExpiry,
         locator: "deterministic-client",
         transport: "iroh",
       })
@@ -784,6 +792,7 @@ describe("bridge application supervision", () => {
     const link = success(
       encodeBridgeKey({
         capability,
+        expiresAt: farFutureExpiry,
         locator: "exhausted-client",
         transport: "iroh",
       })
@@ -812,11 +821,110 @@ describe("bridge application supervision", () => {
     expect(connectCalls).toBe(2);
   });
 
+  test("mints keys with the default eight hour expiry deadline", async () => {
+    const server = await Effect.runPromise(
+      Effect.scoped(
+        openBridge({
+          root: fixture,
+          transport: listenerTransport(listenerFrom([])),
+        })
+      ).pipe(Effect.provide(TestClock.layer({ warningDelay: "10 seconds" })))
+    );
+
+    expect(server.expiresAt).toBe(Duration.toMillis("8 hours"));
+    expect(success(parseBridgeKey(server.link)).expiresAt).toBe(
+      server.expiresAt
+    );
+  });
+
+  test("rejects a valid capability once the key expiry deadline passes", async () => {
+    const end = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const accepts: BridgeListener["accept"][] = [];
+          const listener = listenerFrom(accepts);
+          const server = yield* openBridge({
+            maxConcurrentSessions: 1,
+            root: fixture,
+            transport: listenerTransport(listener),
+            ttl: "1 hour",
+          });
+          expect(server.expiresAt).toBe(Duration.toMillis("1 hour"));
+
+          const request = requestFor(server.link, {
+            script: "cat note.txt",
+            type: "run",
+          });
+          const expired = scriptedSession({ reads: [request] });
+          accepts.push(
+            Effect.succeed(expired.session),
+            Effect.fail(
+              new BridgeListenerClosedError({ message: "listener closed" })
+            )
+          );
+
+          yield* TestClock.adjust("1 hour");
+          const result = yield* server.serve.pipe(Effect.flip);
+          expect(expired.state.writes).toHaveLength(0);
+          expect(expired.state.finishCalls).toBe(0);
+          expect(expired.state.closeCalls).toBe(1);
+          return result;
+        })
+      ).pipe(Effect.provide(TestClock.layer({ warningDelay: "10 seconds" })))
+    );
+
+    expect(end).toBeInstanceOf(BridgeListenerClosedError);
+  });
+
+  test("rejects a request that finishes arriving after the key deadline", async () => {
+    const end = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const accepts: BridgeListener["accept"][] = [];
+          const listener = listenerFrom(accepts);
+          const server = yield* openBridge({
+            deadlines: { request: "5 hours" },
+            maxConcurrentSessions: 1,
+            root: fixture,
+            transport: listenerTransport(listener),
+            ttl: "1 hour",
+          });
+
+          const request = requestFor(server.link, {
+            script: "cat note.txt",
+            type: "run",
+          });
+          const lateArrival = scriptedSession({
+            readDelay: "2 hours",
+            reads: [request],
+          });
+          accepts.push(
+            Effect.succeed(lateArrival.session),
+            Effect.fail(
+              new BridgeListenerClosedError({ message: "listener closed" })
+            )
+          );
+
+          const fiber = yield* server.serve.pipe(Effect.flip, Effect.forkChild);
+          yield* TestClock.adjust("4 hours");
+          const result = yield* Fiber.join(fiber);
+          expect(lateArrival.state.writes).toHaveLength(0);
+          expect(lateArrival.state.finishCalls).toBe(0);
+          expect(lateArrival.state.closeCalls).toBe(1);
+          return result;
+        })
+      ).pipe(Effect.provide(TestClock.layer({ warningDelay: "10 seconds" })))
+    );
+
+    expect(end).toBeInstanceOf(BridgeListenerClosedError);
+  });
+
   test("does not retry after request transmission starts", async () => {
     const capability = mintCapability();
     const link = success(
       encodeBridgeKey({
         capability,
+        expiresAt: farFutureExpiry,
         locator: "request-failure-client",
         transport: "iroh",
       })

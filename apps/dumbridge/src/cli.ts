@@ -6,8 +6,16 @@ import {
 } from "@dumbridge/bridge-transport/iroh";
 import type { PullErrorTag } from "@dumbridge/pull-transfer";
 import { BunRuntime, BunServices } from "@effect/platform-bun";
-import { Config, Effect, Option, pipe, Redacted, Schema } from "effect";
-import { Argument, Command } from "effect/unstable/cli";
+import {
+  Config,
+  Duration,
+  Effect,
+  Option,
+  pipe,
+  Redacted,
+  Schema,
+} from "effect";
+import { Argument, Command, Flag } from "effect/unstable/cli";
 import skillGuide from "../../../skills/dumbridge/SKILL.md" with {
   type: "text",
 };
@@ -54,19 +62,45 @@ const write = (stream: NodeJS.WriteStream, value: string) =>
     stream.write(value);
   });
 
+const parseServeTtl = (value: string) => {
+  const duration = Duration.fromInput(value as Duration.Input);
+  return Option.isSome(duration) &&
+    Duration.isFinite(duration.value) &&
+    Duration.isPositive(duration.value)
+    ? Effect.succeed(duration.value)
+    : Effect.fail(
+        new CliError({
+          message:
+            "The --ttl value is invalid. Use a duration like '90 minutes' or '8 hours'.",
+        })
+      );
+};
+
 const serve = Command.make(
   "serve",
-  { root: Argument.string("root") },
-  ({ root }) =>
+  {
+    root: Argument.string("root"),
+    ttl: Flag.string("ttl").pipe(
+      Flag.optional,
+      Flag.withDescription(
+        "How long the minted key stays valid, like '90 minutes' or '8 hours'. Defaults to 8 hours."
+      )
+    ),
+  },
+  ({ root, ttl }) =>
     Effect.scoped(
       Effect.gen(function* () {
+        const keyTtl = Option.isSome(ttl)
+          ? yield* parseServeTtl(ttl.value)
+          : undefined;
         const server = yield* openBridge({
           root,
           transport: makeIrohTransport(),
+          ...(keyTtl === undefined ? {} : { ttl: keyTtl }),
         });
         yield* write(
           process.stdout,
-          `Serving the selected directory read-only until Ctrl-C.\nDUMBRIDGE_KEY=${server.link}\n`
+          `Serving the selected directory read-only until Ctrl-C.\nThe key expires at ${new Date(server.expiresAt).toISOString()}. Run serve again for a fresh key.\nDUMBRIDGE_KEY=${server.link}\n`
         );
         yield* server.serve;
       })

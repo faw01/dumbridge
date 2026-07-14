@@ -37,4 +37,4 @@ dumbridge pull photos/IMG2123.jpg assets/reference.jpg
 - Never print, log, or repeat `DUMBRIDGE_KEY`; it is a bearer secret.
 - Expect writes inside `run` to disappear. dumbridge cannot change the user's local files.
 - Expect existing destinations and symlinks to be refused. Choose a new destination instead of deleting or overwriting one.
-- If the key is absent or the bridge is offline, ask the user to run `dumbridge serve <root>` locally and place the new key in the cloud environment.
+- If the key is absent, expired, or the bridge is offline, ask the user to run `dumbridge serve <root>` locally and place the new key in the cloud environment. Keys expire after a TTL the user chose at serve time.

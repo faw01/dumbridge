@@ -1,0 +1,3 @@
+# Carry the key expiry deadline inside the key payload
+
+Bridge keys expire at a deadline fixed when serve mints them. The serve process enforces the deadline it recorded at mint time, and the same deadline also travels inside the version 2 key payload so `run` and `pull` can report a precise expired-key message before dialing. A purely server-side deadline was rejected because `dumbridge/1` has no rejection frame, so an expired key would be indistinguishable from a wrong capability at the client. The payload copy is advisory only: the bridge process never trusts a client-presented deadline, which keeps client clock skew harmless.

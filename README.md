@@ -24,12 +24,14 @@ npx --yes dumbridge pull .agents/skills/wayfinder .agents/skills/wayfinder
 
 ## Commands
 
-- `dumbridge serve <root>` shares one directory read-only until Ctrl-C and prints the `DUMBRIDGE_KEY` bearer secret.
+- `dumbridge serve <root>` shares one directory read-only until Ctrl-C and prints the `DUMBRIDGE_KEY` bearer secret, valid for a configurable TTL (default 8 hours, `--ttl '90 minutes'`).
 - `dumbridge run '<script>'` evaluates one Bash-shaped script against the live served root in a bounded Just Bash sandbox, never the host shell. Its writes are discarded.
 - `dumbridge pull <remote-path> [destination]` copies one exact file or directory, verifies content, refuses symlinks, and never overwrites an existing destination.
 - `dumbridge skill` prints the bundled agent usage guide without contacting a bridge.
 
 The bridge key is a bearer secret: anyone holding it while `serve` is running can read below the served root.
+
+Every key carries an expiry deadline fixed when `serve` mints it, enforced by the serve process itself: after the deadline, sessions are rejected even if the process keeps running. Stopping the bridge process still revokes access immediately. The deadline matters most for a detached bridge (`serve --detach`, tracked in [#22](https://github.com/faw01/dumbridge/issues/22)), where a long-lived server would otherwise mint a never-expiring credential; once the key expires, the detached process keeps running but grants nothing, and rerunning `serve` mints a fresh key.
 
 ## Status
 

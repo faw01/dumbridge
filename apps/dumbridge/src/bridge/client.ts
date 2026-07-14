@@ -1,6 +1,8 @@
 import {
   type BridgeKeyError,
+  type BridgeKeyExpiredError,
   type Capability,
+  checkBridgeKeyExpiry,
   parseBridgeKey,
 } from "@dumbridge/bridge-key";
 import {
@@ -23,7 +25,7 @@ import {
   makePullResponseSession,
   makeRunResponseSession,
 } from "@dumbridge/wire";
-import { type Duration, Effect, Option, Schema } from "effect";
+import { Clock, type Duration, Effect, Option, Schema } from "effect";
 import { joinBytes, sendFrames, WireEventReader } from "./channel";
 import {
   finishPullResponse,
@@ -124,6 +126,10 @@ const transientConnectFailure = (error: unknown) =>
 const openSession = (transport: BridgeTransport, link: string) =>
   Effect.gen(function* () {
     const decoded = yield* decodeKey(link);
+    // Courtesy check for a clear message before dialing; the bridge process
+    // remains the expiry authority and re-checks its own mint-time deadline.
+    const now = yield* Clock.currentTimeMillis;
+    yield* Effect.fromResult(checkBridgeKeyExpiry(decoded.expiresAt, now));
     const session = yield* transport
       .connect(BridgeLocator.fromString(decoded.locator))
       .pipe(
@@ -171,7 +177,7 @@ export const runRemote = Effect.fn("BridgeClient.run")(
     readonly transport: BridgeTransport;
   }): Effect.Effect<
     RemoteRunResult,
-    BridgeClientError | DeterministicConnectError
+    BridgeClientError | BridgeKeyExpiredError | DeterministicConnectError
   > =>
     retryConnect(() =>
       Effect.scoped(
@@ -247,7 +253,10 @@ export const pullRemote = Effect.fn("BridgeClient.pull")(
     readonly transport: BridgeTransport;
   }): Effect.Effect<
     RemotePullResult,
-    BridgeClientError | DeterministicConnectError | PullError
+    | BridgeClientError
+    | BridgeKeyExpiredError
+    | DeterministicConnectError
+    | PullError
   > =>
     retryConnect(() =>
       Effect.scoped(

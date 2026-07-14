@@ -1,6 +1,7 @@
 import {
   type BridgeKey,
   type Capability,
+  checkBridgeKeyExpiry,
   encodeBridgeKey,
   mintCapability,
 } from "@dumbridge/bridge-key";
@@ -13,7 +14,7 @@ import {
 import { SafeShell } from "@dumbridge/safe-shell";
 import { ServedRoot } from "@dumbridge/served-root";
 import { type BridgeRequest, makeRequestSession } from "@dumbridge/wire";
-import { Cause, type Duration, Effect, Option } from "effect";
+import { Cause, Clock, Duration, Effect, Option } from "effect";
 import { WireEventReader } from "./channel";
 import {
   type BridgeSessionError,
@@ -26,6 +27,17 @@ const initialAcceptBackoff: Duration.Input = "10 millis";
 const maximumAcceptBackoffMillis = 1000;
 const defaultConcurrentSessions = 4;
 const maximumConcurrentSessions = 8;
+
+// Bounds the credential to one "human at the machine" working day; the served
+// root stays private even when a long-lived bridge process outlives the key.
+const defaultKeyTtl: Duration.Input = "8 hours";
+
+// The serve process is the expiry authority: it enforces the deadline it
+// recorded at mint time and never trusts a deadline presented by a client.
+interface MintedKey {
+  readonly capability: Capability;
+  readonly expiresAt: number;
+}
 
 interface BridgeServerDeadlines {
   readonly pull: Duration.Input;
@@ -40,6 +52,7 @@ const defaultDeadlines: BridgeServerDeadlines = {
 };
 
 interface BridgeServer {
+  readonly expiresAt: number;
   readonly link: BridgeKey;
   readonly serve: Effect.Effect<never, BridgeListenerClosedError>;
 }
@@ -80,18 +93,31 @@ type RequestHandlerError =
   | Effect.Error<ReturnType<typeof handleRun>>
   | BridgeSessionError;
 
+const ensureKeyNotExpired = (key: MintedKey) =>
+  Clock.currentTimeMillis.pipe(
+    Effect.flatMap((now) =>
+      Effect.fromResult(checkBridgeKeyExpiry(key.expiresAt, now))
+    )
+  );
+
 const handleSession = (
   session: BridgeSession,
-  capability: Capability,
+  key: MintedKey,
   root: ServedRoot,
   shell: SafeShell,
   deadlines: BridgeServerDeadlines
 ) =>
-  withSessionDeadline(
-    "request",
-    deadlines.request,
-    readRequest(session, capability)
-  ).pipe(
+  ensureKeyNotExpired(key).pipe(
+    Effect.flatMap(() =>
+      withSessionDeadline(
+        "request",
+        deadlines.request,
+        readRequest(session, key.capability)
+      )
+    ),
+    // The deadline can pass while the request is still arriving, so re-check
+    // after authentication: an expired key never reaches the shell or a pull.
+    Effect.tap(() => ensureKeyNotExpired(key)),
     Effect.flatMap(
       (request): Effect.Effect<void, RequestHandlerError> =>
         request.type === "run"
@@ -128,7 +154,7 @@ const describeSessionFailure = (cause: Cause.Cause<unknown>): string =>
 
 const serveLoop = (
   listener: BridgeListener,
-  capability: Capability,
+  key: MintedKey,
   root: ServedRoot,
   shell: SafeShell,
   deadlines: BridgeServerDeadlines
@@ -142,7 +168,7 @@ const serveLoop = (
     Effect.scoped(
       listener.accept.pipe(
         Effect.flatMap((session) =>
-          handleSession(session, capability, root, shell, deadlines).pipe(
+          handleSession(session, key, root, shell, deadlines).pipe(
             Effect.ensuring(session.close),
             Effect.tapCause((cause) =>
               Effect.logWarning(
@@ -177,7 +203,7 @@ const serveLoop = (
 
 const serveConcurrently = (
   listener: BridgeListener,
-  capability: Capability,
+  key: MintedKey,
   root: ServedRoot,
   shell: SafeShell,
   deadlines: BridgeServerDeadlines,
@@ -185,7 +211,7 @@ const serveConcurrently = (
 ): Effect.Effect<never, BridgeListenerClosedError> =>
   Effect.forEach(
     Array.from({ length: concurrency }),
-    () => serveLoop(listener, capability, root, shell, deadlines),
+    () => serveLoop(listener, key, root, shell, deadlines),
     { concurrency: "unbounded", discard: true }
   ).pipe(Effect.flatMap(() => Effect.never));
 
@@ -200,25 +226,32 @@ export const openBridge = Effect.fn("BridgeServer.open")(
     readonly maxConcurrentSessions?: number;
     readonly root: string;
     readonly transport: BridgeTransport;
+    readonly ttl?: Duration.Input;
   }) =>
     Effect.gen(function* () {
       const root = yield* ServedRoot.make(options.root);
       const shell = yield* SafeShell.make(root);
       const listener = yield* options.transport.listen;
-      const capability = mintCapability();
+      const mintedAt = yield* Clock.currentTimeMillis;
+      const key: MintedKey = {
+        capability: mintCapability(),
+        expiresAt: mintedAt + Duration.toMillis(options.ttl ?? defaultKeyTtl),
+      };
       const link = yield* Effect.fromResult(
         encodeBridgeKey({
-          capability,
+          capability: key.capability,
+          expiresAt: key.expiresAt,
           locator: listener.locator.toString(),
           transport: "iroh",
         })
       );
 
       return {
+        expiresAt: key.expiresAt,
         link,
         serve: serveConcurrently(
           listener,
-          capability,
+          key,
           root,
           shell,
           {
