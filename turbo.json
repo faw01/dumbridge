@@ -12,14 +12,14 @@
     "fix": {
       "cache": false
     },
-    "pack:check": {
-      "dependsOn": ["build"]
-    },
     "test": {
       "dependsOn": ["^build"]
     },
     "typecheck": {
       "dependsOn": ["^typecheck"]
+    },
+    "verify:tarball": {
+      "dependsOn": ["build"]
     }
   }
 }

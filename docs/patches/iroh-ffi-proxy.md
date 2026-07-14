@@ -1,5 +1,12 @@
 # Iroh FFI proxy patch
 
+This patch exists because proxy-only cloud agents (the Codex cloud release
+gate, issue #9) can only reach an iroh relay by tunneling WSS through the
+environment's HTTP(S) proxy, and the published `@number0/iroh` binding does not
+expose iroh's existing `proxy_url` / `proxy_from_env` builder methods. Until an
+upstream release exposes them, this source patch is the only path to that
+configuration.
+
 ## Status
 
 [`patches/iroh-ffi-proxy.patch`](../../patches/iroh-ffi-proxy.patch) is a
