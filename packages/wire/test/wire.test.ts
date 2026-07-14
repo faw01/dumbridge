@@ -6,9 +6,9 @@ import {
   makePullResponseSession,
   makeRequestSession,
   makeRunResponseSession,
+  type PullManifest,
   type WireDecodeError,
   type WireFrame,
-  type WirePullManifest,
 } from "@dumbridge/wire";
 import { Result } from "effect";
 
@@ -76,7 +76,7 @@ const manifest = {
   kind: "directory",
   name: "bundle",
   totalBytes: 3,
-} satisfies WirePullManifest;
+} satisfies PullManifest;
 
 describe("request session", () => {
   test("decodes frames split across arbitrary input chunks", () => {
@@ -748,7 +748,7 @@ describe("pull response session", () => {
         { kind: "directory", path: "assets" },
         { digest, kind: "file", path: "assets/CON .txt", size: 3 },
       ],
-    } satisfies WirePullManifest;
+    } satisfies PullManifest;
     const encoding = encodeFrame({ manifest: unsafe, type: "manifest" });
     expect(Result.isFailure(encoding)).toBe(true);
     if (Result.isFailure(encoding)) {
@@ -786,7 +786,7 @@ describe("pull response session", () => {
           size: 3,
         },
       ],
-    } satisfies WirePullManifest;
+    } satisfies PullManifest;
     const encoding = encodeFrame({ manifest: missingParent, type: "manifest" });
     expect(Result.isFailure(encoding)).toBe(true);
     if (Result.isFailure(encoding)) {
