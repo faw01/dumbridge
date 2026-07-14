@@ -81,22 +81,20 @@ describe("SafeShell", () => {
       writeFile(join(servedRoot, "secret.txt"), "inside secret\n"),
       writeFile(join(outsideRoot, "secret.txt"), "outside secret\n"),
     ]);
-    const root = await Effect.runPromise(ServedRoot.make(servedRoot));
-    const originalGuard = root.guard;
+    const shell = await makeShell();
     const entered = Promise.withResolvers<void>();
     const resume = Promise.withResolvers<void>();
-    let pauseNextOperation = true;
-    const pausedGuard: typeof root.guard = (operation) =>
-      originalGuard(async () => {
-        if (pauseNextOperation) {
-          pauseNextOperation = false;
-          entered.resolve();
-          await resume.promise;
-        }
-        return operation();
-      });
-    Object.defineProperty(root, "guard", { value: pausedGuard });
-    const shell = await Effect.runPromise(SafeShell.make(root));
+    const originalOpen = hostFileSystem.open;
+    const open = spyOn(hostFileSystem, "open");
+    let paused = false;
+    open.mockImplementation(async (...args) => {
+      if (!paused && basename(String(args[0])) === "secret.txt") {
+        paused = true;
+        entered.resolve();
+        await resume.promise;
+      }
+      return originalOpen(...args);
+    });
     const outcomePromise = Effect.runPromise(
       shell.execute("cat secret.txt")
     ).then(
@@ -104,16 +102,30 @@ describe("SafeShell", () => {
       (error: unknown) => ({ error, type: "failure" as const })
     );
 
-    await entered.promise;
-    await rename(servedRoot, join(fixtureRoot, "original-served"));
-    await symlink(
-      outsideRoot,
-      servedRoot,
-      process.platform === "win32" ? "junction" : "dir"
-    );
-    resume.resolve();
+    const { outcome, secretOpens } = await (async () => {
+      try {
+        await entered.promise;
+        await rename(servedRoot, join(fixtureRoot, "original-served"));
+        await symlink(
+          outsideRoot,
+          servedRoot,
+          process.platform === "win32" ? "junction" : "dir"
+        );
+        resume.resolve();
 
-    const outcome = await outcomePromise;
+        const completedOutcome = await outcomePromise;
+        return {
+          outcome: completedOutcome,
+          secretOpens: open.mock.calls.filter(
+            ([path]) => basename(String(path)) === "secret.txt"
+          ),
+        };
+      } finally {
+        resume.resolve();
+        await outcomePromise;
+        open.mockRestore();
+      }
+    })();
 
     expect(outcome).toMatchObject({
       error: {
@@ -122,6 +134,72 @@ describe("SafeShell", () => {
       },
       type: "failure",
     });
+    expect(secretOpens).toHaveLength(1);
+    expect(JSON.stringify(outcome)).not.toContain("outside secret");
+    expect(JSON.stringify(outcome)).not.toContain(outsideRoot);
+  });
+
+  test("never returns outside content when a nested directory changes during a read", async () => {
+    const directory = join(servedRoot, "dir");
+    await mkdir(directory);
+    await Promise.all([
+      writeFile(join(directory, "secret.txt"), "inside secret\n"),
+      writeFile(join(outsideRoot, "secret.txt"), "outside secret\n"),
+    ]);
+    const shell = await makeShell();
+    const entered = Promise.withResolvers<void>();
+    const resume = Promise.withResolvers<void>();
+    const originalOpen = hostFileSystem.open;
+    const open = spyOn(hostFileSystem, "open");
+    let paused = false;
+    open.mockImplementation(async (...args) => {
+      if (!paused && basename(String(args[0])) === "secret.txt") {
+        paused = true;
+        entered.resolve();
+        await resume.promise;
+      }
+      return originalOpen(...args);
+    });
+    const outcomePromise = Effect.runPromise(
+      shell.execute("cat dir/secret.txt; cat dir/secret.txt")
+    ).then(
+      (result) => ({ result, type: "success" as const }),
+      (error: unknown) => ({ error, type: "failure" as const })
+    );
+
+    const { outcome, secretOpens } = await (async () => {
+      try {
+        await entered.promise;
+        await rename(directory, join(servedRoot, "original-dir"));
+        await symlink(
+          outsideRoot,
+          directory,
+          process.platform === "win32" ? "junction" : "dir"
+        );
+        resume.resolve();
+
+        const completedOutcome = await outcomePromise;
+        return {
+          outcome: completedOutcome,
+          secretOpens: open.mock.calls.filter(
+            ([path]) => basename(String(path)) === "secret.txt"
+          ),
+        };
+      } finally {
+        resume.resolve();
+        await outcomePromise;
+        open.mockRestore();
+      }
+    })();
+
+    expect(outcome).toMatchObject({
+      error: {
+        _tag: "ServedRootChangedError",
+        message: "served root changed after bridge start",
+      },
+      type: "failure",
+    });
+    expect(secretOpens).toHaveLength(1);
     expect(JSON.stringify(outcome)).not.toContain("outside secret");
     expect(JSON.stringify(outcome)).not.toContain(outsideRoot);
   });
@@ -188,17 +266,20 @@ describe("SafeShell", () => {
       ? portableOutsideFile
       : `/${portableOutsideFile}`;
 
-    const [traversal, absolute, linked] = await Promise.all([
-      Effect.runPromise(shell.execute("cat ../outside/secret.txt")),
-      Effect.runPromise(shell.execute(`cat '${absolutePath}'`)),
-      Effect.runPromise(shell.execute("cat escape/secret.txt")),
-    ]);
+    const [traversal, backslashTraversal, absolute, linked] = await Promise.all(
+      [
+        Effect.runPromise(shell.execute("cat ../outside/secret.txt")),
+        Effect.runPromise(shell.execute("cat '..\\outside\\secret.txt'")),
+        Effect.runPromise(shell.execute(`cat '${absolutePath}'`)),
+        Effect.runPromise(shell.execute("cat escape/secret.txt")),
+      ]
+    );
 
-    for (const result of [traversal, absolute, linked]) {
+    for (const result of [traversal, backslashTraversal, absolute, linked]) {
       expect(result.exitCode).not.toBe(0);
       expect(result.stdout).not.toContain("outside secret");
     }
-    for (const result of [traversal, linked]) {
+    for (const result of [traversal, backslashTraversal, linked]) {
       expect(result.stderr).not.toContain(fixtureRoot);
     }
   });
@@ -418,6 +499,29 @@ describe("SafeShell", () => {
       _tag: "ShellLimitExceededError",
       limit: "overlay",
     });
+    expect(await readFile(path, "utf8")).toBe("12345678");
+  });
+
+  test("charges host files materialized by chmod and touch", async () => {
+    const path = join(servedRoot, "host.txt");
+    await writeFile(path, "12345678");
+
+    const errors = await Promise.all(
+      ["chmod 600 host.txt", "touch host.txt"].map(async (script) => {
+        const shell = await makeShell({
+          maxFileReadBytes: 16,
+          maxOverlayBytes: 4,
+        });
+        return Effect.runPromise(Effect.flip(shell.execute(script)));
+      })
+    );
+
+    for (const error of errors) {
+      expect(error).toMatchObject({
+        _tag: "ShellLimitExceededError",
+        limit: "overlay",
+      });
+    }
     expect(await readFile(path, "utf8")).toBe("12345678");
   });
 });
