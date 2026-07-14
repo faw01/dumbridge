@@ -233,7 +233,7 @@ describe.skipIf(process.platform === "win32")(
       const parsed = Effect.runSync(Effect.fromResult(parseBridgeKey(key)));
       const forged = encodeBridgeKey({
         capability: mintCapability(),
-        expiresAt: parsed.expiresAt,
+        expiresAt: parsed.expiresAt ?? Number.MAX_SAFE_INTEGER,
         locator: parsed.locator,
         transport: "iroh",
       });
