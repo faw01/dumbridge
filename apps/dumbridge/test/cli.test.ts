@@ -66,8 +66,10 @@ describe("dumbridge CLI", () => {
     expect(root.stdout).toContain("run");
     expect(root.stdout).toContain("pull");
     expect(root.stdout).toContain("skill");
-    expect(serve.stdout).toContain("dumbridge serve [flags] <root>");
+    expect(serve.stdout).toContain("dumbridge serve [flags] [<root>]");
     expect(serve.stdout).toContain("--ttl");
+    expect(serve.stdout).toContain("--detach");
+    expect(serve.stdout).toContain("--stop");
     expect(run.stdout).toContain("dumbridge run [flags] <script>");
     expect(pullHelp.stdout).toContain(
       "dumbridge pull [flags] <remote-path> [<destination>]"
