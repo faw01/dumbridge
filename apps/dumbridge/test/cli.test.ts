@@ -65,6 +65,7 @@ describe("dumbridge CLI", () => {
     expect(root.stdout).toContain("serve");
     expect(root.stdout).toContain("run");
     expect(root.stdout).toContain("pull");
+    expect(root.stdout).toContain("skill");
     expect(serve.stdout).toContain("dumbridge serve [flags] <root>");
     expect(run.stdout).toContain("dumbridge run [flags] <script>");
     expect(pullHelp.stdout).toContain(
@@ -75,6 +76,18 @@ describe("dumbridge CLI", () => {
     expect(serve.stdout).toContain("DUMBRIDGE_LINK");
     expect(run.stdout).toContain("DUMBRIDGE_LINK");
     expect(pullHelp.stdout).toContain("DUMBRIDGE_LINK");
+  });
+
+  test("prints the bundled agent skill guide", async () => {
+    const skillPath = fileURLToPath(
+      new URL("../../../skills/dumbridge/SKILL.md", import.meta.url)
+    );
+    const guide = await Bun.file(skillPath).text();
+    const result = await invoke("skill");
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stderr).toBe("");
+    expect(result.stdout).toBe(guide);
   });
 
   test("reports a missing bridge link without an Effect cause dump", async () => {

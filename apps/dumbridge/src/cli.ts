@@ -3,6 +3,9 @@
 import { BunRuntime, BunServices } from "@effect/platform-bun";
 import { Config, Effect, Option, pipe, Schema } from "effect";
 import { Argument, Command } from "effect/unstable/cli";
+import skillGuide from "../../../skills/dumbridge/SKILL.md" with {
+  type: "text",
+};
 import packageJson from "../package.json" with { type: "json" };
 import {
   type IrohTransportOptions,
@@ -123,11 +126,19 @@ const pull = Command.make(
   )
 );
 
+const skill = Command.make("skill", {}, () =>
+  write(process.stdout, skillGuide)
+).pipe(
+  Command.withDescription(
+    "Print the agent usage guide without contacting a bridge."
+  )
+);
+
 const command = Command.make("dumbridge").pipe(
   Command.withDescription(
     "Run serve locally, set DUMBRIDGE_LINK in the cloud, then use run or pull."
   ),
-  Command.withSubcommands([serve, run, pull])
+  Command.withSubcommands([serve, run, pull, skill])
 );
 
 const runCli = Command.runWith(command, {
