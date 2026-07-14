@@ -1,12 +1,17 @@
 import { type Capability, CapabilityTextSchema } from "@dumbridge/bridge-key";
 import { Schema } from "effect";
+import {
+  Digest,
+  NonNegativeInt,
+  PathText,
+  type PullManifest,
+  PullManifestSchema,
+} from "./pull-manifest";
 
 export const protocol = "dumbridge/1" as const;
 export const lengthPrefixBytes = 4;
 export const maximumFrameBytes = 1024 * 1024;
 export const maximumHeaderBytes = maximumFrameBytes - lengthPrefixBytes;
-export const maximumManifestEntries = 4096;
-const maximumPathCharacters = 4096;
 const maximumScriptCharacters = 64 * 1024;
 
 const frameTypeNames = [
@@ -25,38 +30,6 @@ const frameTypeNames = [
 ] as const;
 export const knownHeaderTypes = new Set<string>(frameTypeNames);
 
-export const NonNegativeInt = Schema.Int.check(
-  Schema.isGreaterThanOrEqualTo(0)
-);
-const Path = Schema.String.check(
-  Schema.isNonEmpty(),
-  Schema.isMaxLength(maximumPathCharacters)
-);
-const Digest = Schema.String.check(
-  Schema.isLengthBetween(64, 64),
-  Schema.isPattern(/^[a-f0-9]{64}$/)
-);
-
-const FileEntrySchema = Schema.Struct({
-  digest: Digest,
-  kind: Schema.Literal("file"),
-  path: Path,
-  size: NonNegativeInt,
-});
-const DirectoryEntrySchema = Schema.Struct({
-  kind: Schema.Literal("directory"),
-  path: Path,
-});
-export const PullManifestSchema = Schema.Struct({
-  digestAlgorithm: Schema.Literal("sha256"),
-  entries: Schema.Array(
-    Schema.Union([FileEntrySchema, DirectoryEntrySchema])
-  ).check(Schema.isMaxLength(maximumManifestEntries)),
-  kind: Schema.Literals(["directory", "file"]),
-  name: Path,
-  totalBytes: NonNegativeInt,
-});
-
 export const AuthHeaderSchema = Schema.Struct({
   capability: CapabilityTextSchema,
   protocol: Schema.Literal(protocol),
@@ -72,7 +45,7 @@ const RunHeaderSchema = Schema.Struct({
 });
 const PullHeaderSchema = Schema.Struct({
   protocol: Schema.Literal(protocol),
-  remotePath: Path,
+  remotePath: PathText,
   type: Schema.Literal("pull"),
 });
 const StdoutHeaderSchema = Schema.Struct({
@@ -95,7 +68,7 @@ const ManifestHeaderSchema = Schema.Struct({
   type: Schema.Literal("manifest"),
 });
 const FileStartHeaderSchema = Schema.Struct({
-  path: Path,
+  path: PathText,
   protocol: Schema.Literal(protocol),
   size: NonNegativeInt,
   type: Schema.Literal("file-start"),
@@ -153,12 +126,7 @@ export const HeaderEnvelopeSchema = Schema.Struct({
 });
 
 export type WireHeader = typeof WireHeaderSchema.Type;
-export type WirePullManifest = typeof PullManifestSchema.Type;
 export type PullFailureCode = typeof PullFailureCodeSchema.Type;
-export type WirePullFileEntry = Extract<
-  WirePullManifest["entries"][number],
-  { readonly kind: "file" }
->;
 
 export type BridgeRequest =
   | { readonly script: string; readonly type: "run" }
@@ -173,7 +141,7 @@ export type RunResponseEvent =
     };
 
 export type PullResponseEvent =
-  | { readonly manifest: WirePullManifest; readonly type: "manifest" }
+  | { readonly manifest: PullManifest; readonly type: "manifest" }
   | {
       readonly path: string;
       readonly size: number;

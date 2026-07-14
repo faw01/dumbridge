@@ -3,6 +3,7 @@ import {
   capabilitiesEqual,
   parseCapability,
 } from "@dumbridge/bridge-key";
+import { parseRemotePath } from "@dumbridge/remote-path";
 import { Result } from "effect";
 import { decodeAuthenticatedRequestFrame, decodeFrameBody } from "./codec";
 import {
@@ -11,18 +12,17 @@ import {
   illegal,
   limitExceeded,
   resolveLimits,
+  validateManifest,
   type WireDecodeError,
   type WireSessionLimits,
 } from "./errors";
-import { canonicalPath, validateManifest } from "./manifest";
 import type {
   BridgeRequest,
   PullResponseEvent,
   RawFrame,
   RunResponseEvent,
-  WirePullFileEntry,
-  WirePullManifest,
 } from "./protocol";
+import type { PullFileEntry, PullManifest } from "./pull-manifest";
 import {
   emit,
   makeSession,
@@ -87,7 +87,7 @@ export const makeRequestSession = (
       return Result.succeed(emit({ script: frame.header.script, type: "run" }));
     }
     if (frame.header.type === "pull") {
-      if (!canonicalPath(frame.header.remotePath)) {
+      if (Result.isFailure(parseRemotePath(frame.header.remotePath))) {
         return Result.fail(
           illegal("path", "Pull path must be canonical and relative.")
         );
@@ -203,13 +203,13 @@ export const makePullResponseSession = (
   const limits = resolved.success;
 
   interface CurrentFile {
-    readonly entry: WirePullFileEntry;
+    readonly entry: PullFileEntry;
     received: number;
   }
 
   let state: "manifest" | "between-files" | "file" | "complete" = "manifest";
-  let manifest: WirePullManifest | undefined;
-  let files: readonly WirePullFileEntry[] = [];
+  let manifest: PullManifest | undefined;
+  let files: readonly PullFileEntry[] = [];
   let nextFileIndex = 0;
   let currentFile: CurrentFile | undefined;
   let transferredBytes = 0;

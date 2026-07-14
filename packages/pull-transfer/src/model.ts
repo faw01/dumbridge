@@ -1,43 +1,20 @@
-import { posix, win32 } from "node:path";
-import { type Effect, Schema, type Stream } from "effect";
+import { parseRemotePath } from "@dumbridge/remote-path";
+import {
+  maximumFileBytes,
+  maximumManifestEntries,
+  maximumTransferBytes,
+  type PullFileEntry,
+  type PullManifest,
+  type PullManifestViolation,
+  validatePullManifest,
+} from "@dumbridge/wire";
+import { type Effect, Result, type Stream } from "effect";
 import {
   type PullError,
   PullIntegrityError,
   PullLimitError,
   PullPathError,
 } from "./errors";
-
-const digestPattern = /^[0-9a-f]{64}$/;
-const windowsDrivePattern = /^[a-z]:/i;
-const windowsForbiddenComponentPattern = /[<>:"|?*]/;
-const windowsReservedBasePattern =
-  /^(?:con|prn|aux|nul|conin\$|conout\$|com[1-9¹²³]|lpt[1-9¹²³])$/i;
-const FileEntrySchema = Schema.Struct({
-  digest: Schema.String,
-  kind: Schema.Literal("file"),
-  path: Schema.String,
-  size: Schema.Number,
-});
-
-const DirectoryEntrySchema = Schema.Struct({
-  kind: Schema.Literal("directory"),
-  path: Schema.String,
-});
-
-const PullManifestSchema = Schema.Struct({
-  digestAlgorithm: Schema.Literal("sha256"),
-  entries: Schema.Array(Schema.Union([FileEntrySchema, DirectoryEntrySchema])),
-  kind: Schema.Union([Schema.Literal("file"), Schema.Literal("directory")]),
-  name: Schema.String,
-  totalBytes: Schema.Number,
-});
-
-export type PullManifest = Schema.Schema.Type<typeof PullManifestSchema>;
-export type PullManifestEntry = PullManifest["entries"][number];
-export type PullFileEntry = Extract<
-  PullManifestEntry,
-  { readonly kind: "file" }
->;
 
 export interface PullLimits {
   readonly chunkBytes: number;
@@ -64,9 +41,9 @@ export interface PullResult {
 
 const defaultLimits: PullLimits = {
   chunkBytes: 64 * 1024,
-  maxEntries: 4096,
-  maxFileBytes: 1024 * 1024 * 1024,
-  maxTotalBytes: 2 * 1024 * 1024 * 1024,
+  maxEntries: maximumManifestEntries,
+  maxFileBytes: maximumFileBytes,
+  maxTotalBytes: maximumTransferBytes,
 };
 
 export const compareText = (left: string, right: string) => {
@@ -95,43 +72,15 @@ export const limitsFrom = (
   return limits;
 };
 
-export const pathParts = (path: string) => {
-  if (
-    path.length === 0 ||
-    path.includes("\0") ||
-    path.includes("\\") ||
-    posix.isAbsolute(path) ||
-    windowsDrivePattern.test(path) ||
-    win32.isAbsolute(path)
-  ) {
+export const pathParts = (path: string): readonly string[] => {
+  const parsed = parseRemotePath(path);
+  if (Result.isFailure(parsed)) {
     throw new PullPathError({
       path,
       reason: "path must be canonical and relative",
     });
   }
-
-  const parts = path.split("/");
-  if (
-    parts.some((part) => {
-      const windowsBase = part.split(".", 1)[0]?.trimEnd() ?? "";
-      return (
-        part.length === 0 ||
-        part === "." ||
-        part === ".." ||
-        part.endsWith(".") ||
-        part.endsWith(" ") ||
-        Array.from(part).some((character) => character.charCodeAt(0) < 32) ||
-        windowsForbiddenComponentPattern.test(part) ||
-        windowsReservedBasePattern.test(windowsBase)
-      );
-    })
-  ) {
-    throw new PullPathError({
-      path,
-      reason: "path must be canonical and relative",
-    });
-  }
-  return parts;
+  return parsed.success.segments;
 };
 
 export const resolvePullDestination = (
@@ -183,96 +132,72 @@ export const totalLimit = (total: number, limits: PullLimits) => {
   }
 };
 
-const decodeManifest = Schema.decodeUnknownSync(PullManifestSchema);
+const receiverLimitNames = {
+  "file-bytes": "file bytes",
+  "manifest-entries": "entries",
+  "transfer-bytes": "total bytes",
+} as const;
+
+const manifestViolationError = (
+  violation: PullManifestViolation
+): PullError => {
+  switch (violation.kind) {
+    case "entry-path":
+    case "name":
+      return new PullPathError({
+        path: violation.path,
+        reason: "path must be canonical and relative",
+      });
+    case "limit":
+      return new PullLimitError({
+        limit: receiverLimitNames[violation.limit],
+        maximum: violation.maximum,
+        observed: violation.observed,
+      });
+    case "order":
+      return new PullIntegrityError({
+        actual: violation.path,
+        expected: "unique entries in lexical order",
+        path: "manifest",
+      });
+    case "parents":
+      return new PullIntegrityError({
+        actual: violation.path,
+        expected: "declared parent directories",
+        path: "manifest",
+      });
+    case "totals":
+      return new PullIntegrityError({
+        actual: String(violation.declared),
+        expected: String(violation.computed),
+        path: "manifest",
+      });
+    case "file-shape":
+      return new PullIntegrityError({
+        actual: "invalid file manifest",
+        expected: "one named file entry",
+        path: "manifest",
+      });
+    default:
+      return new PullIntegrityError({
+        actual: "invalid manifest",
+        expected: "valid manifest",
+        path: "manifest",
+      });
+  }
+};
 
 export const manifestFrom = (
   input: unknown,
   limits: PullLimits
 ): PullManifest => {
-  let manifest: PullManifest;
-  try {
-    manifest = decodeManifest(input);
-  } catch {
-    // biome-ignore lint/style/useErrorCause: Decoder details are not part of the wire error.
-    throw new PullIntegrityError({
-      actual: "invalid manifest",
-      expected: "valid manifest",
-      path: "manifest",
-    });
+  const validated = validatePullManifest(input, {
+    maxFileBytes: limits.maxFileBytes,
+    maxManifestEntries: limits.maxEntries,
+    maxTransferBytes: limits.maxTotalBytes,
+  });
+  if (Result.isFailure(validated)) {
+    throw manifestViolationError(validated.failure);
   }
-
-  const nameParts = pathParts(manifest.name);
-  if (nameParts.length !== 1) {
-    throw new PullPathError({
-      path: manifest.name,
-      reason: "manifest name must have one component",
-    });
-  }
-  entryLimit(manifest.entries.length, limits);
-
-  const directories = new Set<string>();
-  const paths = new Set<string>();
-  let totalBytes = 0;
-  let previousPath = "";
-  for (const entry of manifest.entries) {
-    const parts = pathParts(entry.path);
-    if (paths.has(entry.path) || compareText(previousPath, entry.path) >= 0) {
-      throw new PullIntegrityError({
-        actual: entry.path,
-        expected: "unique entries in lexical order",
-        path: "manifest",
-      });
-    }
-    paths.add(entry.path);
-    previousPath = entry.path;
-
-    const parentParts = parts.slice(0, -1);
-    for (let index = 1; index <= parentParts.length; index += 1) {
-      const parent = parentParts.slice(0, index).join("/");
-      if (!directories.has(parent)) {
-        throw new PullIntegrityError({
-          actual: entry.path,
-          expected: `declared parent directory ${parent}`,
-          path: "manifest",
-        });
-      }
-    }
-
-    if (entry.kind === "directory") {
-      directories.add(entry.path);
-      continue;
-    }
-    fileLimit(entry.size, limits);
-    if (!digestPattern.test(entry.digest)) {
-      throw new PullIntegrityError({
-        actual: entry.digest,
-        expected: "lowercase sha256 digest",
-        path: entry.path,
-      });
-    }
-    totalBytes += entry.size;
-    totalLimit(totalBytes, limits);
-  }
-
-  if (manifest.totalBytes !== totalBytes) {
-    throw new PullIntegrityError({
-      actual: String(manifest.totalBytes),
-      expected: String(totalBytes),
-      path: "manifest",
-    });
-  }
-  if (
-    manifest.kind === "file" &&
-    (manifest.entries.length !== 1 ||
-      manifest.entries[0]?.kind !== "file" ||
-      manifest.entries[0].path !== manifest.name)
-  ) {
-    throw new PullIntegrityError({
-      actual: "invalid file manifest",
-      expected: "one named file entry",
-      path: "manifest",
-    });
-  }
-
-  return manifest;
+  return validated.success.manifest;
 };

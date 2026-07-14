@@ -59,7 +59,19 @@
       "name": "@dumbridge/pull-transfer",
       "version": "0.0.0",
       "dependencies": {
+        "@dumbridge/remote-path": "workspace:*",
         "@dumbridge/served-root": "workspace:*",
+        "@dumbridge/wire": "workspace:*",
+        "effect": "4.0.0-beta.98",
+      },
+      "devDependencies": {
+        "@types/bun": "1.3.14",
+      },
+    },
+    "packages/remote-path": {
+      "name": "@dumbridge/remote-path",
+      "version": "0.0.0",
+      "dependencies": {
         "effect": "4.0.0-beta.98",
       },
       "devDependencies": {
@@ -82,6 +94,7 @@
       "name": "@dumbridge/served-root",
       "version": "0.0.0",
       "dependencies": {
+        "@dumbridge/remote-path": "workspace:*",
         "effect": "4.0.0-beta.98",
         "just-bash": "3.1.0",
       },
@@ -94,6 +107,7 @@
       "version": "0.0.0",
       "dependencies": {
         "@dumbridge/bridge-key": "workspace:*",
+        "@dumbridge/remote-path": "workspace:*",
         "effect": "4.0.0-beta.98",
       },
       "devDependencies": {
@@ -167,6 +181,8 @@
     "@dumbridge/bridge-transport": ["@dumbridge/bridge-transport@workspace:packages/bridge-transport"],
 
     "@dumbridge/pull-transfer": ["@dumbridge/pull-transfer@workspace:packages/pull-transfer"],
+
+    "@dumbridge/remote-path": ["@dumbridge/remote-path@workspace:packages/remote-path"],
 
     "@dumbridge/safe-shell": ["@dumbridge/safe-shell@workspace:packages/safe-shell"],
 

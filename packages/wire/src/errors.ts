@@ -1,5 +1,15 @@
 import { Result, Schema } from "effect";
-import { maximumManifestEntries, NonNegativeInt } from "./protocol";
+import {
+  maximumFileBytes,
+  maximumManifestEntries,
+  maximumTransferBytes,
+} from "./limits";
+import {
+  NonNegativeInt,
+  type PullManifestViolation,
+  type ValidatedPullManifest,
+  validatePullManifest,
+} from "./pull-manifest";
 
 export interface WireSessionLimits {
   readonly maxFileBytes: number;
@@ -10,11 +20,11 @@ export interface WireSessionLimits {
 }
 
 export const defaultSessionLimits: WireSessionLimits = {
-  maxFileBytes: 1024 * 1024 * 1024,
+  maxFileBytes: maximumFileBytes,
   maxFramesPerSession: 65_536,
   maxManifestEntries: maximumManifestEntries,
   maxOutputBytes: 1024 * 1024,
-  maxTransferBytes: 2 * 1024 * 1024 * 1024,
+  maxTransferBytes: maximumTransferBytes,
 };
 
 const sessionLimitNames = [
@@ -138,6 +148,64 @@ export const limitExceeded = (
     message: "Wire session exceeded a configured limit.",
     observed,
   });
+
+const manifestViolationError = (
+  violation: PullManifestViolation
+): IllegalFrameError | WireLimitExceededError => {
+  switch (violation.kind) {
+    case "limit":
+      return limitExceeded(
+        violation.limit,
+        violation.maximum,
+        violation.observed
+      );
+    case "shape":
+      return illegal(
+        "manifest",
+        "Pull manifest does not match the wire schema."
+      );
+    case "name":
+      return illegal("manifest", "Pull manifest name is not canonical.");
+    case "entry-path":
+    case "order":
+      return illegal(
+        "manifest",
+        "Pull manifest paths are not canonical and ordered."
+      );
+    case "parents":
+      return illegal("manifest", "Pull manifest omits a parent directory.");
+    case "totals":
+      return illegal(
+        "manifest",
+        "Pull manifest total does not match its files."
+      );
+    case "file-shape":
+      return illegal(
+        "manifest",
+        "File manifest does not describe one named file."
+      );
+    default:
+      return illegal("manifest", "Pull manifest is invalid.");
+  }
+};
+
+export const validateManifest = (
+  input: unknown,
+  limits: WireSessionLimits
+): Result.Result<
+  ValidatedPullManifest,
+  IllegalFrameError | WireLimitExceededError
+> => {
+  const validated = validatePullManifest(input, {
+    maxFileBytes: limits.maxFileBytes,
+    maxManifestEntries: limits.maxManifestEntries,
+    maxTransferBytes: limits.maxTransferBytes,
+  });
+  if (Result.isSuccess(validated)) {
+    return Result.succeed(validated.success);
+  }
+  return Result.fail(manifestViolationError(validated.failure));
+};
 
 export const resolveLimits = (
   overrides: Partial<WireSessionLimits>

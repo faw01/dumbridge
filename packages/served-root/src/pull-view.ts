@@ -1,7 +1,9 @@
 import { Buffer } from "node:buffer";
 import { createHash } from "node:crypto";
 import { promises as hostFileSystem, type Stats } from "node:fs";
-import { join, posix, win32 } from "node:path";
+import { join } from "node:path";
+import { parseRemotePath } from "@dumbridge/remote-path";
+import { Result } from "effect";
 import {
   ServedRootChangedError,
   ServedRootEntryTypeError,
@@ -29,8 +31,6 @@ import {
   sourceEntryFrom,
   sourceRevisionMatches,
 } from "./source-revision";
-
-const windowsDrivePattern = /^[a-z]:/i;
 
 export interface ServedRootPullView {
   readonly inspect: (
@@ -75,24 +75,15 @@ class SourceReservationFailure {
 }
 
 const parsedSourcePath = (path: string): ParsedSourcePath => {
-  const parts = path.split("/");
-  if (
-    path.length === 0 ||
-    path.includes("\0") ||
-    path.includes("\\") ||
-    posix.isAbsolute(path) ||
-    win32.isAbsolute(path) ||
-    windowsDrivePattern.test(path) ||
-    posix.normalize(path) !== path ||
-    parts.some((part) => part.length === 0 || part === "." || part === "..")
-  ) {
+  const parsed = parseRemotePath(path);
+  if (Result.isFailure(parsed)) {
     throw new ServedRootPathError({
       path,
       reason: "path must be canonical and relative",
     });
   }
   return {
-    parts,
+    parts: parsed.success.segments,
     path,
     virtualPath: `${virtualRoot}/${path}`,
   };

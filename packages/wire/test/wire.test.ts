@@ -6,9 +6,9 @@ import {
   makePullResponseSession,
   makeRequestSession,
   makeRunResponseSession,
+  type PullManifest,
   type WireDecodeError,
   type WireFrame,
-  type WirePullManifest,
 } from "@dumbridge/wire";
 import { Result } from "effect";
 
@@ -76,7 +76,7 @@ const manifest = {
   kind: "directory",
   name: "bundle",
   totalBytes: 3,
-} satisfies WirePullManifest;
+} satisfies PullManifest;
 
 describe("request session", () => {
   test("decodes frames split across arbitrary input chunks", () => {
@@ -203,6 +203,43 @@ describe("request session", () => {
         _tag: "IllegalFrameError",
         reason: "payload",
       });
+    }
+  });
+
+  test("rejects Windows-unsafe pull paths at encode and decode seams", () => {
+    const paths = [
+      "folder/CON",
+      "folder/CON .txt",
+      "conout$.log",
+      "folder/name.",
+      "folder/name ",
+      "folder/has<angle",
+      "folder/file.txt:stream",
+    ];
+    for (const remotePath of paths) {
+      const encoding = encodeFrame({ remotePath, type: "pull" });
+      expect(Result.isFailure(encoding)).toBe(true);
+      if (Result.isFailure(encoding)) {
+        expect(encoding.failure).toMatchObject({
+          _tag: "IllegalFrameError",
+          reason: "path",
+        });
+      }
+
+      const session = success(makeRequestSession(capability));
+      const decoding = session.push(
+        joinChunks(
+          encoded({ capability, type: "auth" }),
+          rawFrame({ protocol: "dumbridge/1", remotePath, type: "pull" })
+        )
+      );
+      expect(Result.isFailure(decoding)).toBe(true);
+      if (Result.isFailure(decoding)) {
+        expect(decoding.failure).toMatchObject({
+          _tag: "IllegalFrameError",
+          reason: "path",
+        });
+      }
     }
   });
 
@@ -704,6 +741,40 @@ describe("pull response session", () => {
     }
   });
 
+  test("rejects Windows-unsafe manifest entry paths at encode and decode seams", () => {
+    const unsafe = {
+      ...manifest,
+      entries: [
+        { kind: "directory", path: "assets" },
+        { digest, kind: "file", path: "assets/CON .txt", size: 3 },
+      ],
+    } satisfies PullManifest;
+    const encoding = encodeFrame({ manifest: unsafe, type: "manifest" });
+    expect(Result.isFailure(encoding)).toBe(true);
+    if (Result.isFailure(encoding)) {
+      expect(encoding.failure).toMatchObject({
+        _tag: "IllegalFrameError",
+        reason: "manifest",
+      });
+    }
+
+    const session = success(makePullResponseSession());
+    const decoding = session.push(
+      rawFrame({
+        manifest: unsafe,
+        protocol: "dumbridge/1",
+        type: "manifest",
+      })
+    );
+    expect(Result.isFailure(decoding)).toBe(true);
+    if (Result.isFailure(decoding)) {
+      expect(decoding.failure).toMatchObject({
+        _tag: "IllegalFrameError",
+        reason: "manifest",
+      });
+    }
+  });
+
   test("rejects manifests that omit declared parent directories", () => {
     const missingParent = {
       ...manifest,
@@ -715,7 +786,7 @@ describe("pull response session", () => {
           size: 3,
         },
       ],
-    } satisfies WirePullManifest;
+    } satisfies PullManifest;
     const encoding = encodeFrame({ manifest: missingParent, type: "manifest" });
     expect(Result.isFailure(encoding)).toBe(true);
     if (Result.isFailure(encoding)) {

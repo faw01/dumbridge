@@ -1,4 +1,5 @@
 import { encodeCapability } from "@dumbridge/bridge-key";
+import { parseRemotePath } from "@dumbridge/remote-path";
 import { Result, Schema } from "effect";
 import {
   defaultSessionLimits,
@@ -8,10 +9,10 @@ import {
   malformed,
   UnknownFrameTypeError,
   UnsupportedProtocolError,
+  validateManifest,
   type WireDecodeError,
   type WireEncodeError,
 } from "./errors";
-import { canonicalPath, validateManifest } from "./manifest";
 import {
   AuthHeaderSchema,
   HeaderEnvelopeSchema,
@@ -112,7 +113,7 @@ const frameToRaw = (
         payload: empty,
       });
     case "pull":
-      if (!canonicalPath(frame.remotePath)) {
+      if (Result.isFailure(parseRemotePath(frame.remotePath))) {
         return Result.fail(
           illegal("path", "Pull path must be canonical and relative.")
         );
@@ -166,7 +167,7 @@ const frameToRaw = (
       });
     }
     case "file-start":
-      if (!canonicalPath(frame.path)) {
+      if (Result.isFailure(parseRemotePath(frame.path))) {
         return Result.fail(
           illegal("path", "File path must be canonical and relative.")
         );

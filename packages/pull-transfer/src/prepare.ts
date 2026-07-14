@@ -4,6 +4,11 @@ import type {
   SourceEntry,
   SourceRevision,
 } from "@dumbridge/served-root";
+import type {
+  PullFileEntry,
+  PullManifest,
+  PullManifestEntry,
+} from "@dumbridge/wire";
 import { Effect, Stream } from "effect";
 import type { PullError } from "./errors";
 import { changed, mapPullError, PullPathError } from "./errors";
@@ -12,10 +17,7 @@ import {
   entryLimit,
   fileLimit,
   limitsFrom,
-  type PullFileEntry,
   type PullLimits,
-  type PullManifest,
-  type PullManifestEntry,
   type PullSource,
   pathParts,
   totalLimit,

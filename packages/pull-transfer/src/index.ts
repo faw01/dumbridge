@@ -1,3 +1,8 @@
+export type {
+  PullFileEntry,
+  PullManifest,
+  PullManifestEntry,
+} from "@dumbridge/wire";
 export {
   type PullError,
   PullIOError,
@@ -9,9 +14,6 @@ export {
 } from "./errors";
 export { materializePull } from "./materialize";
 export {
-  type PullFileEntry,
-  type PullManifest,
-  type PullManifestEntry,
   type PullRead,
   type PullResult,
   type PullSource,

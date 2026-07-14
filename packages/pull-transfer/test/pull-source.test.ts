@@ -119,6 +119,7 @@ describe("pull transfer source", () => {
         "folder\\secret",
         "folder//secret",
         "folder/./secret",
+        `folder/${"a".repeat(4096)}`,
       ];
 
       const errors = await Promise.all(
