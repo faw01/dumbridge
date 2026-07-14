@@ -206,6 +206,43 @@ describe("request session", () => {
     }
   });
 
+  test("rejects Windows-unsafe pull paths at encode and decode seams", () => {
+    const paths = [
+      "folder/CON",
+      "folder/CON .txt",
+      "conout$.log",
+      "folder/name.",
+      "folder/name ",
+      "folder/has<angle",
+      "folder/file.txt:stream",
+    ];
+    for (const remotePath of paths) {
+      const encoding = encodeFrame({ remotePath, type: "pull" });
+      expect(Result.isFailure(encoding)).toBe(true);
+      if (Result.isFailure(encoding)) {
+        expect(encoding.failure).toMatchObject({
+          _tag: "IllegalFrameError",
+          reason: "path",
+        });
+      }
+
+      const session = success(makeRequestSession(capability));
+      const decoding = session.push(
+        joinChunks(
+          encoded({ capability, type: "auth" }),
+          rawFrame({ protocol: "dumbridge/1", remotePath, type: "pull" })
+        )
+      );
+      expect(Result.isFailure(decoding)).toBe(true);
+      if (Result.isFailure(decoding)) {
+        expect(decoding.failure).toMatchObject({
+          _tag: "IllegalFrameError",
+          reason: "path",
+        });
+      }
+    }
+  });
+
   test("never retains untrusted protocol or type strings in errors", () => {
     const secret = "dumbridge1_SECRET_BEARER";
     const protocolSession = success(makeRequestSession(capability));
@@ -691,6 +728,40 @@ describe("pull response session", () => {
     const decoding = session.push(
       rawFrame({
         manifest: inconsistent,
+        protocol: "dumbridge/1",
+        type: "manifest",
+      })
+    );
+    expect(Result.isFailure(decoding)).toBe(true);
+    if (Result.isFailure(decoding)) {
+      expect(decoding.failure).toMatchObject({
+        _tag: "IllegalFrameError",
+        reason: "manifest",
+      });
+    }
+  });
+
+  test("rejects Windows-unsafe manifest entry paths at encode and decode seams", () => {
+    const unsafe = {
+      ...manifest,
+      entries: [
+        { kind: "directory", path: "assets" },
+        { digest, kind: "file", path: "assets/CON .txt", size: 3 },
+      ],
+    } satisfies WirePullManifest;
+    const encoding = encodeFrame({ manifest: unsafe, type: "manifest" });
+    expect(Result.isFailure(encoding)).toBe(true);
+    if (Result.isFailure(encoding)) {
+      expect(encoding.failure).toMatchObject({
+        _tag: "IllegalFrameError",
+        reason: "manifest",
+      });
+    }
+
+    const session = success(makePullResponseSession());
+    const decoding = session.push(
+      rawFrame({
+        manifest: unsafe,
         protocol: "dumbridge/1",
         type: "manifest",
       })

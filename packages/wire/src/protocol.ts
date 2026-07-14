@@ -1,4 +1,5 @@
 import { type Capability, CapabilityTextSchema } from "@dumbridge/bridge-key";
+import { maximumRemotePathCharacters } from "@dumbridge/remote-path";
 import { Schema } from "effect";
 
 export const protocol = "dumbridge/1" as const;
@@ -6,7 +7,6 @@ export const lengthPrefixBytes = 4;
 export const maximumFrameBytes = 1024 * 1024;
 export const maximumHeaderBytes = maximumFrameBytes - lengthPrefixBytes;
 export const maximumManifestEntries = 4096;
-const maximumPathCharacters = 4096;
 const maximumScriptCharacters = 64 * 1024;
 
 const frameTypeNames = [
@@ -30,7 +30,7 @@ export const NonNegativeInt = Schema.Int.check(
 );
 const Path = Schema.String.check(
   Schema.isNonEmpty(),
-  Schema.isMaxLength(maximumPathCharacters)
+  Schema.isMaxLength(maximumRemotePathCharacters)
 );
 const Digest = Schema.String.check(
   Schema.isLengthBetween(64, 64),

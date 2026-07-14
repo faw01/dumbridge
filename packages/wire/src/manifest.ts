@@ -1,3 +1,4 @@
+import { parseRemotePath } from "@dumbridge/remote-path";
 import { Result, Schema } from "effect";
 import {
   type IllegalFrameError,
@@ -12,8 +13,6 @@ import {
   type WirePullManifest,
 } from "./protocol";
 
-const windowsDrivePattern = /^[a-z]:/i;
-
 export interface ValidatedManifest {
   readonly files: readonly WirePullFileEntry[];
   readonly manifest: WirePullManifest;
@@ -25,19 +24,10 @@ interface ValidatedManifestEntries {
 }
 
 export const canonicalPath = (path: string, singlePart = false): boolean => {
-  if (
-    path.length === 0 ||
-    path.includes("\0") ||
-    path.includes("\\") ||
-    path.startsWith("/") ||
-    windowsDrivePattern.test(path)
-  ) {
-    return false;
-  }
-  const parts = path.split("/");
+  const parsed = parseRemotePath(path);
   return (
-    (!singlePart || parts.length === 1) &&
-    parts.every((part) => part.length > 0 && part !== "." && part !== "..")
+    Result.isSuccess(parsed) &&
+    (!singlePart || parsed.success.segments.length === 1)
   );
 };
 
