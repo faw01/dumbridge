@@ -27,6 +27,8 @@ export interface ServedRootReadView {
   readonly begin: (signal: AbortSignal) => void;
   readonly fileSystem: IFileSystem;
   readonly limitExceeded: ServedRootLimit | undefined;
+  /** First virtual path a read missed outside the served root, if any. */
+  readonly outsideRootPath: string | undefined;
   readonly sourceFailure:
     | ServedRootChangedError
     | ServedRootSourceChangedError
@@ -40,6 +42,13 @@ export class RequestBudgetOverlayFs extends OverlayFs {
     | ServedRootChangedError
     | ServedRootSourceChangedError
     | undefined;
+
+  get outsideRootPath(): string | undefined {
+    const [first] = this.outsideRootMisses;
+    return first;
+  }
+
+  private readonly outsideRootMisses = new Set<string>();
 
   private activeHostReads = 0;
   private readonly chargedEntryPaths = new Set([virtualRoot]);
@@ -179,6 +188,42 @@ export class RequestBudgetOverlayFs extends OverlayFs {
 
   private normalize(path: string) {
     return super.resolvePath("/", path);
+  }
+
+  // Escape branding stays at path resolution, above the overlay: the check is
+  // purely syntactic on the normal form and never consults the host tree, so
+  // it cannot reveal what exists outside the jail. Only a read that actually
+  // missed records the escape, and a later successful write to the same path
+  // erases it again, because the shell probes a redirect target with stat
+  // before creating it; overlay scratch content outside the root (for example
+  // a script's own /tmp writes) therefore stays unbranded.
+  private recordOutsideRootMiss(path: string, error: unknown) {
+    if (!isMissingRead(error)) {
+      return;
+    }
+    const normalized = this.normalize(path);
+    if (
+      normalized !== virtualRoot &&
+      !normalized.startsWith(`${virtualRoot}/`)
+    ) {
+      this.outsideRootMisses.add(normalized);
+    }
+  }
+
+  private clearOutsideRootMiss(path: string) {
+    this.outsideRootMisses.delete(this.normalize(path));
+  }
+
+  private async readGuarded<A>(
+    path: string,
+    operation: () => Promise<A>
+  ): Promise<A> {
+    try {
+      return await this.whileGuarded([path], operation);
+    } catch (error) {
+      this.recordOutsideRootMiss(path, error);
+      throw error;
+    }
   }
 
   private chargeEntries(path: string, includeParents: boolean) {
@@ -405,7 +450,7 @@ export class RequestBudgetOverlayFs extends OverlayFs {
     ...args: Parameters<OverlayFs["readFileBuffer"]>
   ): ReturnType<OverlayFs["readFileBuffer"]> {
     try {
-      return await this.whileGuarded([args[0]], () => {
+      return await this.readGuarded(args[0], () => {
         const normalized = this.normalize(args[0]);
         const location = this.hostLocation(normalized);
         const isServedPath =
@@ -444,6 +489,7 @@ export class RequestBudgetOverlayFs extends OverlayFs {
       const normalized = this.normalize(args[0]);
       this.overlayFilePaths.add(normalized);
       this.tombstonePaths.delete(normalized);
+      this.clearOutsideRootMiss(normalized);
     });
   }
 
@@ -472,6 +518,7 @@ export class RequestBudgetOverlayFs extends OverlayFs {
       await super.appendFile(...args);
       this.overlayFilePaths.add(normalized);
       this.tombstonePaths.delete(normalized);
+      this.clearOutsideRootMiss(normalized);
     });
   }
 
@@ -484,13 +531,13 @@ export class RequestBudgetOverlayFs extends OverlayFs {
   override stat(
     ...args: Parameters<OverlayFs["stat"]>
   ): ReturnType<OverlayFs["stat"]> {
-    return this.whileGuarded([args[0]], () => super.stat(...args));
+    return this.readGuarded(args[0], () => super.stat(...args));
   }
 
   override lstat(
     ...args: Parameters<OverlayFs["lstat"]>
   ): ReturnType<OverlayFs["lstat"]> {
-    return this.whileGuarded([args[0]], () => super.lstat(...args));
+    return this.readGuarded(args[0], () => super.lstat(...args));
   }
 
   override async mkdir(
@@ -500,21 +547,20 @@ export class RequestBudgetOverlayFs extends OverlayFs {
       this.chargeEntries(args[0], true);
       await super.mkdir(...args);
       this.tombstonePaths.delete(this.normalize(args[0]));
+      this.clearOutsideRootMiss(args[0]);
     });
   }
 
   override readdir(
     ...args: Parameters<OverlayFs["readdir"]>
   ): ReturnType<OverlayFs["readdir"]> {
-    return this.whileGuarded([args[0]], () => super.readdir(...args));
+    return this.readGuarded(args[0], () => super.readdir(...args));
   }
 
   override readdirWithFileTypes(
     ...args: Parameters<OverlayFs["readdirWithFileTypes"]>
   ): ReturnType<OverlayFs["readdirWithFileTypes"]> {
-    return this.whileGuarded([args[0]], () =>
-      super.readdirWithFileTypes(...args)
-    );
+    return this.readGuarded(args[0], () => super.readdirWithFileTypes(...args));
   }
 
   override async rm(
@@ -532,13 +578,19 @@ export class RequestBudgetOverlayFs extends OverlayFs {
   override cp(
     ...args: Parameters<OverlayFs["cp"]>
   ): ReturnType<OverlayFs["cp"]> {
-    return this.whileGuarded([args[0], args[1]], () => super.cp(...args));
+    return this.whileGuarded([args[0], args[1]], async () => {
+      await super.cp(...args);
+      this.clearOutsideRootMiss(args[1]);
+    });
   }
 
   override mv(
     ...args: Parameters<OverlayFs["mv"]>
   ): ReturnType<OverlayFs["mv"]> {
-    return this.whileGuarded([args[0], args[1]], () => super.mv(...args));
+    return this.whileGuarded([args[0], args[1]], async () => {
+      await super.mv(...args);
+      this.clearOutsideRootMiss(args[1]);
+    });
   }
 
   override async chmod(
@@ -565,6 +617,7 @@ export class RequestBudgetOverlayFs extends OverlayFs {
       this.chargeEntries(args[1], true);
       await super.symlink(...args);
       this.overlayFilePaths.add(this.normalize(args[1]));
+      this.clearOutsideRootMiss(args[1]);
     });
   }
 
@@ -579,6 +632,7 @@ export class RequestBudgetOverlayFs extends OverlayFs {
       }
       await super.link(...args);
       this.overlayFilePaths.add(this.normalize(args[1]));
+      this.clearOutsideRootMiss(args[1]);
     });
   }
 
@@ -651,6 +705,21 @@ export const fileSystemFacade = (
       fileSystem.writeFile(path, content, options),
   };
   return Object.freeze(facade);
+};
+
+// Overlay errors carry the POSIX code in the message rather than a code
+// property, so both shapes are treated as a missing path.
+const isMissingRead = (error: unknown) => {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+  const { code } = error as NodeJS.ErrnoException;
+  return (
+    code === "ENOENT" ||
+    code === "ENOTDIR" ||
+    error.message.startsWith("ENOENT") ||
+    error.message.startsWith("ENOTDIR")
+  );
 };
 
 const fileContentSize = (

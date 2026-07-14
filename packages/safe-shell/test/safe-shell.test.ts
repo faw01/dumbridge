@@ -333,6 +333,43 @@ describe("SafeShell", () => {
     }
   });
 
+  test("reports out-of-root access as outside the served root", async () => {
+    const shell = await makeShell();
+
+    const listed = await Effect.runPromise(shell.execute("ls ../../Downloads"));
+
+    expect(listed.exitCode).not.toBe(0);
+    expect(listed.stderr).toContain(
+      "dumbridge: '/Downloads' is outside the served root; the served root is visible at /workspace.\n"
+    );
+    expect(listed.stderr).not.toContain(fixtureRoot);
+
+    const concatenated = await Effect.runPromise(
+      shell.execute("cat /etc/passwd")
+    );
+
+    expect(concatenated.exitCode).not.toBe(0);
+    expect(concatenated.stderr).toContain(
+      "dumbridge: '/etc/passwd' is outside the served root; the served root is visible at /workspace.\n"
+    );
+  });
+
+  test("does not brand misses inside the root or overlay scratch reads", async () => {
+    const shell = await makeShell();
+
+    const missingInside = await Effect.runPromise(
+      shell.execute("cat missing.txt")
+    );
+    expect(missingInside.exitCode).not.toBe(0);
+    expect(missingInside.stderr).not.toContain("outside the served root");
+
+    const scratch = await Effect.runPromise(
+      shell.execute("echo hi > /tmp/f && cat /tmp/f")
+    );
+    expect(scratch).toMatchObject({ exitCode: 0, stdout: "hi\n" });
+    expect(scratch.stderr).not.toContain("outside the served root");
+  });
+
   test("does not expose host, network, Python, or JavaScript commands", async () => {
     const shell = await makeShell();
 
