@@ -555,4 +555,27 @@ describe("SafeShell", () => {
     }
     expect(await readFile(path, "utf8")).toBe("12345678");
   });
+
+  test("charges host files materialized by copy and move", async () => {
+    const path = join(servedRoot, "host.txt");
+    await writeFile(path, "12345678");
+
+    const errors = await Promise.all(
+      ["cp host.txt copy.txt", "mv host.txt moved.txt"].map(async (script) => {
+        const shell = await makeShell({
+          maxFileReadBytes: 16,
+          maxOverlayBytes: 4,
+        });
+        return Effect.runPromise(Effect.flip(shell.execute(script)));
+      })
+    );
+
+    for (const error of errors) {
+      expect(error).toMatchObject({
+        _tag: "ShellLimitExceededError",
+        limit: "overlay",
+      });
+    }
+    expect(await readFile(path, "utf8")).toBe("12345678");
+  });
 });
