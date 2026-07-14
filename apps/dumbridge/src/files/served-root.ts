@@ -103,13 +103,13 @@ type VirtualPathSnapshot = readonly PathComponentSnapshot[] | undefined;
 
 export type ServedRootLimit = "file-read" | "overlay" | "overlay-entries";
 
-export interface ServedRootReadLimits {
+interface ServedRootReadLimits {
   readonly maxFileReadBytes: number;
   readonly maxOverlayBytes: number;
   readonly maxOverlayEntries: number;
 }
 
-export interface ServedRootReadView {
+interface ServedRootReadView {
   readonly begin: (signal: AbortSignal) => void;
   readonly fileSystem: IFileSystem;
   readonly limitExceeded: ServedRootLimit | undefined;
@@ -117,7 +117,7 @@ export interface ServedRootReadView {
   readonly workingDirectory: "/workspace";
 }
 
-export class InvalidServedRootError extends Schema.TaggedErrorClass<InvalidServedRootError>()(
+class InvalidServedRootError extends Schema.TaggedErrorClass<InvalidServedRootError>()(
   "InvalidServedRootError",
   { message: Schema.String }
 ) {}

@@ -33,7 +33,7 @@ const maximumAcceptBackoffMillis = 1000;
 const defaultConcurrentSessions = 4;
 const maximumConcurrentSessions = 8;
 
-export interface BridgeServerDeadlines {
+interface BridgeServerDeadlines {
   readonly pull: Duration.Input;
   readonly request: Duration.Input;
   readonly run: Duration.Input;
@@ -45,12 +45,12 @@ const defaultDeadlines: BridgeServerDeadlines = {
   run: "1 minute",
 };
 
-export class BridgeSessionError extends Schema.TaggedErrorClass<BridgeSessionError>()(
+class BridgeSessionError extends Schema.TaggedErrorClass<BridgeSessionError>()(
   "BridgeSessionError",
   { message: Schema.String }
 ) {}
 
-export interface BridgeServer {
+interface BridgeServer {
   readonly link: BridgeLink;
   readonly serve: Effect.Effect<never, BridgeListenerClosedError>;
 }

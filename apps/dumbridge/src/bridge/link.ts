@@ -45,7 +45,7 @@ export interface BridgeLinkContents extends BridgeLinkInput {
   readonly version: 1;
 }
 
-export class InvalidCapabilityError extends Schema.TaggedErrorClass<InvalidCapabilityError>()(
+class InvalidCapabilityError extends Schema.TaggedErrorClass<InvalidCapabilityError>()(
   "InvalidCapabilityError",
   {
     message: Schema.String,
@@ -53,7 +53,7 @@ export class InvalidCapabilityError extends Schema.TaggedErrorClass<InvalidCapab
   }
 ) {}
 
-export class InvalidBridgeLinkError extends Schema.TaggedErrorClass<InvalidBridgeLinkError>()(
+class InvalidBridgeLinkError extends Schema.TaggedErrorClass<InvalidBridgeLinkError>()(
   "InvalidBridgeLinkError",
   {
     message: Schema.String,

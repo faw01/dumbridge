@@ -41,7 +41,7 @@ const ClientOperation = Schema.Literals([
   "run-response",
 ]);
 
-export class BridgeClientError extends Schema.TaggedErrorClass<BridgeClientError>()(
+class BridgeClientError extends Schema.TaggedErrorClass<BridgeClientError>()(
   "BridgeClientError",
   {
     message: Schema.String,
@@ -49,14 +49,14 @@ export class BridgeClientError extends Schema.TaggedErrorClass<BridgeClientError
   }
 ) {}
 
-export interface RemoteRunResult {
+interface RemoteRunResult {
   readonly exitCode: number;
   readonly stderr: string;
   readonly stdout: string;
   readonly truncated: boolean;
 }
 
-export interface RemotePullResult extends PullResult {
+interface RemotePullResult extends PullResult {
   readonly destination: string;
 }
 

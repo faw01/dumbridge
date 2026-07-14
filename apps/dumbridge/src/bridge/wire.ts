@@ -229,7 +229,7 @@ const LimitName = Schema.Literals([
 ]);
 type LimitName = typeof LimitName.Type;
 
-export class FrameTooLargeError extends Schema.TaggedErrorClass<FrameTooLargeError>()(
+class FrameTooLargeError extends Schema.TaggedErrorClass<FrameTooLargeError>()(
   "FrameTooLargeError",
   {
     declaredBytes: NonNegativeInt,
@@ -238,7 +238,7 @@ export class FrameTooLargeError extends Schema.TaggedErrorClass<FrameTooLargeErr
   }
 ) {}
 
-export class MalformedFrameError extends Schema.TaggedErrorClass<MalformedFrameError>()(
+class MalformedFrameError extends Schema.TaggedErrorClass<MalformedFrameError>()(
   "MalformedFrameError",
   {
     message: Schema.String,
@@ -246,7 +246,7 @@ export class MalformedFrameError extends Schema.TaggedErrorClass<MalformedFrameE
   }
 ) {}
 
-export class IncompleteFrameError extends Schema.TaggedErrorClass<IncompleteFrameError>()(
+class IncompleteFrameError extends Schema.TaggedErrorClass<IncompleteFrameError>()(
   "IncompleteFrameError",
   {
     message: Schema.String,
@@ -254,22 +254,22 @@ export class IncompleteFrameError extends Schema.TaggedErrorClass<IncompleteFram
   }
 ) {}
 
-export class UnsupportedProtocolError extends Schema.TaggedErrorClass<UnsupportedProtocolError>()(
+class UnsupportedProtocolError extends Schema.TaggedErrorClass<UnsupportedProtocolError>()(
   "UnsupportedProtocolError",
   { message: Schema.String }
 ) {}
 
-export class UnknownFrameTypeError extends Schema.TaggedErrorClass<UnknownFrameTypeError>()(
+class UnknownFrameTypeError extends Schema.TaggedErrorClass<UnknownFrameTypeError>()(
   "UnknownFrameTypeError",
   { message: Schema.String }
 ) {}
 
-export class AuthenticationError extends Schema.TaggedErrorClass<AuthenticationError>()(
+class AuthenticationError extends Schema.TaggedErrorClass<AuthenticationError>()(
   "AuthenticationError",
   { message: Schema.String }
 ) {}
 
-export class IllegalFrameError extends Schema.TaggedErrorClass<IllegalFrameError>()(
+class IllegalFrameError extends Schema.TaggedErrorClass<IllegalFrameError>()(
   "IllegalFrameError",
   {
     message: Schema.String,
@@ -277,12 +277,12 @@ export class IllegalFrameError extends Schema.TaggedErrorClass<IllegalFrameError
   }
 ) {}
 
-export class IncompleteSessionError extends Schema.TaggedErrorClass<IncompleteSessionError>()(
+class IncompleteSessionError extends Schema.TaggedErrorClass<IncompleteSessionError>()(
   "IncompleteSessionError",
   { message: Schema.String }
 ) {}
 
-export class WireLimitExceededError extends Schema.TaggedErrorClass<WireLimitExceededError>()(
+class WireLimitExceededError extends Schema.TaggedErrorClass<WireLimitExceededError>()(
   "WireLimitExceededError",
   {
     limit: LimitName,
@@ -292,7 +292,7 @@ export class WireLimitExceededError extends Schema.TaggedErrorClass<WireLimitExc
   }
 ) {}
 
-export class InvalidWireLimitError extends Schema.TaggedErrorClass<InvalidWireLimitError>()(
+class InvalidWireLimitError extends Schema.TaggedErrorClass<InvalidWireLimitError>()(
   "InvalidWireLimitError",
   {
     limit: Schema.String,

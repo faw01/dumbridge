@@ -97,9 +97,9 @@ const ShellLimit = Schema.Literals([
   "output",
   "script",
 ]);
-export type ShellLimit = typeof ShellLimit.Type;
+type ShellLimit = typeof ShellLimit.Type;
 
-export class InvalidSafeShellLimitError extends Schema.TaggedErrorClass<InvalidSafeShellLimitError>()(
+class InvalidSafeShellLimitError extends Schema.TaggedErrorClass<InvalidSafeShellLimitError>()(
   "InvalidSafeShellLimitError",
   {
     limit: Schema.String,
@@ -115,7 +115,7 @@ export class ShellLimitExceededError extends Schema.TaggedErrorClass<ShellLimitE
   }
 ) {}
 
-export class ShellExecutionError extends Schema.TaggedErrorClass<ShellExecutionError>()(
+class ShellExecutionError extends Schema.TaggedErrorClass<ShellExecutionError>()(
   "ShellExecutionError",
   { message: Schema.String }
 ) {}

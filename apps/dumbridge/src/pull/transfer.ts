@@ -36,7 +36,7 @@ const DirectoryEntrySchema = Schema.Struct({
   path: Schema.String,
 });
 
-export const PullManifestSchema = Schema.Struct({
+const PullManifestSchema = Schema.Struct({
   digestAlgorithm: Schema.Literal("sha256"),
   entries: Schema.Array(Schema.Union([FileEntrySchema, DirectoryEntrySchema])),
   kind: Schema.Union([Schema.Literal("file"), Schema.Literal("directory")]),
@@ -51,7 +51,7 @@ export type PullFileEntry = Extract<
   { readonly kind: "file" }
 >;
 
-export interface PullLimits {
+interface PullLimits {
   readonly chunkBytes: number;
   readonly maxEntries: number;
   readonly maxFileBytes: number;
@@ -92,7 +92,7 @@ export class PullSymlinkError extends Schema.TaggedErrorClass<PullSymlinkError>(
   { path: Schema.String }
 ) {}
 
-export class PullLimitError extends Schema.TaggedErrorClass<PullLimitError>()(
+class PullLimitError extends Schema.TaggedErrorClass<PullLimitError>()(
   "PullLimitError",
   {
     limit: Schema.String,
@@ -111,12 +111,12 @@ export class PullSourceChangedError extends Schema.TaggedErrorClass<PullSourceCh
   { path: Schema.String }
 ) {}
 
-export class PullDestinationExistsError extends Schema.TaggedErrorClass<PullDestinationExistsError>()(
+class PullDestinationExistsError extends Schema.TaggedErrorClass<PullDestinationExistsError>()(
   "PullDestinationExistsError",
   { path: Schema.String }
 ) {}
 
-export class PullIntegrityError extends Schema.TaggedErrorClass<PullIntegrityError>()(
+class PullIntegrityError extends Schema.TaggedErrorClass<PullIntegrityError>()(
   "PullIntegrityError",
   {
     actual: Schema.String,
