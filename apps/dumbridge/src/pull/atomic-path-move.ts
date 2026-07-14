@@ -138,7 +138,7 @@ const linuxMove = (): NativeMove => {
   }
 
   throw new Error(
-    `atomic directory moves are unavailable for Linux ${process.arch}`
+    `atomic path moves are unavailable for Linux ${process.arch}`
   );
 };
 
@@ -191,13 +191,13 @@ const loadNativeMove = (): NativeMove => {
     case "win32":
       return windowsMove();
     default:
-      throw new Error("atomic directory moves are unavailable");
+      throw new Error("atomic path moves are unavailable");
   }
 };
 
 let nativeMove: NativeMove | undefined;
 
-export const moveDirectoryNoReplace = (
+export const movePathNoReplace = (
   source: string,
   destination: string
 ): boolean => {

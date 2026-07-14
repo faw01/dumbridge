@@ -13,8 +13,8 @@ import { join } from "node:path";
 import {
   linuxLibcCandidates,
   linuxRenameat2SyscallNumber,
-  moveDirectoryNoReplace,
-} from "../src/pull/atomic-directory-move";
+  movePathNoReplace,
+} from "../src/pull/atomic-path-move";
 
 const withFixture = async <A>(use: (root: string) => Promise<A>) => {
   const root = await mkdtemp(join(tmpdir(), "dumbridge-atomic-move-test-"));
@@ -42,7 +42,7 @@ const pathExists = async (path: string) => {
   }
 };
 
-describe("atomic directory move", () => {
+describe("atomic path move", () => {
   test("discovers glibc and supported musl library names", () => {
     expect(linuxLibcCandidates("x64")).toEqual([
       "libc.so.6",
@@ -70,11 +70,22 @@ describe("atomic directory move", () => {
       await mkdir(source);
       await writeFile(join(source, "incoming.txt"), "incoming");
 
-      expect(moveDirectoryNoReplace(source, destination)).toBe(true);
+      expect(movePathNoReplace(source, destination)).toBe(true);
       expect(await pathExists(source)).toBe(false);
       expect(await readFile(join(destination, "incoming.txt"), "utf8")).toBe(
         "incoming"
       );
+    }));
+
+  test("moves a staged file and removes its source path", () =>
+    withFixture(async (root) => {
+      const source = join(root, "stage");
+      const destination = join(root, "destination");
+      await writeFile(source, "incoming");
+
+      expect(movePathNoReplace(source, destination)).toBe(true);
+      expect(await pathExists(source)).toBe(false);
+      expect(await readFile(destination, "utf8")).toBe("incoming");
     }));
 
   test("preserves a destination created at the commit seam", () =>
@@ -87,7 +98,7 @@ describe("atomic directory move", () => {
       await mkdir(destination);
       const destinationBefore = await lstat(destination);
 
-      expect(moveDirectoryNoReplace(source, destination)).toBe(false);
+      expect(movePathNoReplace(source, destination)).toBe(false);
       expect(await readFile(join(source, "incoming.txt"), "utf8")).toBe(
         "incoming"
       );
@@ -102,5 +113,17 @@ describe("atomic directory move", () => {
         dev: destinationBefore.dev,
         ino: destinationBefore.ino,
       });
+    }));
+
+  test("preserves an existing file destination", () =>
+    withFixture(async (root) => {
+      const source = join(root, "stage");
+      const destination = join(root, "destination");
+      await writeFile(source, "incoming");
+      await writeFile(destination, "keep");
+
+      expect(movePathNoReplace(source, destination)).toBe(false);
+      expect(await readFile(source, "utf8")).toBe("incoming");
+      expect(await readFile(destination, "utf8")).toBe("keep");
     }));
 });

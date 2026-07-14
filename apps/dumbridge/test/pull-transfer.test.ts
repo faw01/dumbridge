@@ -1,9 +1,10 @@
 import { describe, expect, spyOn, test } from "bun:test";
-import { promises as hostFileSystem } from "node:fs";
+import { constants, promises as hostFileSystem } from "node:fs";
 import {
   lstat,
   mkdir,
   mkdtemp,
+  open,
   readdir,
   readFile,
   rm,
@@ -301,6 +302,61 @@ describe("pull transfer", () => {
       expect(await readdir(workspace)).toEqual([]);
     }));
 
+  test.skipIf(process.platform === "win32")(
+    "fails promptly when a planned file is replaced by a FIFO",
+    () =>
+      withFixture(async ({ root, workspace }) => {
+        const sourcePath = join(root, "draft.txt");
+        await writeFile(sourcePath, "first");
+        const source = await Effect.runPromise(
+          preparePull({ remotePath: "draft.txt", servedRoot: root })
+        );
+        await rm(sourcePath);
+
+        const mkfifo = Bun.spawn(["mkfifo", sourcePath], {
+          stderr: "pipe",
+          stdout: "ignore",
+        });
+        const exitCode = await mkfifo.exited;
+        if (exitCode !== 0) {
+          throw new Error(
+            `mkfifo failed: ${await new Response(mkfifo.stderr).text()}`
+          );
+        }
+
+        const transfer = collectError(
+          materializePull({
+            destination: join(workspace, "draft.txt"),
+            manifest: source.manifest,
+            read: source.read,
+          })
+        );
+        const outcome = await Promise.race([
+          transfer.then((error) => ({ error, status: "completed" as const })),
+          Bun.sleep(1000).then(() => ({ status: "blocked" as const })),
+        ]);
+
+        if (outcome.status === "blocked") {
+          // biome-ignore lint/suspicious/noBitwiseOperators: POSIX open flags compose as a bitmask.
+          const releaseFlags = constants.O_RDWR | constants.O_NONBLOCK;
+          const release = await open(sourcePath, releaseFlags);
+          try {
+            await transfer;
+          } finally {
+            await release.close();
+          }
+          throw new Error("pull blocked while opening a replaced FIFO");
+        }
+
+        expect(outcome.error).toMatchObject({
+          _tag: "PullPathError",
+          path: "draft.txt",
+          reason: "not a regular file",
+        });
+        expect(await readdir(workspace)).toEqual([]);
+      })
+  );
+
   test("refuses an intermediate symlink introduced after planning", () =>
     withFixture(async ({ root, workspace }) => {
       const sourceDirectory = join(root, "selected", "nested");
@@ -510,6 +566,37 @@ describe("pull transfer", () => {
       expect(await readFile(destination, "utf8")).toBe("keep");
     }));
 
+  test("preserves a file created after the destination check", () =>
+    withFixture(async ({ root, workspace }) => {
+      await writeFile(join(root, "file.txt"), "incoming");
+      const source = await Effect.runPromise(
+        preparePull({ remotePath: "file.txt", servedRoot: root })
+      );
+      const destination = join(workspace, "file.txt");
+      let destinationCreated = false;
+      const racingRead: PullRead = (entry, signal) =>
+        source.read(entry, signal).pipe(
+          Stream.tap(() => {
+            if (destinationCreated) {
+              return Effect.void;
+            }
+            destinationCreated = true;
+            return Effect.promise(() => writeFile(destination, "keep"));
+          })
+        );
+
+      const error = await collectError(
+        materializePull({
+          destination,
+          manifest: source.manifest,
+          read: racingRead,
+        })
+      );
+
+      expect(error).toMatchObject({ _tag: "PullDestinationExistsError" });
+      expect(await readFile(destination, "utf8")).toBe("keep");
+    }));
+
   test("preserves a directory created after the destination check", () =>
     withFixture(async ({ root, workspace }) => {
       await mkdir(join(root, "folder"));
@@ -646,11 +733,15 @@ describe("pull transfer", () => {
 
         expect(result).toEqual({ bytes: 9, files: 1 });
         expect(await readFile(destination, "utf8")).toBe("published");
-        expect(
-          (await readdir(workspace)).some((name) =>
-            name.startsWith(".dumbridge-pull-")
-          )
-        ).toBe(true);
+        const stages = (await readdir(workspace)).filter((name) =>
+          name.startsWith(".dumbridge-pull-")
+        );
+        expect(stages).toHaveLength(1);
+        const [stage] = stages;
+        if (stage === undefined) {
+          throw new Error("the failed cleanup did not leave its stage");
+        }
+        expect(await readdir(join(workspace, stage))).toEqual([]);
       } finally {
         removeSpy.mockRestore();
       }

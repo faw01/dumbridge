@@ -6,7 +6,6 @@ import {
   type Stats,
 } from "node:fs";
 import {
-  link,
   lstat,
   mkdir,
   mkdtemp,
@@ -17,14 +16,15 @@ import {
 } from "node:fs/promises";
 import { dirname, join, posix, relative, resolve, sep, win32 } from "node:path";
 import { Effect, Exit, Schema, Stream } from "effect";
-import { moveDirectoryNoReplace } from "./atomic-directory-move";
+import { movePathNoReplace } from "./atomic-path-move";
 
 const digestPattern = /^[0-9a-f]{64}$/;
 const windowsDeviceNamePattern =
   /^(?:con|prn|aux|nul|com[1-9¹²³]|lpt[1-9¹²³])(?:\..*)?$/i;
 const windowsDrivePattern = /^[a-z]:/i;
-// biome-ignore lint/suspicious/noBitwiseOperators: POSIX open flags compose as a bitmask.
-const readOnlyNoFollow = constants.O_RDONLY | constants.O_NOFOLLOW;
+const readOnlyNoFollowNonBlocking =
+  // biome-ignore lint/suspicious/noBitwiseOperators: POSIX open flags compose as a bitmask; nonblocking prevents a FIFO replacement from hanging before fstat.
+  constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK;
 
 const FileEntrySchema = Schema.Struct({
   digest: Schema.String,
@@ -391,7 +391,10 @@ const scanSourceFile = async function* (options: {
       options.parts,
       options.expected !== undefined
     );
-    const handle = await open(inspectedBefore.absolutePath, readOnlyNoFollow);
+    const handle = await open(
+      inspectedBefore.absolutePath,
+      readOnlyNoFollowNonBlocking
+    );
     try {
       const before = await handle.stat();
       if (!before.isFile()) {
@@ -970,27 +973,13 @@ const writeEntry = (
       )
   );
 
-const destinationConflict = (cause: unknown, destination: string): PullError =>
-  hasCode(cause, "EEXIST") || hasCode(cause, "ENOTEMPTY")
-    ? new PullDestinationExistsError({ path: destination })
-    : mapPullError(cause, "commit destination", destination);
-
-const commitFile = (
-  payload: string,
-  destination: string
-): Effect.Effect<void, PullError> =>
-  Effect.tryPromise({
-    catch: (cause) => destinationConflict(cause, destination),
-    try: () => link(payload, destination),
-  });
-
-const commitDirectory = (
+const commitPath = (
   payload: string,
   destination: string
 ): Effect.Effect<void, PullError> =>
   Effect.try({
     catch: (cause) => mapPullError(cause, "commit destination", destination),
-    try: () => moveDirectoryNoReplace(payload, destination),
+    try: () => movePathNoReplace(payload, destination),
   }).pipe(
     Effect.flatMap((moved) => {
       if (moved) {
@@ -1009,15 +998,6 @@ const commitDirectory = (
       );
     })
   );
-
-const commitDestination = (
-  payload: string,
-  destination: string,
-  kind: PullManifest["kind"]
-): Effect.Effect<void, PullError> =>
-  kind === "file"
-    ? commitFile(payload, destination)
-    : commitDirectory(payload, destination);
 
 const populateStage = (options: {
   readonly destination: string;
@@ -1060,11 +1040,7 @@ const populateStage = (options: {
       }
     }
 
-    yield* commitDestination(
-      payload,
-      options.destination,
-      options.manifest.kind
-    );
+    yield* commitPath(payload, options.destination);
     return { bytes: options.manifest.totalBytes, files };
   });
 
