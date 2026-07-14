@@ -6,7 +6,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/faw01/dumbridge",
+    "url": "git+https://github.com/faw01/dumbridge.git",
     "directory": "apps/dumbridge"
   },
   "bugs": {
