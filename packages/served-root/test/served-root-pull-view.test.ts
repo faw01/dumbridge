@@ -121,6 +121,13 @@ describe("ServedRoot pull view", () => {
       "folder//file",
       "folder\\file",
       "C:relative",
+      "folder/CON",
+      "folder/CON .txt",
+      "conout$.log",
+      "folder/name.",
+      "folder/name ",
+      "folder/has<angle",
+      "folder/file.txt:stream",
     ];
 
     const errors = await Promise.all(
