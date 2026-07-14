@@ -15,6 +15,7 @@
   "dependencies": {
     "@dumbridge/remote-path": "workspace:*",
     "@dumbridge/served-root": "workspace:*",
+    "@dumbridge/wire": "workspace:*",
     "effect": "4.0.0-beta.98"
   },
   "devDependencies": {

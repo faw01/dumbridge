@@ -300,7 +300,7 @@ const populateStage = (options: {
 const materializePullEffect = (options: {
   readonly destination: string;
   readonly limits?: Partial<PullLimits>;
-  readonly manifest: unknown;
+  readonly manifest: PullManifest;
   readonly read: PullRead;
 }): Effect.Effect<PullResult, PullError> =>
   Effect.gen(function* () {
@@ -369,7 +369,7 @@ export const materializePull = Effect.fn("PullTransfer.materialize")(
   (options: {
     readonly destination: string;
     readonly limits?: Partial<PullLimits>;
-    readonly manifest: unknown;
+    readonly manifest: PullManifest;
     readonly read: PullRead;
   }) => materializePullEffect(options)
 );
