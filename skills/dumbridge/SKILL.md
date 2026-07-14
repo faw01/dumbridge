@@ -1,9 +1,9 @@
 ---
 name: dumbridge
-description: Find, inspect, and pull live files from a user's read-only Dumbridge served root into a cloud agent workspace. Use when a task needs local-only or uncommitted context, skills, fixtures, images, datasets, or environment files exposed through DUMBRIDGE_LINK.
+description: Find, inspect, and pull live files from a user's read-only dumbridge served root into a cloud agent workspace. Use when a task needs local-only or uncommitted context, skills, fixtures, images, datasets, or environment files exposed through DUMBRIDGE_LINK.
 ---
 
-# Dumbridge
+# dumbridge
 
 Treat the served root like a read-only external drive. Use the CLI directly; do not add an MCP server or another runner.
 
@@ -35,6 +35,6 @@ dumbridge pull photos/IMG2123.jpg assets/reference.jpg
 - Use relative paths below the served root. `pull` does not expand globs.
 - Do not print secret file contents merely to decide whether to pull them. Pull an exact `.env` path directly when the task requires it.
 - Never print, log, or repeat `DUMBRIDGE_LINK`; it is a bearer secret.
-- Expect writes inside `run` to disappear. Dumbridge cannot change the user's local files.
+- Expect writes inside `run` to disappear. dumbridge cannot change the user's local files.
 - Expect existing destinations and symlinks to be refused. Choose a new destination instead of deleting or overwriting one.
 - If the link is absent or the bridge is offline, ask the user to run `dumbridge serve <root>` locally and place the new link in the cloud environment.

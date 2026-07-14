@@ -164,7 +164,7 @@ export const publicErrorMessage = (error: unknown): string => {
       return message;
     }
   }
-  return "Dumbridge failed.";
+  return "dumbridge failed.";
 };
 
 const cliArguments = process.argv.slice(2);

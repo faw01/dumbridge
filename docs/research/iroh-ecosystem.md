@@ -1,16 +1,16 @@
-# Iroh ecosystem findings for Dumbridge
+# Iroh ecosystem findings for dumbridge
 
 Research date: 2026-07-14
 
 ## Recommendation
 
-Build Dumbridge v1 in TypeScript on the official `@number0/iroh` 1.0 Node binding, with one custom ALPN (`dumbridge/1`) and a small Dumbridge wire protocol. Do **not** make Sendme, Dumbpipe, or `iroh-blobs` runtime dependencies for v1.
+Build dumbridge v1 in TypeScript on the official `@number0/iroh` 1.0 Node binding, with one custom ALPN (`dumbridge/1`) and a small dumbridge wire protocol. Do **not** make Sendme, Dumbpipe, or `iroh-blobs` runtime dependencies for v1.
 
 The intended composition is:
 
 ```text
-Dumbridge CLI
-  -> capability-authenticated Dumbridge protocol
+dumbridge CLI
+  -> capability-authenticated dumbridge protocol
   -> one Iroh connection + one bidirectional stream per invocation
   -> QUIC / NAT traversal / relay fallback supplied by Iroh
 ```
@@ -33,7 +33,7 @@ The local clones under `.repos/` include all five projects. `iroh-blobs` was ini
 
 Iroh lets an application dial a peer by its public-key endpoint identity and then supplies authenticated encryption, QUIC streams and datagrams, path discovery, NAT traversal, and relay fallback. The official Iroh 1.0 README demonstrates the core client flow—`Endpoint`, `connect`, `open_bi`—and the Rust server-side `Router`/`ProtocolHandler` pattern. ([Iroh README](https://github.com/n0-computer/iroh/blob/5817271c4a5fedc3e8387ec788ed42d68ba22064/README.md))
 
-Iroh does **not** define Dumbridge's:
+Iroh does **not** define dumbridge's:
 
 - filesystem authorization;
 - bearer capability;
@@ -49,7 +49,7 @@ An Iroh `EndpointTicket` is also not an access grant. Its implementation seriali
 
 ## The Node binding is enough for a custom protocol
 
-The official TypeScript surface exposes everything needed by Dumbridge:
+The official TypeScript surface exposes everything needed by dumbridge:
 
 - `Endpoint.builder()` / `Endpoint.bind()`;
 - configuring ALPNs and an optional secret key;
@@ -61,7 +61,7 @@ The official TypeScript surface exposes everything needed by Dumbridge:
 
 See the generated [Node type declarations](https://github.com/n0-computer/iroh-ffi/blob/66e628e0fd2b7d526d01b81269041c97fc97f7a5/iroh-js/index.d.ts) and [endpoint implementation](https://github.com/n0-computer/iroh-ffi/blob/66e628e0fd2b7d526d01b81269041c97fc97f7a5/iroh-js/src/endpoint.rs).
 
-Unlike Rust, the Node binding does not expose Iroh's `Router` or a `ProtocolHandler` trait. Dumbridge should own one small accept loop:
+Unlike Rust, the Node binding does not expose Iroh's `Router` or a `ProtocolHandler` trait. dumbridge should own one small accept loop:
 
 ```text
 acceptNext
@@ -73,7 +73,7 @@ acceptNext
   -> dispatch run | pull
 ```
 
-That is not a reason to add another routing framework when Dumbridge has one ALPN.
+That is not a reason to add another routing framework when dumbridge has one ALPN.
 
 ### Important byte-path risk
 
@@ -81,12 +81,12 @@ The generated declarations use `Array<number>` for read/write buffers. The bindi
 
 This is acceptable for command output and ordinary files, but it is an unproven large-transfer path. A v1 tracer test should measure direct and relay transfer for roughly 1 KiB, 10 MiB, and 1 GiB payloads, including peak RSS.
 
-## The Dumbridge link must wrap the Iroh ticket
+## The dumbridge link must wrap the Iroh ticket
 
 The best accountless pairing shape is an opaque bearer link containing:
 
 ```text
-DumbridgeLinkV1
+dumbridgeLinkV1
   version: 1
   endpointTicket: <Iroh EndpointTicket string>
   capability: <32 random bytes>
@@ -105,10 +105,10 @@ The link should normally be injected as a cloud secret/environment value rather 
 Three current implementations reinforce the separation between Iroh identity/addressing and application authorization:
 
 1. Thunderbird's Thunderbolt persists each client's Iroh secret key, authenticates the resulting endpoint ID in the QUIC handshake, then checks a local allowlist before spawning an agent. It also caps handshakes, connection rates, idle stream waits, and live processes. ([endpoint setup](https://github.com/thunderbird/thunderbolt/blob/26edce91fe1f14bae1d7b63fdbb70e83597ba0de/cli/src/iroh/endpoint.ts), [admission and authorization](https://github.com/thunderbird/thunderbolt/blob/26edce91fe1f14bae1d7b63fdbb70e83597ba0de/cli/src/iroh/bridge.ts)) This is a good persistent-device pattern, but it is a poor first interaction for disposable cloud agents.
-2. Boop defines an application `InviteTicket` that combines a 32-byte token with an Iroh `EndpointTicket`, then consumes the pending token on successful onboarding. ([invite ticket](https://github.com/olizilla/boop/blob/e73f219597d2cfcef1131e17926d998da0154f9b/src-tauri/boop-core/src/invite_ticket.rs), [welcome handler](https://github.com/olizilla/boop/blob/e73f219597d2cfcef1131e17926d998da0154f9b/src-tauri/boop-core/src/iroh_manager.rs)) This is closest to Dumbridge's desired bearer-link shape, although Boop currently depends on release-candidate/older higher-level Iroh crates.
-3. Volt wraps an Iroh ticket with protocol, endpoint identity, workspace, optional expiry, and a secret; after pairing it produces a reconnect ticket with secrets stripped. ([Volt ticket format](https://github.com/hansjm10/Volt/blob/bb5f8c44d4139bade4ef07152160dc1e19e831fb/packages/coding-agent/src/core/remote/iroh/ticket.ts)) Volt is much broader than Dumbridge, but it demonstrates that the raw Iroh ticket and the application authorization token are distinct things.
+2. Boop defines an application `InviteTicket` that combines a 32-byte token with an Iroh `EndpointTicket`, then consumes the pending token on successful onboarding. ([invite ticket](https://github.com/olizilla/boop/blob/e73f219597d2cfcef1131e17926d998da0154f9b/src-tauri/boop-core/src/invite_ticket.rs), [welcome handler](https://github.com/olizilla/boop/blob/e73f219597d2cfcef1131e17926d998da0154f9b/src-tauri/boop-core/src/iroh_manager.rs)) This is closest to dumbridge's desired bearer-link shape, although Boop currently depends on release-candidate/older higher-level Iroh crates.
+3. Volt wraps an Iroh ticket with protocol, endpoint identity, workspace, optional expiry, and a secret; after pairing it produces a reconnect ticket with secrets stripped. ([Volt ticket format](https://github.com/hansjm10/Volt/blob/bb5f8c44d4139bade4ef07152160dc1e19e831fb/packages/coding-agent/src/core/remote/iroh/ticket.ts)) Volt is much broader than dumbridge, but it demonstrates that the raw Iroh ticket and the application authorization token are distinct things.
 
-For Dumbridge v1, use the Boop-like bearer shape, not Thunderbolt/Volt's persisted-client lifecycle.
+For dumbridge v1, use the Boop-like bearer shape, not Thunderbolt/Volt's persisted-client lifecycle.
 
 ## Wire protocol shape
 
@@ -167,7 +167,7 @@ Its sender:
 
 Its receiver downloads verified content into a hidden hash-named store, asks only for missing ranges when partial data already exists, loads the collection metadata, validates each path component, refuses existing destinations, exports the files, and removes staging. ([receive flow](https://github.com/n0-computer/sendme/blob/ee8d8d6570a73ab9864ca6bb79d29e36137f8e66/src/main.rs#L1008-L1143), [safe export paths](https://github.com/n0-computer/sendme/blob/ee8d8d6570a73ab9864ca6bb79d29e36137f8e66/src/main.rs#L486-L529))
 
-Dumbridge should copy the invariants, not the temporary blob database:
+dumbridge should copy the invariants, not the temporary blob database:
 
 - every remote path is relative to one canonical served root;
 - reject `..`, absolute paths, NULs, platform separator tricks, and root-escaping symlinks;
@@ -178,7 +178,7 @@ Dumbridge should copy the invariants, not the temporary blob database:
 - verify byte count and digest before commit;
 - clean staging on cancellation/failure.
 
-Unlike Sendme, Dumbridge serves a **live read-only root** and chooses artifacts after remote exploration. Importing the whole root into a content-addressed store at `serve` time would turn it into a stale snapshot and make startup proportional to the entire tree.
+Unlike Sendme, dumbridge serves a **live read-only root** and chooses artifacts after remote exploration. Importing the whole root into a content-addressed store at `serve` time would turn it into a stale snapshot and make startup proportional to the entire tree.
 
 ## Why not `iroh-blobs` in v1
 
@@ -188,25 +188,25 @@ But it is the wrong v1 dependency for three concrete reasons:
 
 1. The official FFI explicitly states that the bindings mirror the stabilized Iroh 1.0 transport surface and exclude higher-level protocols, including `iroh-blobs`, because those protocols are not yet at 1.0. ([Iroh FFI README](https://github.com/n0-computer/iroh-ffi/blob/66e628e0fd2b7d526d01b81269041c97fc97f7a5/README.md#L8-L17))
 2. The current `iroh-blobs` 0.103 README says it is not yet considered production quality and points production users to the older 0.35 line. ([current README](https://github.com/n0-computer/iroh-blobs/blob/e82cbdcbdac9a78033174aad55e3199b2cf4c0dc/README.md#L1-L8))
-3. A live filesystem path must still be imported/snapshotted into a blob store before it can be addressed by hash. Dumbridge needs a custom authenticated command protocol regardless.
+3. A live filesystem path must still be imported/snapshotted into a blob store before it can be addressed by hash. dumbridge needs a custom authenticated command protocol regardless.
 
 Revisit `iroh-blobs` only when resumable multi-gigabyte transfer is a demonstrated requirement and either a stable binding exists or a narrow Rust transfer adapter is justified.
 
 ## Why not spawn Sendme or Dumbpipe
 
-Spawning either binary is viable for a throwaway connectivity spike, but neither removes Dumbridge's hard parts.
+Spawning either binary is viable for a throwaway connectivity spike, but neither removes dumbridge's hard parts.
 
 ### Dumbpipe subprocess
 
-Dumbpipe would supply a byte pipe, but Dumbridge would still need framing, bearer authentication, request limits, filesystem confinement, process supervision, cross-platform binary installation, and error translation. Its endpoint ticket is address information, and its fixed handshake is not authorization. It also exits after the first successful stdio connection in its basic mode. ([Dumbpipe stdio listener](https://github.com/n0-computer/dumbpipe/blob/71342378ce8d6665d0c16ee093ff8e76397d8613/src/main.rs#L360-L423))
+Dumbpipe would supply a byte pipe, but dumbridge would still need framing, bearer authentication, request limits, filesystem confinement, process supervision, cross-platform binary installation, and error translation. Its endpoint ticket is address information, and its fixed handshake is not authorization. It also exits after the first successful stdio connection in its basic mode. ([Dumbpipe stdio listener](https://github.com/n0-computer/dumbpipe/blob/71342378ce8d6665d0c16ee093ff8e76397d8613/src/main.rs#L360-L423))
 
 The official `dumbpipe-web` example does not spawn a process: it embeds the `dumbpipe` crate for the ALPN/ticket/handshake and uses Iroh streams directly. ([dependency](https://github.com/n0-computer/iroh-examples/blob/6a8cfcdccc6a633c5608cb25e776cb52fd509dd3/dumbpipe-web/Cargo.toml), [connection code](https://github.com/n0-computer/iroh-examples/blob/6a8cfcdccc6a633c5608cb25e776cb52fd509dd3/dumbpipe-web/src/main.rs)) That is evidence for owning the transport integration rather than parsing a long-lived CLI.
 
 ### Sendme subprocess
 
-Sendme can transfer a selected snapshot reliably, but it creates another endpoint/ticket and temporary store per selection. Dumbridge would need to remotely ask the Mac to spawn it, scrape its human-oriented output, return a second ticket, supervise its lifetime, and align authorization between two unrelated protocols.
+Sendme can transfer a selected snapshot reliably, but it creates another endpoint/ticket and temporary store per selection. dumbridge would need to remotely ask the Mac to spawn it, scrape its human-oriented output, return a second ticket, supervise its lifetime, and align authorization between two unrelated protocols.
 
-A real Raycast extension does spawn `sendme send`, searches several possible binary locations, parses both stdout and stderr for the human phrase `sendme receive`, stores the child process, and kills it later. ([Raycast Sendme wrapper](https://github.com/raycast/extensions/blob/5e98ea3fce2d4c487a59dfc2f5e3455a7d18564c/extensions/sendme/src/utils/sendme.ts)) That is workable UI glue, but it illustrates the integration cost Dumbridge can avoid. The code searches performed for this report did not surface a comparably maintained Dumbpipe subprocess wrapper.
+A real Raycast extension does spawn `sendme send`, searches several possible binary locations, parses both stdout and stderr for the human phrase `sendme receive`, stores the child process, and kills it later. ([Raycast Sendme wrapper](https://github.com/raycast/extensions/blob/5e98ea3fce2d4c487a59dfc2f5e3455a7d18564c/extensions/sendme/src/utils/sendme.ts)) That is workable UI glue, but it illustrates the integration cost dumbridge can avoid. The code searches performed for this report did not surface a comparably maintained Dumbpipe subprocess wrapper.
 
 ## Runtime and platform implications
 
@@ -227,7 +227,7 @@ Therefore:
 - advertising Bun as the required production runtime is premature;
 - advertising a Bun single executable is premature until native-addon packaging is tested on every promised target;
 - Node is the upstream-supported runtime baseline;
-- “Mac, Linux, Windows” must be expressed as an explicit tested matrix, with Intel Mac excluded unless Dumbridge builds its own addon target.
+- “Mac, Linux, Windows” must be expressed as an explicit tested matrix, with Intel Mac excluded unless dumbridge builds its own addon target.
 
 ## Deep module consequences
 

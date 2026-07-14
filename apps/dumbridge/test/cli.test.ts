@@ -131,6 +131,6 @@ describe("dumbridge CLI", () => {
         path: "large.bin",
       })
     ).toBe("The remote pull exceeded a safety limit.");
-    expect(publicErrorMessage({ message: "   " })).toBe("Dumbridge failed.");
+    expect(publicErrorMessage({ message: "   " })).toBe("dumbridge failed.");
   });
 });

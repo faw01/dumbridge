@@ -14,7 +14,7 @@ builder:
 - `EndpointBuilder.proxyUrl(url)` parses the URL in Rust, then delegates to
   `proxy_url(url)`.
 
-No proxy is implemented in Dumbridge, and the patch does not add a network
+No proxy is implemented in dumbridge, and the patch does not add a network
 service. It only makes Iroh's existing HTTP(S)-proxy configuration reachable
 from the Node-API binding.
 
@@ -32,7 +32,7 @@ in the patch so the JavaScript contract can be reviewed without building the
 native addon; the release build must regenerate it and produce the same two
 method names.
 
-Dumbridge feature-detects `proxyUrl`. For `FromEnvironment`, it follows Iroh's
+dumbridge feature-detects `proxyUrl`. For `FromEnvironment`, it follows Iroh's
 documented `HTTP_PROXY`, `http_proxy`, `HTTPS_PROXY`, `https_proxy` precedence,
 then accepts `ALL_PROXY` or `all_proxy` as a generic fallback. It ignores
 uppercase `HTTP_PROXY` in CGI contexts, requires an HTTP(S) URL, and passes that
@@ -46,7 +46,7 @@ in public typed errors.
 
 Proxy support is not shippable merely because this source patch applies. The
 remaining external gate is to build, test, and publish patched native packages
-for every supported Iroh Node target, point Dumbridge at that release, and then
+for every supported Iroh Node target, point dumbridge at that release, and then
 prove a relay connection from each supported hosted-agent network through its
 real HTTP/HTTPS proxy. That proof must include any required `iroh.link` relay
 allowlist. Until both the native package matrix and hosted-network proof exist,

@@ -1,10 +1,10 @@
-# Dumbridge
+# dumbridge
 
-Dumbridge gives a disposable cloud coding agent temporary, live, read-only access to one local directory.
+dumbridge gives a disposable cloud coding agent temporary, live, read-only access to one local directory.
 
 ## Quick start
 
-Dumbridge currently requires Bun 1.3.14 or newer.
+dumbridge currently requires Bun 1.3.14 or newer.
 
 On the computer that owns the files:
 

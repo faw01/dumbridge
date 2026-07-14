@@ -788,7 +788,7 @@ const decodeFrameEnvelope = (
   if (envelope.success.protocol !== protocol) {
     return Result.fail(
       new UnsupportedProtocolError({
-        message: "Frame uses an unsupported Dumbridge protocol.",
+        message: "Frame uses an unsupported dumbridge protocol.",
       })
     );
   }
