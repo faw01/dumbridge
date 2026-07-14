@@ -12,6 +12,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   linuxLibcCandidates,
+  linuxRenameat2SyscallNumber,
   moveDirectoryNoReplace,
 } from "../src/pull/atomic-directory-move";
 
@@ -54,6 +55,12 @@ describe("atomic directory move", () => {
       "/lib/ld-musl-aarch64.so.1",
     ]);
     expect(linuxLibcCandidates("riscv64")).toEqual(["libc.so.6"]);
+  });
+
+  test("maps only supported Linux architectures to renameat2 syscalls", () => {
+    expect(linuxRenameat2SyscallNumber("x64")).toBe(316);
+    expect(linuxRenameat2SyscallNumber("arm64")).toBe(276);
+    expect(linuxRenameat2SyscallNumber("riscv64")).toBeUndefined();
   });
 
   test("moves a staged directory when the destination is absent", () =>
