@@ -1,5 +1,9 @@
 #!/usr/bin/env bun
 
+import {
+  type IrohTransportOptions,
+  makeIrohTransport,
+} from "@dumbridge/bridge-transport/iroh";
 import { BunRuntime, BunServices } from "@effect/platform-bun";
 import { Config, Effect, Option, pipe, Schema } from "effect";
 import { Argument, Command } from "effect/unstable/cli";
@@ -7,10 +11,6 @@ import skillGuide from "../../../skills/dumbridge/SKILL.md" with {
   type: "text",
 };
 import packageJson from "../package.json" with { type: "json" };
-import {
-  type IrohTransportOptions,
-  makeIrohTransport,
-} from "./bridge/adapters/iroh";
 import { pullRemote, runRemote } from "./bridge/client";
 import { openBridge } from "./bridge/server";
 

@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { fileURLToPath } from "node:url";
+import { encodeBridgeLink, mintCapability } from "@dumbridge/bridge-link";
 import { Effect } from "effect";
 import packageJson from "../package.json" with { type: "json" };
-import { encodeBridgeLink, mintCapability } from "../src/bridge/link";
 import { publicErrorMessage, resolveClientTransportOptions } from "../src/cli";
 
 const cliPath = fileURLToPath(new URL("../src/cli.ts", import.meta.url));

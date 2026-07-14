@@ -1,15 +1,15 @@
-import { Effect, Option } from "effect";
 import type {
   BridgeDeadlineExceededError,
   BridgeReadError,
   BridgeSession,
-} from "./transport";
+} from "@dumbridge/bridge-transport";
 import {
   encodeFrame,
   type WireDecodeError,
   type WireFrame,
   type WireSession,
-} from "./wire";
+} from "@dumbridge/wire";
+import { Effect, Option } from "effect";
 
 export const sendFrame = (session: BridgeSession, frame: WireFrame) =>
   Effect.fromResult(encodeFrame(frame)).pipe(Effect.flatMap(session.write));

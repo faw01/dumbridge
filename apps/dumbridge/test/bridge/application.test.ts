@@ -2,14 +2,14 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Effect, Result } from "effect";
-import { makeIrohTransport } from "../../src/bridge/adapters/iroh";
-import { pullRemote, runRemote } from "../../src/bridge/client";
 import {
   encodeBridgeLink,
   mintCapability,
   parseBridgeLink,
-} from "../../src/bridge/link";
+} from "@dumbridge/bridge-link";
+import { makeIrohTransport } from "@dumbridge/bridge-transport/iroh";
+import { Effect, Result } from "effect";
+import { pullRemote, runRemote } from "../../src/bridge/client";
 import { openBridge } from "../../src/bridge/server";
 
 let fixture = "";

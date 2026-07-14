@@ -2,16 +2,11 @@ import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { mkdir, mkdtemp, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { type Duration, Effect, Fiber, Option, Result } from "effect";
-import { TestClock } from "effect/testing";
-import { Bash } from "just-bash";
-import { pullRemote, runRemote } from "../../src/bridge/client";
 import {
   encodeBridgeLink,
   mintCapability,
   parseBridgeLink,
-} from "../../src/bridge/link";
-import { openBridge } from "../../src/bridge/server";
+} from "@dumbridge/bridge-link";
 import {
   BridgeAcceptError,
   BridgeConnectError,
@@ -22,7 +17,7 @@ import {
   BridgeLocator,
   type BridgeSession,
   type BridgeTransport,
-} from "../../src/bridge/transport";
+} from "@dumbridge/bridge-transport";
 import {
   encodeFrame,
   makePullResponseSession,
@@ -30,7 +25,12 @@ import {
   type PullResponseEvent,
   type RunResponseEvent,
   type WireFrame,
-} from "../../src/bridge/wire";
+} from "@dumbridge/wire";
+import { type Duration, Effect, Fiber, Option, Result } from "effect";
+import { TestClock } from "effect/testing";
+import { Bash } from "just-bash";
+import { pullRemote, runRemote } from "../../src/bridge/client";
+import { openBridge } from "../../src/bridge/server";
 
 let fixture = "";
 

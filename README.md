@@ -44,6 +44,6 @@ bun install --frozen-lockfile
 bun run verify
 ```
 
-This is a Bun workspace orchestrated by Turborepo. The publishable CLI is in `apps/dumbridge`; the optional agent instructions are in `skills/dumbridge`.
+This is a Bun workspace orchestrated by Turborepo. The publishable CLI is in `apps/dumbridge`; the internal seams (`bridge-link`, `bridge-transport`, `wire`, `served-root`, `safe-shell`, `pull-transfer`) are private packages under `packages/*` that get bundled into the published `dist/cli.js`. The optional agent instructions are in `skills/dumbridge`.
 
 See [the v1 design](docs/design/v1.md) for the product and security contract and [CONTEXT.md](CONTEXT.md) for its domain language.

@@ -6,5 +6,18 @@
   },
   "javascript": {
     "globals": ["Bun"]
-  }
+  },
+  "overrides": [
+    {
+      // Workspace package entry points re-export their public interface.
+      "includes": ["packages/*/src/**/index.ts"],
+      "linter": {
+        "rules": {
+          "performance": {
+            "noBarrelFile": "off"
+          }
+        }
+      }
+    }
+  ]
 }
