@@ -9,8 +9,12 @@ The one canonical local directory visible through a running bridge.
 _Avoid_: Share, mount, host filesystem
 
 **Bridge process**:
-The foreground local process that owns access to a served root. Stopping it ends access.
+The local process that owns access to a served root, foreground by default. Stopping it ends access.
 _Avoid_: Daemon, server account
+
+**Detached serve**:
+A bridge process started with `serve --detach` that runs without a terminal until `serve --stop`. Its death still revokes the bridge key.
+_Avoid_: Daemon, background service
 
 **Bridge key**:
 The opaque bearer credential minted by serve, encoding a transport locator, capability, and expiry deadline, valid only while serve runs and before that deadline.
