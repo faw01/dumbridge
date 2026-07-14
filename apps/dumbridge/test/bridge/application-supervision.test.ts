@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type Duration, Effect, Fiber, Option, Result } from "effect";
@@ -308,6 +308,47 @@ describe("bridge application supervision", () => {
       type: "stdout",
     });
     expect(events.at(-1)).toMatchObject({ code: 0, type: "exit" });
+  });
+
+  test("terminates without a response when the served root changes", async () => {
+    const accepts: BridgeListener["accept"][] = [];
+    const listener = listenerFrom(accepts);
+    const server = await Effect.runPromise(
+      Effect.scoped(
+        openBridge({
+          maxConcurrentSessions: 1,
+          root: fixture,
+          transport: listenerTransport(listener),
+        })
+      )
+    );
+    const request = requestFor(server.link, {
+      script: "cat note.txt",
+      type: "run",
+    });
+    const changedRootSession = scriptedSession({ reads: [request] });
+    accepts.push(
+      Effect.succeed(changedRootSession.session),
+      Effect.fail(new BridgeListenerClosedError({ message: "listener closed" }))
+    );
+    const originalRoot = `${fixture}-original`;
+
+    try {
+      await rename(fixture, originalRoot);
+      await mkdir(fixture);
+      await writeFile(join(fixture, "note.txt"), "replacement secret\n");
+
+      const end = await Effect.runPromise(
+        Effect.scoped(server.serve.pipe(Effect.flip))
+      );
+
+      expect(end).toBeInstanceOf(BridgeListenerClosedError);
+      expect(changedRootSession.state.writes).toHaveLength(0);
+      expect(changedRootSession.state.finishCalls).toBe(0);
+      expect(changedRootSession.state.closeCalls).toBe(1);
+    } finally {
+      await rm(originalRoot, { force: true, recursive: true });
+    }
   });
 
   test("interrupts and closes a pull that exceeds its total deadline", async () => {

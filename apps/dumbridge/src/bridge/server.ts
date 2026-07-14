@@ -1,5 +1,5 @@
 import { type Duration, Effect, Option, Schema, Stream } from "effect";
-import { ServedRoot } from "../files/served-root";
+import { ServedRoot, ServedRootChangedError } from "../files/served-root";
 import { type PullSource, preparePull } from "../pull/transfer";
 import {
   SafeShell,
@@ -127,13 +127,15 @@ const executeShell = (shell: SafeShell, script: string) =>
   shell.execute(script).pipe(
     Effect.map((result) => ({ ...result, truncated: false })),
     Effect.catch((error) =>
-      Effect.succeed(
-        failedShellResult(
-          error instanceof ShellLimitExceededError
-            ? error.message
-            : "remote read shell failed"
-        )
-      )
+      error instanceof ServedRootChangedError
+        ? Effect.fail(error)
+        : Effect.succeed(
+            failedShellResult(
+              error instanceof ShellLimitExceededError
+                ? error.message
+                : "remote read shell failed"
+            )
+          )
     ),
     Effect.timeoutOrElse({
       duration: "30 seconds",
