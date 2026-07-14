@@ -1,15 +1,17 @@
 import { describe, expect, test } from "bun:test";
 import {
   capabilitiesEqual,
+  checkBridgeKeyExpiry,
   encodeBridgeKey,
   makeCapability,
   mintCapability,
   parseBridgeKey,
   redactBridgeKey,
 } from "@dumbridge/bridge-key";
-import { Result } from "effect";
+import { Encoding, Result } from "effect";
 
 const capabilityBytes = Uint8Array.from({ length: 32 }, (_, index) => index);
+const testExpiresAt = 1_752_600_000_000;
 
 describe("BridgeKey", () => {
   test("mints a fresh 32-byte capability", () => {
@@ -64,6 +66,7 @@ describe("BridgeKey", () => {
     const locator = "iroh-ticket-with-private-routing-details";
     const encoded = encodeBridgeKey({
       capability: capability.success,
+      expiresAt: testExpiresAt,
       locator,
       transport: "iroh",
     });
@@ -83,7 +86,54 @@ describe("BridgeKey", () => {
 
     expect(decoded.success.transport).toBe("iroh");
     expect(decoded.success.locator).toBe(locator);
+    expect(decoded.success.expiresAt).toBe(testExpiresAt);
+    expect(decoded.success.version).toBe(2);
     expect([...decoded.success.capability]).toEqual([...capabilityBytes]);
+  });
+
+  test("parses a version 1 key without an expiry deadline", () => {
+    const capability = makeCapability(capabilityBytes);
+    if (Result.isFailure(capability)) {
+      throw capability.failure;
+    }
+    const payload = JSON.stringify({
+      capability: Encoding.encodeBase64Url(capability.success),
+      locator: "iroh-ticket-minted-before-key-ttl",
+      transport: "iroh",
+      version: 1,
+    });
+    const legacyKey = `dumbridge1_${Encoding.encodeBase64Url(new TextEncoder().encode(payload))}`;
+
+    const decoded = parseBridgeKey(legacyKey);
+    expect(Result.isSuccess(decoded)).toBe(true);
+    if (Result.isFailure(decoded)) {
+      return;
+    }
+
+    expect(decoded.success.version).toBe(1);
+    expect(decoded.success.expiresAt).toBeUndefined();
+    expect(
+      Result.isSuccess(checkBridgeKeyExpiry(decoded.success.expiresAt, 1))
+    ).toBe(true);
+  });
+
+  test("reports key expiry only once the deadline passes", () => {
+    expect(
+      Result.isSuccess(checkBridgeKeyExpiry(testExpiresAt, testExpiresAt - 1))
+    ).toBe(true);
+
+    const atDeadline = checkBridgeKeyExpiry(testExpiresAt, testExpiresAt);
+    const pastDeadline = checkBridgeKeyExpiry(testExpiresAt, testExpiresAt + 1);
+    expect(Result.isFailure(atDeadline)).toBe(true);
+    expect(Result.isFailure(pastDeadline)).toBe(true);
+    if (Result.isFailure(atDeadline) && Result.isFailure(pastDeadline)) {
+      expect(atDeadline.failure._tag).toBe("BridgeKeyExpiredError");
+      expect(atDeadline.failure.expiresAt).toBe(testExpiresAt);
+      expect(pastDeadline.failure.message).toContain(
+        new Date(testExpiresAt).toISOString()
+      );
+      expect(pastDeadline.failure.message).not.toContain("dumbridge1_");
+    }
   });
 
   test("redacts the complete bearer value", () => {
@@ -93,6 +143,7 @@ describe("BridgeKey", () => {
     }
     const link = encodeBridgeKey({
       capability: capability.success,
+      expiresAt: testExpiresAt,
       locator: "iroh-secret-locator",
       transport: "iroh",
     });

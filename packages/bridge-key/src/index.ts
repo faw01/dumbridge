@@ -20,15 +20,33 @@ const BridgeKeySchema = Schema.String.check(
   Schema.isMaxLength(maximumBridgeKeyLength)
 ).pipe(Schema.brand("@Dumbridge/BridgeKey"));
 
-const BridgeKeyPayloadSchema = Schema.Struct({
+const LocatorSchema = Schema.String.check(
+  Schema.isNonEmpty(),
+  Schema.isMaxLength(maximumLocatorLength)
+);
+
+// Epoch milliseconds; keys minted before key TTL existed (version 1) omit it.
+const ExpiresAtSchema = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0));
+
+const BridgeKeyPayloadV1Schema = Schema.Struct({
   capability: CapabilityTextSchema,
-  locator: Schema.String.check(
-    Schema.isNonEmpty(),
-    Schema.isMaxLength(maximumLocatorLength)
-  ),
+  locator: LocatorSchema,
   transport: Schema.Literal("iroh"),
   version: Schema.Literal(1),
 });
+
+const BridgeKeyPayloadV2Schema = Schema.Struct({
+  capability: CapabilityTextSchema,
+  expiresAt: ExpiresAtSchema,
+  locator: LocatorSchema,
+  transport: Schema.Literal("iroh"),
+  version: Schema.Literal(2),
+});
+
+const BridgeKeyPayloadSchema = Schema.Union([
+  BridgeKeyPayloadV2Schema,
+  BridgeKeyPayloadV1Schema,
+]);
 
 const BridgeKeyPayloadJson = Schema.fromJsonString(BridgeKeyPayloadSchema);
 
@@ -37,12 +55,17 @@ export type Capability = typeof CapabilitySchema.Type;
 
 export interface BridgeKeyInput {
   readonly capability: Capability;
+  readonly expiresAt: number;
   readonly locator: string;
   readonly transport: "iroh";
 }
 
-export interface BridgeKeyContents extends BridgeKeyInput {
-  readonly version: 1;
+export interface BridgeKeyContents {
+  readonly capability: Capability;
+  readonly expiresAt: number | undefined;
+  readonly locator: string;
+  readonly transport: "iroh";
+  readonly version: 1 | 2;
 }
 
 class InvalidCapabilityError extends Schema.TaggedErrorClass<InvalidCapabilityError>()(
@@ -61,7 +84,33 @@ class InvalidBridgeKeyError extends Schema.TaggedErrorClass<InvalidBridgeKeyErro
   }
 ) {}
 
+export class BridgeKeyExpiredError extends Schema.TaggedErrorClass<BridgeKeyExpiredError>()(
+  "BridgeKeyExpiredError",
+  {
+    expiresAt: ExpiresAtSchema,
+    message: Schema.String,
+  }
+) {}
+
 export type BridgeKeyError = InvalidBridgeKeyError | InvalidCapabilityError;
+
+/**
+ * Both bridge sides share this comparison so expiry wording stays identical:
+ * the client checks the deadline parsed from the key, the bridge process
+ * checks the deadline it recorded at mint time.
+ */
+export const checkBridgeKeyExpiry = (
+  expiresAt: number | undefined,
+  nowMillis: number
+): Result.Result<void, BridgeKeyExpiredError> =>
+  expiresAt === undefined || nowMillis < expiresAt
+    ? Result.succeed(undefined)
+    : Result.fail(
+        new BridgeKeyExpiredError({
+          expiresAt,
+          message: `The bridge key expired at ${new Date(expiresAt).toISOString()}. Run dumbridge serve again to mint a fresh key.`,
+        })
+      );
 
 export const redactBridgeKey = (_link: string): string =>
   `${bridgeKeyPrefix}[REDACTED]`;
@@ -144,9 +193,10 @@ export const encodeBridgeKey = (
 
   const payload = Schema.encodeResult(BridgeKeyPayloadJson)({
     capability: capability.success,
+    expiresAt: input.expiresAt,
     locator: input.locator,
     transport: input.transport,
-    version: 1,
+    version: 2,
   });
   if (Result.isFailure(payload)) {
     return Result.fail(
@@ -238,6 +288,8 @@ export const parseBridgeKey = (
 
   return Result.succeed({
     capability: capability.success,
+    expiresAt:
+      payload.success.version === 2 ? payload.success.expiresAt : undefined,
     locator: payload.success.locator,
     transport: payload.success.transport,
     version: payload.success.version,

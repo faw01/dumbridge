@@ -67,6 +67,7 @@ describe("dumbridge CLI", () => {
     expect(root.stdout).toContain("pull");
     expect(root.stdout).toContain("skill");
     expect(serve.stdout).toContain("dumbridge serve [flags] <root>");
+    expect(serve.stdout).toContain("--ttl");
     expect(run.stdout).toContain("dumbridge run [flags] <script>");
     expect(pullHelp.stdout).toContain(
       "dumbridge pull [flags] <remote-path> [<destination>]"
@@ -117,6 +118,7 @@ describe("dumbridge CLI", () => {
       Effect.fromResult(
         encodeBridgeKey({
           capability: mintCapability(),
+          expiresAt: Number.MAX_SAFE_INTEGER,
           locator: "unused-client",
           transport: "iroh",
         })
@@ -131,6 +133,40 @@ describe("dumbridge CLI", () => {
     expect(result.exitCode).toBe(1);
     expect(result.stdout).toBe("");
     expect(result.stderr).toBe("dumbridge: The pull path is invalid.\n");
+  });
+
+  test("reports an expired bridge key before attempting a connection", async () => {
+    const link = Effect.runSync(
+      Effect.fromResult(
+        encodeBridgeKey({
+          capability: mintCapability(),
+          expiresAt: 1,
+          locator: "unused-client",
+          transport: "iroh",
+        })
+      )
+    );
+    const result = await invokeWithEnvironment(
+      { DUMBRIDGE_KEY: link },
+      "run",
+      "true"
+    );
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toBe("");
+    expect(result.stderr).toBe(
+      "dumbridge: The bridge key expired at 1970-01-01T00:00:00.001Z. Run dumbridge serve again to mint a fresh key.\n"
+    );
+  });
+
+  test("rejects an invalid serve --ttl before opening a bridge", async () => {
+    const result = await invoke("serve", "--ttl", "sideways", "unused-root");
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toBe("");
+    expect(result.stderr).toBe(
+      "dumbridge: The --ttl value is invalid. Use a duration like '90 minutes' or '8 hours'.\n"
+    );
   });
 
   test("uses relay-only reachability whenever a cloud proxy is selected", () => {

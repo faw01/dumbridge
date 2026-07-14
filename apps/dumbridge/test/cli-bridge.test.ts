@@ -119,6 +119,9 @@ describe("dumbridge CLI bridge", () => {
       expect(startup.output.split("\n", 1)[0]).toBe(
         "Serving the selected directory read-only until Ctrl-C."
       );
+      expect(startup.output).toMatch(
+        /^The key expires at \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z\./m
+      );
       expect(startup.output.match(/^DUMBRIDGE_KEY=/gm)).toHaveLength(1);
       expect(startup.output).not.toContain(servedRoot);
       expect(startup.output).not.toContain("counterfeit");

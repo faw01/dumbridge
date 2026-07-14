@@ -163,6 +163,7 @@ describe("dumbridge application", () => {
           const wrongKey = success(
             encodeBridgeKey({
               capability: mintCapability(),
+              expiresAt: Number.MAX_SAFE_INTEGER,
               locator: decoded.locator,
               transport: "iroh",
             })

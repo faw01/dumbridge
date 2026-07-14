@@ -13,8 +13,12 @@ The foreground local process that owns access to a served root. Stopping it ends
 _Avoid_: Daemon, server account
 
 **Bridge key**:
-The opaque bearer credential minted by serve, encoding a transport locator plus capability, valid only while serve runs.
+The opaque bearer credential minted by serve, encoding a transport locator, capability, and expiry deadline, valid only while serve runs and before that deadline.
 _Avoid_: Bridge link, share URL, API key, pairing
+
+**Key TTL**:
+The configurable duration a bridge key stays valid after serve mints it; it fixes the expiry deadline the bridge process enforces on every session.
+_Avoid_: Session timeout, token expiration, key rotation
 
 **Remote read shell**:
 A Bash-shaped interpreter over the served root whose writes are discarded. It is not the host shell.
