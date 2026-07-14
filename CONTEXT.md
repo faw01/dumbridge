@@ -27,3 +27,7 @@ _Avoid_: Exec, command endpoint
 **Pull**:
 Copy one selected file or directory from the served root into the remote working directory.
 _Avoid_: Download, sync
+
+**Skill guide**:
+The bundled agent usage instructions that `dumbridge skill` prints without contacting a bridge.
+_Avoid_: Docs command, manual

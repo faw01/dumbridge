@@ -5,7 +5,7 @@ description: Find, inspect, and pull live files from a user's read-only dumbridg
 
 # dumbridge
 
-Treat the served root like a read-only external drive. Use the CLI directly; do not add an MCP server or another runner.
+Treat the served root like a read-only external drive. Use the CLI directly; do not add an MCP server or another runner. `dumbridge skill` reprints this guide at any time.
 
 ## Workflow
 

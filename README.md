@@ -2,30 +2,38 @@
 
 dumbridge gives a disposable cloud coding agent temporary, live, read-only access to one local directory.
 
-dumbridge currently requires Bun 1.3.14 or newer. Install Bun once, then run the package directly from npm.
+It is published on npm as [`dumbridge`](https://www.npmjs.com/package/dumbridge); the 0.1.0 `serve` / `run` / `pull` flow has been proven end to end from a real Cursor Cloud agent with `npx --yes dumbridge@0.1.0`. Bun 1.3.14 or newer must be on `PATH`; both `bunx` and `npx` work.
+
+## Quick start
+
+On the computer that owns the files:
 
 ```bash
-# On the computer that owns the files
 bunx dumbridge serve ~/Documents/GitHub
-
-# In the cloud agent, with DUMBRIDGE_LINK set
-bunx dumbridge run 'find . -path "*/skills/*/SKILL.md" -print | sort'
-bunx dumbridge pull .agents/skills/wayfinder .agents/skills/wayfinder
 ```
 
-npm's package runner works too when Bun is on `PATH`:
+Keep that process in the foreground; Ctrl-C revokes access. Put the printed `DUMBRIDGE_LINK` value in the cloud agent's environment without logging or committing it.
+
+In the cloud agent:
 
 ```bash
-npx --yes dumbridge --help
+npx --yes dumbridge skill
+npx --yes dumbridge run 'find . -path "*/skills/*/SKILL.md" -print | sort'
+npx --yes dumbridge pull .agents/skills/wayfinder .agents/skills/wayfinder
 ```
 
-`serve` stays in the foreground and Ctrl-C revokes the link. `run` evaluates a bounded Bash-shaped query in Just Bash, never the host shell. Its writes are discarded. `pull` stages and verifies one exact file or directory, refuses symlinks, and never overwrites an existing destination.
+## Commands
 
-The bridge link is a bearer secret. Anyone holding it while `serve` is running can read below the served root.
+- `dumbridge serve <root>` shares one directory read-only until Ctrl-C and prints the `DUMBRIDGE_LINK` bearer secret.
+- `dumbridge run '<script>'` evaluates one Bash-shaped script against the live served root in a bounded Just Bash sandbox, never the host shell. Its writes are discarded.
+- `dumbridge pull <remote-path> [destination]` copies one exact file or directory, verifies content, refuses symlinks, and never overwrites an existing destination.
+- `dumbridge skill` prints the bundled agent usage guide without contacting a bridge.
+
+The bridge link is a bearer secret: anyone holding it while `serve` is running can read below the served root.
 
 ## Status
 
-dumbridge is an early prerelease. The complete `serve` / `run` / `pull` flow works over direct Iroh connections and ordinary relay fallback. Proxy-only cloud agents still require the included Iroh binding patch to be built and published for each native platform; stock `@number0/iroh` does not expose that proxy configuration yet. See [the proxy patch](docs/patches/iroh-ffi-proxy.md) and [the release gates](docs/design/v1.md#release-gates).
+The complete flow works over direct iroh connections and ordinary relay fallback. Proxy-only cloud agents still require the included iroh binding patch to be built and published for each native platform; stock `@number0/iroh` does not expose that proxy configuration yet. See [the proxy patch](docs/patches/iroh-ffi-proxy.md) and [the release gates](docs/design/v1.md#release-gates).
 
 CI runs on GitHub-hosted macOS, Linux, and Windows runners. Exact CPU and libc support remains a native release gate.
 
