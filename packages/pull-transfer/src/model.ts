@@ -1,5 +1,5 @@
-import { posix, win32 } from "node:path";
-import { type Effect, Schema, type Stream } from "effect";
+import { parseRemotePath } from "@dumbridge/remote-path";
+import { type Effect, Result, Schema, type Stream } from "effect";
 import {
   type PullError,
   PullIntegrityError,
@@ -8,10 +8,6 @@ import {
 } from "./errors";
 
 const digestPattern = /^[0-9a-f]{64}$/;
-const windowsDrivePattern = /^[a-z]:/i;
-const windowsForbiddenComponentPattern = /[<>:"|?*]/;
-const windowsReservedBasePattern =
-  /^(?:con|prn|aux|nul|conin\$|conout\$|com[1-9¹²³]|lpt[1-9¹²³])$/i;
 const FileEntrySchema = Schema.Struct({
   digest: Schema.String,
   kind: Schema.Literal("file"),
@@ -95,43 +91,15 @@ export const limitsFrom = (
   return limits;
 };
 
-export const pathParts = (path: string) => {
-  if (
-    path.length === 0 ||
-    path.includes("\0") ||
-    path.includes("\\") ||
-    posix.isAbsolute(path) ||
-    windowsDrivePattern.test(path) ||
-    win32.isAbsolute(path)
-  ) {
+export const pathParts = (path: string): readonly string[] => {
+  const parsed = parseRemotePath(path);
+  if (Result.isFailure(parsed)) {
     throw new PullPathError({
       path,
       reason: "path must be canonical and relative",
     });
   }
-
-  const parts = path.split("/");
-  if (
-    parts.some((part) => {
-      const windowsBase = part.split(".", 1)[0]?.trimEnd() ?? "";
-      return (
-        part.length === 0 ||
-        part === "." ||
-        part === ".." ||
-        part.endsWith(".") ||
-        part.endsWith(" ") ||
-        Array.from(part).some((character) => character.charCodeAt(0) < 32) ||
-        windowsForbiddenComponentPattern.test(part) ||
-        windowsReservedBasePattern.test(windowsBase)
-      );
-    })
-  ) {
-    throw new PullPathError({
-      path,
-      reason: "path must be canonical and relative",
-    });
-  }
-  return parts;
+  return parsed.success.segments;
 };
 
 export const resolvePullDestination = (
