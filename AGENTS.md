@@ -2,7 +2,7 @@
 
 Use Bun for package management and runtime commands. Run `bun run verify` before committing.
 
-Keep the product surface to `serve`, `run`, `pull`, and the read-only informational `skill` verb. The local side is read-only: never execute the host shell or write below the served root. Prefer a few deep modules, explicit Effect errors, and tests through public behavior. Comments explain constraints, not code narration.
+Keep the product surface to `serve`, `run`, `pull`, and the read-only informational `skill` verb. The local side is read-only: never execute the host shell or write below the served root. Effect v4 owns the CLI and lifecycle; iroh stays behind the `BridgeTransport` seam; Just Bash stays behind the `SafeShell` seam. Prefer a few deep modules, explicit Effect errors, and tests through public behavior. Comments explain constraints, not code narration.
 
 Commits use one-line conventional commits with a required scope, for example `feat(bridge): stream pull responses`. Do not add commit bodies, footers, or co-authors.
 
