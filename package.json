@@ -11,10 +11,10 @@
     "changeset:status": "changeset status --since=origin/main",
     "check": "turbo run check --cache-dir=.turbo/cache && ultracite check .",
     "fix": "turbo run fix --cache-dir=.turbo/cache && ultracite fix .",
-    "pack:check": "turbo run pack:check --cache-dir=.turbo/cache",
     "test": "turbo run test --cache-dir=.turbo/cache",
     "typecheck": "turbo run typecheck --cache-dir=.turbo/cache",
-    "verify": "bun run changeset:status && bun run check && bun run typecheck && bun run test && bun run build && bun run pack:check"
+    "verify": "bun run changeset:status && bun run check && bun run typecheck && bun run test && bun run build && bun run verify:tarball",
+    "verify:tarball": "turbo run verify:tarball --cache-dir=.turbo/cache"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.3",

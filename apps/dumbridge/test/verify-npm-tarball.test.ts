@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { assessPackManifest } from "../scripts/verify-pack";
+import { assessPackManifest } from "../scripts/verify-npm-tarball";
 
 const manifest = (paths: readonly string[]) => ({
   files: paths.map((path) => ({ path })),
