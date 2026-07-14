@@ -13,6 +13,7 @@ import {
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { Effect, Fiber } from "effect";
+import { Bash } from "just-bash";
 import { ServedRoot } from "../src/files/served-root";
 import { SafeShell, type SafeShellLimits } from "../src/shell/safe-shell";
 
@@ -421,6 +422,36 @@ describe("SafeShell", () => {
         exitCode: 126,
         stdout: "",
       });
+    }
+  });
+
+  test("keeps a typed limit when Just Bash replaces a filesystem error", async () => {
+    const execute = spyOn(Bash.prototype, "exec");
+    execute.mockImplementation(async function (this: Bash) {
+      await this.fs.writeFile("/workspace/overlay.txt", "12345678");
+      try {
+        await this.fs.readFileBuffer("/workspace/overlay.txt");
+      } catch {
+        // Just Bash can replace the filesystem error while unwinding.
+      }
+      throw new Error("EFBIG: simulated Just Bash rejection");
+    });
+
+    try {
+      const shell = await makeShell({
+        maxFileReadBytes: 4,
+        maxOverlayBytes: 16,
+      });
+      const error = await Effect.runPromise(
+        Effect.flip(shell.execute("cat overlay.txt"))
+      );
+
+      expect(error).toMatchObject({
+        _tag: "ShellLimitExceededError",
+        limit: "file-read",
+      });
+    } finally {
+      execute.mockRestore();
     }
   });
 

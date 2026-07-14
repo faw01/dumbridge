@@ -228,7 +228,18 @@ const makeExecute = (servedRoot: ServedRoot, limits: SafeShellLimits) =>
           }),
       });
       const result = yield* Effect.tryPromise({
-        catch: executionError,
+        catch: (cause) => {
+          if (view.servedRootFailure !== undefined) {
+            return view.servedRootFailure;
+          }
+          if (view.limitExceeded !== undefined) {
+            return new ShellLimitExceededError({
+              limit: view.limitExceeded,
+              message: limitMessage(view.limitExceeded),
+            });
+          }
+          return executionError(cause);
+        },
         try: async (signal) => {
           view.begin(signal);
           const execution = await bash.exec(script, { signal });

@@ -437,6 +437,30 @@ class RequestBudgetOverlayFs extends OverlayFs {
     }
   }
 
+  private release(kind: ServedRootLimit, bytes: number) {
+    if (kind === "file-read") {
+      this.readBytes -= bytes;
+    } else {
+      this.overlayBytes -= bytes;
+    }
+  }
+
+  private async whileReserved<A>(
+    kind: ServedRootLimit,
+    bytes: number,
+    operation: () => Promise<A>
+  ): Promise<A> {
+    this.reserve(kind, bytes);
+    try {
+      return await operation();
+    } catch (error) {
+      if (this.limitExceeded === undefined && bytes > 0) {
+        this.release(kind, bytes);
+      }
+      throw error;
+    }
+  }
+
   override async readFileBuffer(
     ...args: Parameters<OverlayFs["readFileBuffer"]>
   ): ReturnType<OverlayFs["readFileBuffer"]> {
@@ -444,10 +468,14 @@ class RequestBudgetOverlayFs extends OverlayFs {
       return await this.whileGuarded([args[0]], async () => {
         const stats = await super.stat(args[0]);
         const reservedBytes = stats.isFile ? stats.size : 0;
-        this.reserve("file-read", reservedBytes);
-        const content = await super.readFileBuffer(...args);
+        const content = await this.whileReserved(
+          "file-read",
+          reservedBytes,
+          () => super.readFileBuffer(...args)
+        );
         if (content.byteLength > reservedBytes) {
-          this.reserve("file-read", content.byteLength - reservedBytes);
+          const extraBytes = content.byteLength - reservedBytes;
+          this.reserve("file-read", extraBytes);
         }
         return content;
       });
@@ -462,10 +490,12 @@ class RequestBudgetOverlayFs extends OverlayFs {
   override async writeFile(
     ...args: Parameters<OverlayFs["writeFile"]>
   ): ReturnType<OverlayFs["writeFile"]> {
-    await this.whileGuarded([args[0]], async () => {
-      this.reserve("overlay", fileContentSize(args[1], args[2]));
-      await super.writeFile(...args);
-    });
+    const reservedBytes = fileContentSize(args[1], args[2]);
+    await this.whileGuarded([args[0]], () =>
+      this.whileReserved("overlay", reservedBytes, () =>
+        super.writeFile(...args)
+      )
+    );
   }
 
   override async appendFile(
@@ -478,8 +508,9 @@ class RequestBudgetOverlayFs extends OverlayFs {
         const stats = await super.stat(args[0]);
         existingBytes = stats.isFile ? stats.size : 0;
       }
-      this.reserve("overlay", existingBytes + appendedBytes);
-      await super.appendFile(...args);
+      await this.whileReserved("overlay", existingBytes + appendedBytes, () =>
+        super.appendFile(...args)
+      );
     });
   }
 
@@ -545,7 +576,10 @@ class RequestBudgetOverlayFs extends OverlayFs {
     await this.whileGuarded([args[0]], async () => {
       const stats = await super.stat(args[0]);
       if (stats.isFile) {
-        this.reserve("overlay", stats.size);
+        await this.whileReserved("overlay", stats.size, () =>
+          super.chmod(...args)
+        );
+        return;
       }
       await super.chmod(...args);
     });
@@ -581,7 +615,10 @@ class RequestBudgetOverlayFs extends OverlayFs {
     await this.whileGuarded([args[0]], async () => {
       const stats = await super.stat(args[0]);
       if (stats.isFile) {
-        this.reserve("overlay", stats.size);
+        await this.whileReserved("overlay", stats.size, () =>
+          super.utimes(...args)
+        );
+        return;
       }
       await super.utimes(...args);
     });
