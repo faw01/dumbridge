@@ -25,6 +25,78 @@
         "just-bash": "3.1.0",
       },
       "devDependencies": {
+        "@dumbridge/bridge-link": "workspace:*",
+        "@dumbridge/bridge-transport": "workspace:*",
+        "@dumbridge/pull-transfer": "workspace:*",
+        "@dumbridge/safe-shell": "workspace:*",
+        "@dumbridge/served-root": "workspace:*",
+        "@dumbridge/wire": "workspace:*",
+        "@types/bun": "1.3.14",
+      },
+    },
+    "packages/bridge-link": {
+      "name": "@dumbridge/bridge-link",
+      "version": "0.0.0",
+      "dependencies": {
+        "effect": "4.0.0-beta.98",
+      },
+      "devDependencies": {
+        "@types/bun": "1.3.14",
+      },
+    },
+    "packages/bridge-transport": {
+      "name": "@dumbridge/bridge-transport",
+      "version": "0.0.0",
+      "dependencies": {
+        "@number0/iroh": "1.0.0",
+        "effect": "4.0.0-beta.98",
+      },
+      "devDependencies": {
+        "@types/bun": "1.3.14",
+      },
+    },
+    "packages/pull-transfer": {
+      "name": "@dumbridge/pull-transfer",
+      "version": "0.0.0",
+      "dependencies": {
+        "@dumbridge/served-root": "workspace:*",
+        "effect": "4.0.0-beta.98",
+      },
+      "devDependencies": {
+        "@types/bun": "1.3.14",
+      },
+    },
+    "packages/safe-shell": {
+      "name": "@dumbridge/safe-shell",
+      "version": "0.0.0",
+      "dependencies": {
+        "@dumbridge/served-root": "workspace:*",
+        "effect": "4.0.0-beta.98",
+        "just-bash": "3.1.0",
+      },
+      "devDependencies": {
+        "@types/bun": "1.3.14",
+      },
+    },
+    "packages/served-root": {
+      "name": "@dumbridge/served-root",
+      "version": "0.0.0",
+      "dependencies": {
+        "effect": "4.0.0-beta.98",
+        "just-bash": "3.1.0",
+      },
+      "devDependencies": {
+        "@types/bun": "1.3.14",
+      },
+    },
+    "packages/wire": {
+      "name": "@dumbridge/wire",
+      "version": "0.0.0",
+      "dependencies": {
+        "@dumbridge/bridge-link": "workspace:*",
+        "effect": "4.0.0-beta.98",
+      },
+      "devDependencies": {
         "@types/bun": "1.3.14",
       },
     },
@@ -89,6 +161,18 @@
     "@clack/core": ["@clack/core@1.4.3", "", { "dependencies": { "fast-wrap-ansi": "^0.2.0", "sisteransi": "^1.0.5" } }, "sha512-/kr3UWNtdJfxZtPgDqUOmG2pvwlmcLGheex5yiZKdwbzZJxhV+HMNR9QNmyY5cGwTNV6LrR7Jtp+KjhUAP1qBQ=="],
 
     "@clack/prompts": ["@clack/prompts@1.7.0", "", { "dependencies": { "@clack/core": "1.4.3", "fast-string-width": "^3.0.2", "fast-wrap-ansi": "^0.2.0", "sisteransi": "^1.0.5" } }, "sha512-y7/yvZ2TPAnR9+jnc00klvNNLkJiXFFrQA/hlLCcxA9a2A4zQIOimyFQ9XfwYKiGD1fb5GY8vbKIIgO8d5Tb2A=="],
+
+    "@dumbridge/bridge-link": ["@dumbridge/bridge-link@workspace:packages/bridge-link"],
+
+    "@dumbridge/bridge-transport": ["@dumbridge/bridge-transport@workspace:packages/bridge-transport"],
+
+    "@dumbridge/pull-transfer": ["@dumbridge/pull-transfer@workspace:packages/pull-transfer"],
+
+    "@dumbridge/safe-shell": ["@dumbridge/safe-shell@workspace:packages/safe-shell"],
+
+    "@dumbridge/served-root": ["@dumbridge/served-root@workspace:packages/served-root"],
+
+    "@dumbridge/wire": ["@dumbridge/wire@workspace:packages/wire"],
 
     "@effect/platform-bun": ["@effect/platform-bun@4.0.0-beta.98", "", { "dependencies": { "@effect/platform-node-shared": "^4.0.0-beta.98" }, "peerDependencies": { "effect": "^4.0.0-beta.98" } }, "sha512-QorRKhvwHDPwvE8lH5lE0r0dI2z+zj12VUN4h7hfoIunKUiXSoSOMZqF3w13W30RpV6ivsvJywUycaa/18yMPA=="],
 

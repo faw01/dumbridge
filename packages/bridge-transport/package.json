@@ -1,0 +1,23 @@
+{
+  "name": "@dumbridge/bridge-transport",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./iroh": "./src/iroh/index.ts"
+  },
+  "scripts": {
+    "check": "ultracite check src test package.json tsconfig.json",
+    "fix": "ultracite fix src test package.json tsconfig.json",
+    "test": "bun test",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@number0/iroh": "1.0.0",
+    "effect": "4.0.0-beta.98"
+  },
+  "devDependencies": {
+    "@types/bun": "1.3.14"
+  }
+}
