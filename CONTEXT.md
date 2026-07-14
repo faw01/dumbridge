@@ -28,6 +28,10 @@ _Avoid_: Exec, command endpoint
 Copy one selected file or directory from the served root into the remote working directory.
 _Avoid_: Download, sync
 
+**Remote path**:
+The canonical, Windows-safe relative path that selects one file or directory below the served root; both bridge sides accept and reject the same remote paths.
+_Avoid_: Safe relative path, source path, virtual path
+
 **Skill guide**:
 The bundled agent usage instructions that `dumbridge skill` prints without contacting a bridge.
 _Avoid_: Docs command, manual
