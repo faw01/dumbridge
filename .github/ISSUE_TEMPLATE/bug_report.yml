@@ -5,7 +5,7 @@ labels: [needs-triage]
 body:
   - type: markdown
     attributes:
-      value: Never include bridge links, capabilities, `.env` contents, or private paths.
+      value: Never include bridge keys, capabilities, `.env` contents, or private paths.
   - type: input
     id: version
     attributes:

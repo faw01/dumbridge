@@ -3,10 +3,10 @@ import { mkdir, mkdtemp, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-  encodeBridgeLink,
+  encodeBridgeKey,
   mintCapability,
-  parseBridgeLink,
-} from "@dumbridge/bridge-link";
+  parseBridgeKey,
+} from "@dumbridge/bridge-key";
 import {
   BridgeAcceptError,
   BridgeConnectError,
@@ -131,7 +131,7 @@ const listenerFrom = (accepts: BridgeListener["accept"][]): BridgeListener => {
 };
 
 const requestFor = (link: string, request: WireFrame) => {
-  const decoded = success(parseBridgeLink(link));
+  const decoded = success(parseBridgeKey(link));
   return joinChunks(
     encoded({ capability: decoded.capability, type: "auth" }),
     encoded(request)
@@ -581,7 +581,7 @@ describe("bridge application supervision", () => {
     let connectCalls = 0;
     const capability = mintCapability();
     const link = success(
-      encodeBridgeLink({
+      encodeBridgeKey({
         capability,
         locator: "unused-client",
         transport: "iroh",
@@ -613,7 +613,7 @@ describe("bridge application supervision", () => {
   test("represents a sanitized remote limit without fabricated measurements", async () => {
     const capability = mintCapability();
     const link = success(
-      encodeBridgeLink({
+      encodeBridgeKey({
         capability,
         locator: "limited-client",
         transport: "iroh",
@@ -644,7 +644,7 @@ describe("bridge application supervision", () => {
   test("bounds a client response even when every read makes progress", async () => {
     const capability = mintCapability();
     const link = success(
-      encodeBridgeLink({
+      encodeBridgeKey({
         capability,
         locator: "test-client",
         transport: "iroh",
@@ -680,7 +680,7 @@ describe("bridge application supervision", () => {
   test("retries one connection failure before sending the request", async () => {
     const capability = mintCapability();
     const link = success(
-      encodeBridgeLink({
+      encodeBridgeKey({
         capability,
         locator: "retry-client",
         transport: "iroh",
@@ -717,7 +717,7 @@ describe("bridge application supervision", () => {
   test("does not retry after request transmission starts", async () => {
     const capability = mintCapability();
     const link = success(
-      encodeBridgeLink({
+      encodeBridgeKey({
         capability,
         locator: "request-failure-client",
         transport: "iroh",

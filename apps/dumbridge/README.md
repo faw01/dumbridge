@@ -12,7 +12,7 @@ On the computer that owns the files:
 bunx dumbridge serve ~/Documents/GitHub
 ```
 
-Keep that process open. Put the printed `DUMBRIDGE_LINK` value in the cloud agent's environment without logging or committing it. In the cloud agent:
+Keep that process open. Put the printed `DUMBRIDGE_KEY` value in the cloud agent's environment without logging or committing it. In the cloud agent:
 
 ```bash
 npx --yes dumbridge skill
@@ -22,7 +22,7 @@ npx --yes dumbridge pull .agents/skills/wayfinder .agents/skills/wayfinder
 
 `skill` prints the bundled agent usage guide. `run` uses a bounded Just Bash filesystem, not the host shell, and its writes disappear after the request. `pull` accepts one exact relative path, refuses symlinks and existing destinations, and verifies content before publishing it.
 
-The bridge is one-way and the link is a bearer secret. Ctrl-C on `serve` revokes access.
+The bridge is one-way and the key is a bearer secret. Ctrl-C on `serve` revokes access.
 
 ## Prerelease limitation
 

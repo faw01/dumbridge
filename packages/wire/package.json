@@ -13,7 +13,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@dumbridge/bridge-link": "workspace:*",
+    "@dumbridge/bridge-key": "workspace:*",
     "effect": "4.0.0-beta.98"
   },
   "devDependencies": {

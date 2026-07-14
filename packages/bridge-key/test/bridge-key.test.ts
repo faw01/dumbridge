@@ -1,17 +1,17 @@
 import { describe, expect, test } from "bun:test";
 import {
   capabilitiesEqual,
-  encodeBridgeLink,
+  encodeBridgeKey,
   makeCapability,
   mintCapability,
-  parseBridgeLink,
-  redactBridgeLink,
-} from "@dumbridge/bridge-link";
+  parseBridgeKey,
+  redactBridgeKey,
+} from "@dumbridge/bridge-key";
 import { Result } from "effect";
 
 const capabilityBytes = Uint8Array.from({ length: 32 }, (_, index) => index);
 
-describe("BridgeLink", () => {
+describe("BridgeKey", () => {
   test("mints a fresh 32-byte capability", () => {
     const first = mintCapability();
     const second = mintCapability();
@@ -62,7 +62,7 @@ describe("BridgeLink", () => {
     }
 
     const locator = "iroh-ticket-with-private-routing-details";
-    const encoded = encodeBridgeLink({
+    const encoded = encodeBridgeKey({
       capability: capability.success,
       locator,
       transport: "iroh",
@@ -75,7 +75,7 @@ describe("BridgeLink", () => {
     expect(encoded.success.startsWith("dumbridge1_")).toBe(true);
     expect(encoded.success).not.toContain(locator);
 
-    const decoded = parseBridgeLink(encoded.success);
+    const decoded = parseBridgeKey(encoded.success);
     expect(Result.isSuccess(decoded)).toBe(true);
     if (Result.isFailure(decoded)) {
       return;
@@ -91,7 +91,7 @@ describe("BridgeLink", () => {
     if (Result.isFailure(capability)) {
       throw capability.failure;
     }
-    const link = encodeBridgeLink({
+    const link = encodeBridgeKey({
       capability: capability.success,
       locator: "iroh-secret-locator",
       transport: "iroh",
@@ -100,26 +100,26 @@ describe("BridgeLink", () => {
       throw link.failure;
     }
 
-    const redacted = redactBridgeLink(link.success);
+    const redacted = redactBridgeKey(link.success);
 
     expect(redacted).toBe("dumbridge1_[REDACTED]");
     expect(redacted).not.toContain(link.success.slice("dumbridge1_".length));
     expect(redacted).not.toContain("iroh-secret-locator");
   });
 
-  test("rejects malformed and oversized bridge links with typed errors", () => {
-    const malformed = parseBridgeLink("dumbridge1_***");
-    const oversized = parseBridgeLink(`dumbridge1_${"a".repeat(16_384)}`);
+  test("rejects malformed and oversized bridge keys with typed errors", () => {
+    const malformed = parseBridgeKey("dumbridge1_***");
+    const oversized = parseBridgeKey(`dumbridge1_${"a".repeat(16_384)}`);
 
     expect(Result.isFailure(malformed)).toBe(true);
     expect(Result.isFailure(oversized)).toBe(true);
     if (Result.isFailure(malformed) && Result.isFailure(oversized)) {
       expect(malformed.failure).toMatchObject({
-        _tag: "InvalidBridgeLinkError",
+        _tag: "InvalidBridgeKeyError",
         reason: "encoding",
       });
       expect(oversized.failure).toMatchObject({
-        _tag: "InvalidBridgeLinkError",
+        _tag: "InvalidBridgeKeyError",
         reason: "size",
       });
       expect(JSON.stringify(malformed.failure)).not.toContain("***");

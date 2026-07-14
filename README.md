@@ -12,7 +12,7 @@ On the computer that owns the files:
 bunx dumbridge serve ~/Documents/GitHub
 ```
 
-Keep that process in the foreground; Ctrl-C revokes access. Put the printed `DUMBRIDGE_LINK` value in the cloud agent's environment without logging or committing it.
+Keep that process in the foreground; Ctrl-C revokes access. Put the printed `DUMBRIDGE_KEY` value in the cloud agent's environment without logging or committing it.
 
 In the cloud agent:
 
@@ -24,12 +24,12 @@ npx --yes dumbridge pull .agents/skills/wayfinder .agents/skills/wayfinder
 
 ## Commands
 
-- `dumbridge serve <root>` shares one directory read-only until Ctrl-C and prints the `DUMBRIDGE_LINK` bearer secret.
+- `dumbridge serve <root>` shares one directory read-only until Ctrl-C and prints the `DUMBRIDGE_KEY` bearer secret.
 - `dumbridge run '<script>'` evaluates one Bash-shaped script against the live served root in a bounded Just Bash sandbox, never the host shell. Its writes are discarded.
 - `dumbridge pull <remote-path> [destination]` copies one exact file or directory, verifies content, refuses symlinks, and never overwrites an existing destination.
 - `dumbridge skill` prints the bundled agent usage guide without contacting a bridge.
 
-The bridge link is a bearer secret: anyone holding it while `serve` is running can read below the served root.
+The bridge key is a bearer secret: anyone holding it while `serve` is running can read below the served root.
 
 ## Status
 
@@ -44,6 +44,6 @@ bun install --frozen-lockfile
 bun run verify
 ```
 
-This is a Bun workspace orchestrated by Turborepo. The publishable CLI is in `apps/dumbridge`; the internal seams (`bridge-link`, `bridge-transport`, `wire`, `served-root`, `safe-shell`, `pull-transfer`) are private packages under `packages/*` that get bundled into the published `dist/cli.js`. The optional agent instructions are in `skills/dumbridge`.
+This is a Bun workspace orchestrated by Turborepo. The publishable CLI is in `apps/dumbridge`; the internal seams (`bridge-key`, `bridge-transport`, `wire`, `served-root`, `safe-shell`, `pull-transfer`) are private packages under `packages/*` that get bundled into the published `dist/cli.js`. The optional agent instructions are in `skills/dumbridge`.
 
 See [the v1 design](docs/design/v1.md) for the product and security contract and [CONTEXT.md](CONTEXT.md) for its domain language.
