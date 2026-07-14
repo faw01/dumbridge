@@ -747,8 +747,33 @@ describe("bridge application supervision", () => {
       _tag: "BridgeClientError",
       operation: "request",
     });
+    expect(error.cause).toBeInstanceOf(BridgeFinishError);
     expect(connectCalls).toBe(1);
     expect(started.state.writes).toHaveLength(2);
     expect(started.state.closeCalls).toBe(1);
+  });
+
+  test("keeps the bridge key out of a remapped invalid-key error", async () => {
+    const rejectedPayload = "bm90LXJlYWxseS1hLWJyaWRnZS1rZXk";
+    const transport: BridgeTransport = {
+      connect: () => Effect.die("invalid keys must not connect"),
+      listen: Effect.die("listener is not used in this test"),
+    };
+
+    const error = await Effect.runPromise(
+      runRemote({
+        link: `dumbridge1_${rejectedPayload}`,
+        script: "cat note.txt",
+        transport,
+      }).pipe(Effect.flip)
+    );
+
+    expect(error).toMatchObject({
+      _tag: "BridgeClientError",
+      message: "DUMBRIDGE_KEY is invalid.",
+      operation: "bridge-key",
+    });
+    expect(error.cause).toMatchObject({ _tag: "InvalidBridgeKeyError" });
+    expect(JSON.stringify(error)).not.toContain(rejectedPayload);
   });
 });

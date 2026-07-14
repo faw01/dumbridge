@@ -44,6 +44,7 @@ const ClientOperation = Schema.Literals([
 class BridgeClientError extends Schema.TaggedErrorClass<BridgeClientError>()(
   "BridgeClientError",
   {
+    cause: Schema.optionalKey(Schema.Defect()),
     message: Schema.String,
     operation: ClientOperation,
   }
@@ -60,8 +61,11 @@ interface RemotePullResult extends PullResult {
   readonly destination: string;
 }
 
-const clientError = (operation: typeof ClientOperation.Type, message: string) =>
-  new BridgeClientError({ message, operation });
+const clientError = (
+  operation: typeof ClientOperation.Type,
+  message: string,
+  cause?: unknown
+) => new BridgeClientError({ cause, message, operation });
 
 const retryConnect = <A, E, R>(
   attempt: () => Effect.Effect<A, E, R>,
@@ -99,8 +103,8 @@ const withClientDeadline = <A, E, R>(
 
 const decodeKey = (link: string) =>
   Effect.fromResult(parseBridgeKey(link)).pipe(
-    Effect.mapError((_error: BridgeKeyError) =>
-      clientError("bridge-key", "DUMBRIDGE_KEY is invalid.")
+    Effect.mapError((error: BridgeKeyError) =>
+      clientError("bridge-key", "DUMBRIDGE_KEY is invalid.", error)
     )
   );
 
@@ -110,8 +114,12 @@ const openSession = (transport: BridgeTransport, link: string) =>
     const session = yield* transport
       .connect(BridgeLocator.fromString(decoded.locator))
       .pipe(
-        Effect.mapError(() =>
-          clientError("connect", "Could not connect to the bridge process.")
+        Effect.mapError((error) =>
+          clientError(
+            "connect",
+            "Could not connect to the bridge process.",
+            error
+          )
         )
       );
     return { capability: decoded.capability, session };
@@ -124,8 +132,8 @@ const finishRequest = (
 ) =>
   sendFrames(session, [{ capability, type: "auth" }, request]).pipe(
     Effect.flatMap(() => session.finish),
-    Effect.mapError(() =>
-      clientError("request", "Could not send the bridge request.")
+    Effect.mapError((error) =>
+      clientError("request", "Could not send the bridge request.", error)
     )
   );
 
@@ -136,8 +144,12 @@ const nextClientEvent = <A>(
   reader
     .next()
     .pipe(
-      Effect.mapError(() =>
-        clientError(operation, "The bridge returned an invalid response.")
+      Effect.mapError((error) =>
+        clientError(
+          operation,
+          "The bridge returned an invalid response.",
+          error
+        )
       )
     );
 
@@ -164,8 +176,12 @@ export const runRemote = Effect.fn("BridgeClient.run")(
           const decoder = yield* Effect.fromResult(
             makeRunResponseSession()
           ).pipe(
-            Effect.mapError(() =>
-              clientError("run-response", "Could not open the run response.")
+            Effect.mapError((error) =>
+              clientError(
+                "run-response",
+                "Could not open the run response.",
+                error
+              )
             )
           );
           const reader = new WireEventReader(session, decoder);
@@ -236,8 +252,12 @@ export const pullRemote = Effect.fn("BridgeClient.pull")(
           const decoder = yield* Effect.fromResult(
             makePullResponseSession()
           ).pipe(
-            Effect.mapError(() =>
-              clientError("pull-response", "Could not open the pull response.")
+            Effect.mapError((error) =>
+              clientError(
+                "pull-response",
+                "Could not open the pull response.",
+                error
+              )
             )
           );
           const reader = new WireEventReader(session, decoder);
