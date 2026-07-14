@@ -2,6 +2,8 @@
 
 Research date: 2026-07-14
 
+> Decision note: this records the initial research recommendation. The owner subsequently chose a Bun-only runtime, a Turborepo workspace, and no release workflow or OIDC publishing. The implemented decision in `docs/design/v1.md` is authoritative.
+
 ## Recommendation
 
 Dumbridge should begin as **one publishable TypeScript CLI package**, not a monorepo. Use Bun as the repository package manager and local task runner, but keep that choice separate from the runtime contract of the published CLI. If `npx dumbridge` must work on a clean cloud agent that has Node but not Bun, the shipped executable must retain a Node shebang and run on Node; using `bun install`, `bun test`, or `bun run` during development does not require shipping a Bun-only executable.

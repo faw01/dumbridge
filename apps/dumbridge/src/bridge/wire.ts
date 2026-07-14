@@ -1,4 +1,3 @@
-import { createHash, type Hash } from "node:crypto";
 import { Result, Schema } from "effect";
 import {
   type Capability,
@@ -26,6 +25,7 @@ const frameTypeNames = [
   "file-start",
   "manifest",
   "pull",
+  "pull-error",
   "run",
   "stderr",
   "stdout",
@@ -119,6 +119,19 @@ const CompleteHeaderSchema = Schema.Struct({
   protocol: Schema.Literal(protocol),
   type: Schema.Literal("complete"),
 });
+const PullFailureCodeSchema = Schema.Literals([
+  "invalid-path",
+  "io",
+  "limit",
+  "not-found",
+  "source-changed",
+  "symlink",
+]);
+const PullErrorHeaderSchema = Schema.Struct({
+  code: PullFailureCodeSchema,
+  protocol: Schema.Literal(protocol),
+  type: Schema.Literal("pull-error"),
+});
 const RequestHeaderSchema = Schema.Union([RunHeaderSchema, PullHeaderSchema]);
 
 const WireHeaderSchema = Schema.Union([
@@ -133,6 +146,7 @@ const WireHeaderSchema = Schema.Union([
   FileChunkHeaderSchema,
   FileEndHeaderSchema,
   CompleteHeaderSchema,
+  PullErrorHeaderSchema,
 ]);
 const WireHeaderJson = Schema.fromJsonString(WireHeaderSchema);
 const HeaderEnvelopeSchema = Schema.Struct({
@@ -142,6 +156,7 @@ const HeaderEnvelopeSchema = Schema.Struct({
 
 type WireHeader = typeof WireHeaderSchema.Type;
 export type WirePullManifest = typeof PullManifestSchema.Type;
+export type PullFailureCode = typeof PullFailureCodeSchema.Type;
 type WirePullFileEntry = Extract<
   WirePullManifest["entries"][number],
   { readonly kind: "file" }
@@ -172,6 +187,7 @@ export type PullResponseEvent =
       readonly type: "file-chunk";
     }
   | { readonly digest: string; readonly type: "file-end" }
+  | { readonly code: PullFailureCode; readonly type: "pull-error" }
   | { readonly type: "complete" };
 
 export type WireFrame =
@@ -222,7 +238,7 @@ export class FrameTooLargeError extends Schema.TaggedErrorClass<FrameTooLargeErr
   }
 ) {}
 
-export class MalformedFrameError extends Schema.TaggedErrorClass<MalformedFrameError>()(
+class MalformedFrameError extends Schema.TaggedErrorClass<MalformedFrameError>()(
   "MalformedFrameError",
   {
     message: Schema.String,
@@ -230,7 +246,7 @@ export class MalformedFrameError extends Schema.TaggedErrorClass<MalformedFrameE
   }
 ) {}
 
-export class IncompleteFrameError extends Schema.TaggedErrorClass<IncompleteFrameError>()(
+class IncompleteFrameError extends Schema.TaggedErrorClass<IncompleteFrameError>()(
   "IncompleteFrameError",
   {
     message: Schema.String,
@@ -238,22 +254,22 @@ export class IncompleteFrameError extends Schema.TaggedErrorClass<IncompleteFram
   }
 ) {}
 
-export class UnsupportedProtocolError extends Schema.TaggedErrorClass<UnsupportedProtocolError>()(
+class UnsupportedProtocolError extends Schema.TaggedErrorClass<UnsupportedProtocolError>()(
   "UnsupportedProtocolError",
   { message: Schema.String }
 ) {}
 
-export class UnknownFrameTypeError extends Schema.TaggedErrorClass<UnknownFrameTypeError>()(
+class UnknownFrameTypeError extends Schema.TaggedErrorClass<UnknownFrameTypeError>()(
   "UnknownFrameTypeError",
   { message: Schema.String }
 ) {}
 
-export class AuthenticationError extends Schema.TaggedErrorClass<AuthenticationError>()(
+class AuthenticationError extends Schema.TaggedErrorClass<AuthenticationError>()(
   "AuthenticationError",
   { message: Schema.String }
 ) {}
 
-export class IllegalFrameError extends Schema.TaggedErrorClass<IllegalFrameError>()(
+class IllegalFrameError extends Schema.TaggedErrorClass<IllegalFrameError>()(
   "IllegalFrameError",
   {
     message: Schema.String,
@@ -261,12 +277,12 @@ export class IllegalFrameError extends Schema.TaggedErrorClass<IllegalFrameError
   }
 ) {}
 
-export class IncompleteSessionError extends Schema.TaggedErrorClass<IncompleteSessionError>()(
+class IncompleteSessionError extends Schema.TaggedErrorClass<IncompleteSessionError>()(
   "IncompleteSessionError",
   { message: Schema.String }
 ) {}
 
-export class WireLimitExceededError extends Schema.TaggedErrorClass<WireLimitExceededError>()(
+class WireLimitExceededError extends Schema.TaggedErrorClass<WireLimitExceededError>()(
   "WireLimitExceededError",
   {
     limit: LimitName,
@@ -276,7 +292,7 @@ export class WireLimitExceededError extends Schema.TaggedErrorClass<WireLimitExc
   }
 ) {}
 
-export class InvalidWireLimitError extends Schema.TaggedErrorClass<InvalidWireLimitError>()(
+class InvalidWireLimitError extends Schema.TaggedErrorClass<InvalidWireLimitError>()(
   "InvalidWireLimitError",
   {
     limit: Schema.String,
@@ -305,11 +321,7 @@ export interface WireSession<A> {
   ) => Result.Result<readonly A[], WireDecodeError>;
 }
 
-export interface RequestSession {
-  readonly finish: () => Result.Result<BridgeRequest, WireDecodeError>;
-  readonly push: (chunk: Uint8Array) => Result.Result<void, WireDecodeError>;
-}
-
+export type RequestSession = WireSession<BridgeRequest>;
 export type RunResponseSession = WireSession<RunResponseEvent>;
 export type PullResponseSession = WireSession<PullResponseEvent>;
 
@@ -461,32 +473,6 @@ const validateManifestEntries = (
   return Result.succeed({ files, totalBytes });
 };
 
-const cloneManifest = (manifest: WirePullManifest): WirePullManifest => ({
-  digestAlgorithm: manifest.digestAlgorithm,
-  entries: manifest.entries.map((entry) =>
-    entry.kind === "file"
-      ? {
-          digest: entry.digest,
-          kind: entry.kind,
-          path: entry.path,
-          size: entry.size,
-        }
-      : { kind: entry.kind, path: entry.path }
-  ),
-  kind: manifest.kind,
-  name: manifest.name,
-  totalBytes: manifest.totalBytes,
-});
-
-const ownManifest = (manifest: WirePullManifest): WirePullManifest => {
-  const owned = cloneManifest(manifest);
-  for (const entry of owned.entries) {
-    Object.freeze(entry);
-  }
-  Object.freeze(owned.entries);
-  return Object.freeze(owned);
-};
-
 const validateManifest = (
   input: WirePullManifest,
   limits: WireSessionLimits
@@ -502,7 +488,7 @@ const validateManifest = (
       illegal("manifest", "Pull manifest does not match the wire schema.")
     );
   }
-  const manifest = ownManifest(decoded.success);
+  const manifest = decoded.success;
   if (!canonicalPath(manifest.name, true)) {
     return Result.fail(
       illegal("manifest", "Pull manifest name is not canonical.")
@@ -712,6 +698,11 @@ const frameToRaw = (
     case "file-end":
       return Result.succeed({
         header: { digest: frame.digest, protocol, type: "file-end" },
+        payload: empty,
+      });
+    case "pull-error":
+      return Result.succeed({
+        header: { code: frame.code, protocol, type: "pull-error" },
         payload: empty,
       });
     case "complete":
@@ -1082,10 +1073,9 @@ export const makeRequestSession = (
   const limits = resolved.success;
   const expectedCapabilitySnapshot = Uint8Array.from(expectedCapability);
   let state: "auth" | "request" | "complete" = "auth";
-  let request: BridgeRequest | undefined;
   const authenticate = (
     frame: RawFrame
-  ): Result.Result<SessionEvent<never>, WireDecodeError> => {
+  ): Result.Result<SessionEvent<BridgeRequest>, WireDecodeError> => {
     if (frame.header.type !== "auth") {
       return Result.fail(
         illegal("order", "Request session must start with authentication.")
@@ -1113,16 +1103,15 @@ export const makeRequestSession = (
 
   const acceptRequest = (
     frame: RawFrame
-  ): Result.Result<SessionEvent<never>, WireDecodeError> => {
+  ): Result.Result<SessionEvent<BridgeRequest>, WireDecodeError> => {
     if (frame.payload.byteLength !== 0) {
       return Result.fail(
         illegal("payload", "Request frame payload must be empty.")
       );
     }
     if (frame.header.type === "run") {
-      request = { script: frame.header.script, type: "run" };
       state = "complete";
-      return Result.succeed(noEvent);
+      return Result.succeed(emit({ script: frame.header.script, type: "run" }));
     }
     if (frame.header.type === "pull") {
       if (!canonicalPath(frame.header.remotePath)) {
@@ -1130,9 +1119,10 @@ export const makeRequestSession = (
           illegal("path", "Pull path must be canonical and relative.")
         );
       }
-      request = { remotePath: frame.header.remotePath, type: "pull" };
       state = "complete";
-      return Result.succeed(noEvent);
+      return Result.succeed(
+        emit({ remotePath: frame.header.remotePath, type: "pull" })
+      );
     }
     return Result.fail(
       illegal("order", "Request session contains an unexpected frame.")
@@ -1141,7 +1131,7 @@ export const makeRequestSession = (
 
   const consume = (
     frame: RawFrame
-  ): Result.Result<SessionEvent<never>, WireDecodeError> => {
+  ): Result.Result<SessionEvent<BridgeRequest>, WireDecodeError> => {
     if (state === "auth") {
       return authenticate(frame);
     }
@@ -1153,34 +1143,13 @@ export const makeRequestSession = (
     );
   };
 
-  const session = makeSession<never>(
+  const session = makeSession<BridgeRequest>(
     limits,
     (body) => decodeAuthenticatedRequestFrame(body, state),
     consume,
-    () => request !== undefined
+    () => state === "complete"
   );
-  return Result.succeed({
-    finish: () => {
-      const finished = session.finish();
-      if (Result.isFailure(finished)) {
-        return Result.fail(finished.failure);
-      }
-      if (request === undefined) {
-        return Result.fail(
-          new IncompleteSessionError({
-            message: "Wire stream ended before the request completed.",
-          })
-        );
-      }
-      return Result.succeed(request);
-    },
-    push: (chunk) => {
-      const pushed = session.push(chunk);
-      return Result.isFailure(pushed)
-        ? Result.fail(pushed.failure)
-        : Result.succeed(undefined);
-    },
-  });
+  return Result.succeed(session);
 };
 
 export const makeRunResponseSession = (
@@ -1262,7 +1231,6 @@ export const makePullResponseSession = (
 
   interface CurrentFile {
     readonly entry: WirePullFileEntry;
-    readonly hash: Hash;
     received: number;
   }
 
@@ -1277,6 +1245,23 @@ export const makePullResponseSession = (
     SessionEvent<PullResponseEvent>,
     WireDecodeError
   >;
+
+  const acceptFailure = (frame: RawFrame): PullConsumeResult => {
+    if (frame.header.type !== "pull-error" || state === "complete") {
+      return Result.fail(
+        illegal("order", "Pull response contains an unexpected frame.")
+      );
+    }
+    if (frame.payload.byteLength !== 0) {
+      return Result.fail(
+        illegal("payload", "Pull error frame payload must be empty.")
+      );
+    }
+    state = "complete";
+    return Result.succeed(
+      emit({ code: frame.header.code, type: "pull-error" })
+    );
+  };
 
   const acceptManifest = (frame: RawFrame): PullConsumeResult => {
     if (frame.header.type !== "manifest") {
@@ -1299,7 +1284,7 @@ export const makePullResponseSession = (
     files = manifestFiles;
     state = "between-files";
     return Result.succeed(
-      emit({ manifest: cloneManifest(decodedManifest), type: "manifest" })
+      emit({ manifest: decodedManifest, type: "manifest" })
     );
   };
 
@@ -1320,11 +1305,7 @@ export const makePullResponseSession = (
           illegal("order", "File start does not match manifest order.")
         );
       }
-      currentFile = {
-        entry: expected,
-        hash: createHash("sha256"),
-        received: 0,
-      };
+      currentFile = { entry: expected, received: 0 };
       state = "file";
       return Result.succeed(
         emit({
@@ -1384,7 +1365,6 @@ export const makePullResponseSession = (
         limitExceeded("transfer-bytes", limits.maxTransferBytes, transferBytes)
       );
     }
-    file.hash.update(payload);
     file.received = fileBytes;
     transferredBytes = transferBytes;
     return Result.succeed(emit({ offset, payload, type: "file-chunk" }));
@@ -1403,11 +1383,6 @@ export const makePullResponseSession = (
     if (file.received !== file.entry.size || digest !== file.entry.digest) {
       return Result.fail(
         illegal("manifest", "File end does not match the manifest.")
-      );
-    }
-    if (file.hash.digest("hex") !== file.entry.digest) {
-      return Result.fail(
-        illegal("manifest", "File bytes do not match the manifest digest.")
       );
     }
     currentFile = undefined;
@@ -1435,6 +1410,9 @@ export const makePullResponseSession = (
   };
 
   const consume = (frame: RawFrame): PullConsumeResult => {
+    if (frame.header.type === "pull-error") {
+      return acceptFailure(frame);
+    }
     switch (state) {
       case "manifest":
         return acceptManifest(frame);

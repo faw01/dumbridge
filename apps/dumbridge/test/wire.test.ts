@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { Result } from "effect";
 import { encodeCapability, makeCapability } from "../src/bridge/link";
 import {
+  type BridgeRequest,
   encodeFrame,
   makePullResponseSession,
   makeRequestSession,
@@ -11,8 +12,7 @@ import {
   type WirePullManifest,
 } from "../src/bridge/wire";
 
-const digest =
-  "47ffa3ea45a70b8a41c2c0825df323c00a8b7a01c1ea06083cc41dddcc001123";
+const digest = "a".repeat(64);
 const capabilityBytes = Uint8Array.from({ length: 32 }, (_, index) => index);
 const otherCapabilityBytes = Uint8Array.from(capabilityBytes, (byte, index) =>
   index === 31 ? (byte + 1) % 256 : byte
@@ -85,15 +85,15 @@ describe("request session", () => {
       encoded({ capability, type: "auth" }),
       encoded({ script: "find .", type: "run" })
     );
+    const events: BridgeRequest[] = [];
 
     for (const byte of request) {
-      success(session.push(Uint8Array.of(byte)));
+      const pushed = success(session.push(Uint8Array.of(byte)));
+      events.push(...pushed);
     }
 
-    expect(success(session.finish())).toEqual({
-      script: "find .",
-      type: "run",
-    });
+    expect(events).toEqual([{ script: "find .", type: "run" }]);
+    expect(Result.isSuccess(session.finish())).toBe(true);
   });
 
   test("authenticates before parsing a coalesced request", () => {
@@ -106,10 +106,10 @@ describe("request session", () => {
     );
 
     expect(Result.isSuccess(pushed)).toBe(true);
-    expect(success(session.finish())).toEqual({
-      script: "find .",
-      type: "run",
-    });
+    if (Result.isSuccess(pushed)) {
+      expect(pushed.success).toEqual([{ script: "find .", type: "run" }]);
+    }
+    expect(Result.isSuccess(session.finish())).toBe(true);
   });
 
   test("does not decode request fields before authentication", () => {
@@ -159,26 +159,6 @@ describe("request session", () => {
       expect(JSON.stringify(pushed.failure)).not.toContain(
         success(encodeCapability(otherCapability))
       );
-    }
-  });
-
-  test("does not expose a request until the stream ends cleanly", () => {
-    const session = success(makeRequestSession(capability));
-    const accepted = session.push(
-      joinChunks(
-        encoded({ capability, type: "auth" }),
-        encoded({ script: "find .", type: "run" })
-      )
-    );
-    expect(accepted).toEqual(Result.succeed(undefined));
-
-    const trailing = session.push(rawFrameFromText("{"));
-    expect(Result.isFailure(trailing)).toBe(true);
-
-    const finished = session.finish();
-    expect(Result.isFailure(finished)).toBe(true);
-    if (Result.isFailure(finished)) {
-      expect(finished.failure._tag).toBe("MalformedFrameError");
     }
   });
 
@@ -359,7 +339,7 @@ describe("run response session", () => {
     }
   });
 
-  test("rejects empty output frame floods at encode and decode boundaries", () => {
+  test("rejects empty output frames at encode and decode boundaries", () => {
     const encoding = encodeFrame({
       payload: new Uint8Array(),
       type: "stdout",
@@ -372,10 +352,9 @@ describe("run response session", () => {
       });
     }
 
-    const emptyFrame = rawFrame({ protocol: "dumbridge/1", type: "stderr" });
     const session = success(makeRunResponseSession());
     const decoding = session.push(
-      joinChunks(...Array.from({ length: 100 }, () => emptyFrame))
+      rawFrame({ protocol: "dumbridge/1", type: "stderr" })
     );
     expect(Result.isFailure(decoding)).toBe(true);
     if (Result.isFailure(decoding)) {
@@ -435,10 +414,28 @@ describe("run response session", () => {
       expect(fragmentedFailures[0]).toEqual(coalesced.failure);
     }
   });
+
+  test("accepts valid frames independently of transport chunk coalescing", () => {
+    const frames = [
+      ...Array.from({ length: 100 }, () =>
+        encoded({ payload: Uint8Array.of(1), type: "stdout" })
+      ),
+      encoded({ code: 0, truncated: false, type: "exit" }),
+    ];
+    const session = success(makeRunResponseSession());
+
+    const pushed = session.push(joinChunks(...frames));
+
+    expect(Result.isSuccess(pushed)).toBe(true);
+    if (Result.isSuccess(pushed)) {
+      expect(pushed.success).toHaveLength(101);
+    }
+    expect(Result.isSuccess(session.finish())).toBe(true);
+  });
 });
 
 describe("pull response session", () => {
-  test("round trips a lossless manifest and verified multi-chunk file", () => {
+  test("round trips a lossless manifest and ordered file stream", () => {
     const firstChunk = Uint8Array.from([0, 255]);
     const secondChunk = Uint8Array.of(1);
     const session = success(makePullResponseSession());
@@ -477,40 +474,80 @@ describe("pull response session", () => {
     expect(Result.isSuccess(session.finish())).toBe(true);
   });
 
-  test("owns manifest checks independently of emitted values", () => {
-    const session = success(makePullResponseSession());
-    const [manifestEvent] = success(
-      session.push(encoded({ manifest, type: "manifest" }))
-    );
-    if (manifestEvent?.type !== "manifest") {
-      throw new Error("manifest event must be emitted first");
-    }
-    const emittedFile = manifestEvent.manifest.entries.find(
-      (entry) => entry.kind === "file"
-    );
-    if (emittedFile?.kind !== "file") {
-      throw new Error("test manifest must contain a file");
-    }
+  test("accepts bounded pull failures before or during a transfer", () => {
+    const secret = "/Users/example/private/secret.txt";
+    const beforeManifest = success(makePullResponseSession());
+    const encodedFailure = encoded({
+      code: "not-found",
+      message: secret,
+      type: "pull-error",
+    } as WireFrame);
+    const initial = beforeManifest.push(encodedFailure);
 
-    expect(Reflect.set(manifestEvent.manifest, "totalBytes", 999)).toBe(true);
-    expect(Reflect.set(emittedFile, "size", 999)).toBe(true);
-    expect(Reflect.set(emittedFile, "digest", "b".repeat(64))).toBe(true);
+    expect(new TextDecoder().decode(encodedFailure)).not.toContain(secret);
+    expect(Result.isSuccess(initial)).toBe(true);
+    if (Result.isSuccess(initial)) {
+      expect(initial.success).toEqual([
+        { code: "not-found", type: "pull-error" },
+      ]);
+    }
+    expect(Result.isSuccess(beforeManifest.finish())).toBe(true);
 
-    const transferred = session.push(
+    const duringFile = success(makePullResponseSession());
+    const partial = duringFile.push(
       joinChunks(
+        encoded({ manifest, type: "manifest" }),
         encoded({ path: "assets/a.txt", size: 3, type: "file-start" }),
-        encoded({
-          offset: 0,
-          payload: Uint8Array.of(0, 255, 1),
-          type: "file-chunk",
-        }),
-        encoded({ digest, type: "file-end" }),
-        encoded({ type: "complete" })
+        encoded({ offset: 0, payload: Uint8Array.of(1), type: "file-chunk" }),
+        encoded({ code: "source-changed", type: "pull-error" })
       )
     );
 
-    expect(Result.isSuccess(transferred)).toBe(true);
-    expect(Result.isSuccess(session.finish())).toBe(true);
+    expect(Result.isSuccess(partial)).toBe(true);
+    if (Result.isSuccess(partial)) {
+      expect(partial.success.at(-1)).toEqual({
+        code: "source-changed",
+        type: "pull-error",
+      });
+    }
+    expect(Result.isSuccess(duringFile.finish())).toBe(true);
+  });
+
+  test("rejects pull failure payloads and unknown failure codes", () => {
+    const payloadSession = success(makePullResponseSession());
+    const payload = payloadSession.push(
+      rawFrame(
+        {
+          code: "io",
+          protocol: "dumbridge/1",
+          type: "pull-error",
+        },
+        Uint8Array.of(1)
+      )
+    );
+    expect(Result.isFailure(payload)).toBe(true);
+    if (Result.isFailure(payload)) {
+      expect(payload.failure).toMatchObject({
+        _tag: "IllegalFrameError",
+        reason: "payload",
+      });
+    }
+
+    const codeSession = success(makePullResponseSession());
+    const code = codeSession.push(
+      rawFrame({
+        code: "host-path-and-cause",
+        protocol: "dumbridge/1",
+        type: "pull-error",
+      })
+    );
+    expect(Result.isFailure(code)).toBe(true);
+    if (Result.isFailure(code)) {
+      expect(code.failure).toMatchObject({
+        _tag: "MalformedFrameError",
+        reason: "schema",
+      });
+    }
   });
 
   test("rejects out-of-order files and incorrect chunk offsets", () => {
@@ -558,30 +595,6 @@ describe("pull response session", () => {
           type: "file-chunk",
         }),
         encoded({ digest: "b".repeat(64), type: "file-end" })
-      )
-    );
-
-    expect(Result.isFailure(result)).toBe(true);
-    if (Result.isFailure(result)) {
-      expect(result.failure).toMatchObject({
-        _tag: "IllegalFrameError",
-        reason: "manifest",
-      });
-    }
-  });
-
-  test("rejects corrupted bytes with the claimed manifest digest", () => {
-    const session = success(makePullResponseSession());
-    const result = session.push(
-      joinChunks(
-        encoded({ manifest, type: "manifest" }),
-        encoded({ path: "assets/a.txt", size: 3, type: "file-start" }),
-        encoded({
-          offset: 0,
-          payload: Uint8Array.of(0, 255, 2),
-          type: "file-chunk",
-        }),
-        encoded({ digest, type: "file-end" })
       )
     );
 
