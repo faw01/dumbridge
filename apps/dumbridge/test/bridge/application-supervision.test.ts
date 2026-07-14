@@ -28,7 +28,15 @@ import {
   type RunResponseEvent,
   type WireFrame,
 } from "@dumbridge/wire";
-import { type Duration, Effect, Fiber, Option, Result } from "effect";
+import {
+  type Duration,
+  Effect,
+  Fiber,
+  Logger,
+  type LogLevel,
+  Option,
+  Result,
+} from "effect";
 import { TestClock } from "effect/testing";
 import { Bash } from "just-bash";
 import { pullRemote, runRemote } from "../../src/bridge/client";
@@ -334,6 +342,13 @@ describe("bridge application supervision", () => {
       Effect.succeed(changedRootSession.session),
       Effect.fail(new BridgeListenerClosedError({ message: "listener closed" }))
     );
+    const logEntries: {
+      readonly logLevel: LogLevel.LogLevel;
+      readonly message: unknown;
+    }[] = [];
+    const capturingLogger = Logger.make((options) => {
+      logEntries.push({ logLevel: options.logLevel, message: options.message });
+    });
     const originalRoot = `${fixture}-original`;
 
     try {
@@ -342,13 +357,22 @@ describe("bridge application supervision", () => {
       await writeFile(join(fixture, "note.txt"), "replacement secret\n");
 
       const end = await Effect.runPromise(
-        Effect.scoped(server.serve.pipe(Effect.flip))
+        Effect.scoped(server.serve.pipe(Effect.flip)).pipe(
+          Effect.provide(Logger.layer([capturingLogger]))
+        )
       );
 
       expect(end).toBeInstanceOf(BridgeListenerClosedError);
       expect(changedRootSession.state.writes).toHaveLength(0);
       expect(changedRootSession.state.finishCalls).toBe(0);
       expect(changedRootSession.state.closeCalls).toBe(1);
+      const warnings = logEntries.filter((entry) => entry.logLevel === "Warn");
+      expect(warnings).toHaveLength(1);
+      const logged = JSON.stringify(logEntries);
+      expect(logged).toContain("ServedRootChangedError");
+      expect(logged).not.toContain(fixture);
+      expect(logged).not.toContain("replacement secret");
+      expect(logged).not.toContain(server.link);
     } finally {
       await rm(originalRoot, { force: true, recursive: true });
     }

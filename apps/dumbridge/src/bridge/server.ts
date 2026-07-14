@@ -13,7 +13,7 @@ import {
 import { SafeShell } from "@dumbridge/safe-shell";
 import { ServedRoot } from "@dumbridge/served-root";
 import { type BridgeRequest, makeRequestSession } from "@dumbridge/wire";
-import { type Duration, Effect, Option } from "effect";
+import { Cause, type Duration, Effect, Option } from "effect";
 import { WireEventReader } from "./channel";
 import {
   type BridgeSessionError,
@@ -108,6 +108,24 @@ const handleSession = (
     )
   );
 
+// Failure payloads may carry request or path details; the serve log keeps only
+// the error tags so it can never leak the key or served root content.
+const describeSessionFailure = (cause: Cause.Cause<unknown>): string =>
+  cause.reasons
+    .map((reason) => {
+      if (!Cause.isFailReason(reason)) {
+        return Cause.isDieReason(reason) ? "Defect" : "Interrupted";
+      }
+      const error: unknown = reason.error;
+      return typeof error === "object" &&
+        error !== null &&
+        "_tag" in error &&
+        typeof error._tag === "string"
+        ? error._tag
+        : "UnknownFailure";
+    })
+    .join(", ");
+
 const serveLoop = (
   listener: BridgeListener,
   capability: Capability,
@@ -126,6 +144,12 @@ const serveLoop = (
         Effect.flatMap((session) =>
           handleSession(session, capability, root, shell, deadlines).pipe(
             Effect.ensuring(session.close),
+            Effect.tapCause((cause) =>
+              Effect.logWarning(
+                "bridge session failed",
+                describeSessionFailure(cause)
+              )
+            ),
             Effect.catch(() => Effect.void)
           )
         )
