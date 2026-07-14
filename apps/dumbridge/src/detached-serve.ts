@@ -8,6 +8,7 @@ import {
   join,
   relative,
   resolve,
+  sep,
 } from "node:path";
 import { type Duration, Effect, Result, Schema } from "effect";
 
@@ -243,10 +244,13 @@ const stateDirectoryInsideRoot = (root: string, stateDirectory: string) =>
       canonicalizeExisting(stateDirectory),
     ]);
     const separation = relative(canonicalRoot, canonicalState);
-    return (
-      separation === "" ||
-      !(separation.startsWith("..") || isAbsolute(separation))
-    );
+    // Only an exact ".." path segment escapes the root; a sibling whose name
+    // merely begins with dots (such as "..dumbridge") stays inside it.
+    const escapesRoot =
+      separation === ".." ||
+      separation.startsWith(`..${sep}`) ||
+      isAbsolute(separation);
+    return !escapesRoot;
   });
 
 export const detachServe = Effect.fn("DetachedServe.detach")(

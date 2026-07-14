@@ -122,6 +122,24 @@ describe("detachServe", () => {
     expect(await recordExists()).toBe(false);
   });
 
+  test("refuses a dot-dot-prefixed state directory inside the root", async () => {
+    const { calls, control } = makeControl({});
+
+    const error = await Effect.runPromise(
+      detachServe({
+        control,
+        root: stateDirectory,
+        stateDirectory: join(stateDirectory, "..dumbridge"),
+      }).pipe(Effect.flip)
+    );
+
+    expect(error).toMatchObject({
+      _tag: "DetachedServeError",
+      reason: "state-overlap",
+    });
+    expect(calls.spawns).toEqual([]);
+  });
+
   test.skipIf(process.platform === "win32")(
     "refuses an overlap reached through a symlinked root",
     async () => {
