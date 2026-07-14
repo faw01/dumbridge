@@ -1,0 +1,47 @@
+{
+  "$schema": "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json",
+  "rules": {
+    "unresolved-imports": "error",
+    "unlisted-dependencies": "error",
+    "unused-files": "error",
+    "unused-exports": "warn"
+  },
+  "duplicates": {
+    "threshold": 1
+  },
+  "health": {
+    // CRAP scores are static estimates here (bun test emits no Istanbul
+    // coverage), so the default 30 trips on ordinary partially-covered code.
+    // 250 clears the estimated backlog and only fires on egregious new code.
+    "maxCrap": 250,
+    "thresholdOverrides": [
+      {
+        "files": [
+          "packages/served-root/src/**",
+          "packages/wire/src/**",
+          "packages/pull-transfer/src/**"
+        ],
+        "maxCyclomatic": 30,
+        "maxCognitive": 40,
+        "reason": "Pre-gate hotspots: readHostFile (29/39), frameToRaw (21/17), manifestFrom (16/19), served-root watch handler (9/20). Package-scoped because the #24 consolidation may move this code between files."
+      }
+    ]
+  },
+  "audit": {
+    // Inherited findings stay visible in reports; only findings introduced
+    // by the pull request gate the merge.
+    "gate": "new-only"
+  },
+  "overrides": [
+    {
+      // dist/cli.js externalizes @number0/iroh and just-bash, so apps/dumbridge
+      // declares them for the published artifact while only bundled workspace
+      // packages import them. Scoped to this manifest so unused- and
+      // unlisted-dependency detection stays fully active everywhere else.
+      "files": ["apps/dumbridge/package.json"],
+      "rules": {
+        "unused-dependencies": "warn"
+      }
+    }
+  ]
+}
