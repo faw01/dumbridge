@@ -12,9 +12,9 @@ _Avoid_: Share, mount, host filesystem
 The foreground local process that owns access to a served root. Stopping it ends access.
 _Avoid_: Daemon, server account
 
-**Bridge link**:
-A secret, short-lived bearer value that tells a remote dumbridge client how to reach and authenticate to a bridge process.
-_Avoid_: Share URL, API key, pairing
+**Bridge key**:
+The opaque bearer credential minted by serve, encoding a transport locator plus capability, valid only while serve runs.
+_Avoid_: Bridge link, share URL, API key, pairing
 
 **Remote read shell**:
 A Bash-shaped interpreter over the served root whose writes are discarded. It is not the host shell.

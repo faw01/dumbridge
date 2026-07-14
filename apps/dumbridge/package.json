@@ -40,7 +40,7 @@
     "just-bash": "3.1.0"
   },
   "devDependencies": {
-    "@dumbridge/bridge-link": "workspace:*",
+    "@dumbridge/bridge-key": "workspace:*",
     "@dumbridge/bridge-transport": "workspace:*",
     "@dumbridge/pull-transfer": "workspace:*",
     "@dumbridge/safe-shell": "workspace:*",

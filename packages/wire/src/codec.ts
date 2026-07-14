@@ -1,4 +1,4 @@
-import { encodeCapability } from "@dumbridge/bridge-link";
+import { encodeCapability } from "@dumbridge/bridge-key";
 import { Result, Schema } from "effect";
 import {
   defaultSessionLimits,

@@ -1,4 +1,4 @@
-import { type Capability, CapabilityTextSchema } from "@dumbridge/bridge-link";
+import { type Capability, CapabilityTextSchema } from "@dumbridge/bridge-key";
 import { Schema } from "effect";
 
 export const protocol = "dumbridge/1" as const;

@@ -1,9 +1,9 @@
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { Encoding, Result, Schema } from "effect";
 
-const bridgeLinkPrefix = "dumbridge1_";
+const bridgeKeyPrefix = "dumbridge1_";
 const capabilityByteLength = 32;
-const maximumBridgeLinkLength = 16_384;
+const maximumBridgeKeyLength = 16_384;
 const maximumLocatorLength = 8192;
 
 const CapabilitySchema = Schema.Uint8Array.check(
@@ -15,12 +15,12 @@ export const CapabilityTextSchema = Schema.String.check(
   Schema.isBase64Url()
 );
 
-const BridgeLinkSchema = Schema.String.check(
-  Schema.isStartsWith(bridgeLinkPrefix),
-  Schema.isMaxLength(maximumBridgeLinkLength)
-).pipe(Schema.brand("@Dumbridge/BridgeLink"));
+const BridgeKeySchema = Schema.String.check(
+  Schema.isStartsWith(bridgeKeyPrefix),
+  Schema.isMaxLength(maximumBridgeKeyLength)
+).pipe(Schema.brand("@Dumbridge/BridgeKey"));
 
-const BridgeLinkPayloadSchema = Schema.Struct({
+const BridgeKeyPayloadSchema = Schema.Struct({
   capability: CapabilityTextSchema,
   locator: Schema.String.check(
     Schema.isNonEmpty(),
@@ -30,18 +30,18 @@ const BridgeLinkPayloadSchema = Schema.Struct({
   version: Schema.Literal(1),
 });
 
-const BridgeLinkPayloadJson = Schema.fromJsonString(BridgeLinkPayloadSchema);
+const BridgeKeyPayloadJson = Schema.fromJsonString(BridgeKeyPayloadSchema);
 
-export type BridgeLink = typeof BridgeLinkSchema.Type;
+export type BridgeKey = typeof BridgeKeySchema.Type;
 export type Capability = typeof CapabilitySchema.Type;
 
-export interface BridgeLinkInput {
+export interface BridgeKeyInput {
   readonly capability: Capability;
   readonly locator: string;
   readonly transport: "iroh";
 }
 
-export interface BridgeLinkContents extends BridgeLinkInput {
+export interface BridgeKeyContents extends BridgeKeyInput {
   readonly version: 1;
 }
 
@@ -53,18 +53,18 @@ class InvalidCapabilityError extends Schema.TaggedErrorClass<InvalidCapabilityEr
   }
 ) {}
 
-class InvalidBridgeLinkError extends Schema.TaggedErrorClass<InvalidBridgeLinkError>()(
-  "InvalidBridgeLinkError",
+class InvalidBridgeKeyError extends Schema.TaggedErrorClass<InvalidBridgeKeyError>()(
+  "InvalidBridgeKeyError",
   {
     message: Schema.String,
     reason: Schema.Literals(["encoding", "payload", "prefix", "size"]),
   }
 ) {}
 
-export type BridgeLinkError = InvalidBridgeLinkError | InvalidCapabilityError;
+export type BridgeKeyError = InvalidBridgeKeyError | InvalidCapabilityError;
 
-export const redactBridgeLink = (_link: string): string =>
-  `${bridgeLinkPrefix}[REDACTED]`;
+export const redactBridgeKey = (_link: string): string =>
+  `${bridgeKeyPrefix}[REDACTED]`;
 
 export const capabilitiesEqual = (
   left: Uint8Array,
@@ -134,15 +134,15 @@ export const parseCapability = (
   return makeCapability(decoded.success);
 };
 
-export const encodeBridgeLink = (
-  input: BridgeLinkInput
-): Result.Result<BridgeLink, BridgeLinkError> => {
+export const encodeBridgeKey = (
+  input: BridgeKeyInput
+): Result.Result<BridgeKey, BridgeKeyError> => {
   const capability = encodeCapability(input.capability);
   if (Result.isFailure(capability)) {
     return Result.fail(capability.failure);
   }
 
-  const payload = Schema.encodeResult(BridgeLinkPayloadJson)({
+  const payload = Schema.encodeResult(BridgeKeyPayloadJson)({
     capability: capability.success,
     locator: input.locator,
     transport: input.transport,
@@ -150,19 +150,19 @@ export const encodeBridgeLink = (
   });
   if (Result.isFailure(payload)) {
     return Result.fail(
-      new InvalidBridgeLinkError({
-        message: "Bridge link payload is invalid.",
+      new InvalidBridgeKeyError({
+        message: "Bridge key payload is invalid.",
         reason: "payload",
       })
     );
   }
 
-  const encoded = `${bridgeLinkPrefix}${Encoding.encodeBase64Url(payload.success)}`;
-  const link = Schema.decodeUnknownResult(BridgeLinkSchema)(encoded);
+  const encoded = `${bridgeKeyPrefix}${Encoding.encodeBase64Url(payload.success)}`;
+  const link = Schema.decodeUnknownResult(BridgeKeySchema)(encoded);
   if (Result.isFailure(link)) {
     return Result.fail(
-      new InvalidBridgeLinkError({
-        message: "Bridge link exceeds the maximum length.",
+      new InvalidBridgeKeyError({
+        message: "Bridge key exceeds the maximum length.",
         reason: "size",
       })
     );
@@ -170,33 +170,33 @@ export const encodeBridgeLink = (
   return Result.succeed(link.success);
 };
 
-export const parseBridgeLink = (
+export const parseBridgeKey = (
   link: string
-): Result.Result<BridgeLinkContents, BridgeLinkError> => {
-  if (!link.startsWith(bridgeLinkPrefix)) {
+): Result.Result<BridgeKeyContents, BridgeKeyError> => {
+  if (!link.startsWith(bridgeKeyPrefix)) {
     return Result.fail(
-      new InvalidBridgeLinkError({
-        message: "Bridge link has an invalid prefix.",
+      new InvalidBridgeKeyError({
+        message: "Bridge key has an invalid prefix.",
         reason: "prefix",
       })
     );
   }
-  if (link.length > maximumBridgeLinkLength) {
+  if (link.length > maximumBridgeKeyLength) {
     return Result.fail(
-      new InvalidBridgeLinkError({
-        message: "Bridge link exceeds the maximum length.",
+      new InvalidBridgeKeyError({
+        message: "Bridge key exceeds the maximum length.",
         reason: "size",
       })
     );
   }
 
   const payloadBytes = Encoding.decodeBase64Url(
-    link.slice(bridgeLinkPrefix.length)
+    link.slice(bridgeKeyPrefix.length)
   );
   if (Result.isFailure(payloadBytes)) {
     return Result.fail(
-      new InvalidBridgeLinkError({
-        message: "Bridge link has an invalid encoding.",
+      new InvalidBridgeKeyError({
+        message: "Bridge key has an invalid encoding.",
         reason: "encoding",
       })
     );
@@ -209,14 +209,14 @@ export const parseBridgeLink = (
     );
   } catch {
     return Result.fail(
-      new InvalidBridgeLinkError({
-        message: "Bridge link has an invalid encoding.",
+      new InvalidBridgeKeyError({
+        message: "Bridge key has an invalid encoding.",
         reason: "encoding",
       })
     );
   }
 
-  const payload = Schema.decodeUnknownResult(BridgeLinkPayloadJson)(
+  const payload = Schema.decodeUnknownResult(BridgeKeyPayloadJson)(
     payloadText,
     {
       onExcessProperty: "error",
@@ -224,8 +224,8 @@ export const parseBridgeLink = (
   );
   if (Result.isFailure(payload)) {
     return Result.fail(
-      new InvalidBridgeLinkError({
-        message: "Bridge link payload is invalid.",
+      new InvalidBridgeKeyError({
+        message: "Bridge key payload is invalid.",
         reason: "payload",
       })
     );

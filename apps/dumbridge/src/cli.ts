@@ -18,8 +18,8 @@ export class CliError extends Schema.TaggedErrorClass<CliError>()("CliError", {
   message: Schema.String,
 }) {}
 
-const bridgeLink = Config.string("DUMBRIDGE_LINK").pipe(
-  Effect.mapError(() => new CliError({ message: "DUMBRIDGE_LINK is not set." }))
+const bridgeKey = Config.string("DUMBRIDGE_KEY").pipe(
+  Effect.mapError(() => new CliError({ message: "DUMBRIDGE_KEY is not set." }))
 );
 
 const proxyEnvironmentNames = [
@@ -63,14 +63,14 @@ const serve = Command.make(
         });
         yield* write(
           process.stdout,
-          `Serving the selected directory read-only until Ctrl-C.\nDUMBRIDGE_LINK=${server.link}\n`
+          `Serving the selected directory read-only until Ctrl-C.\nDUMBRIDGE_KEY=${server.link}\n`
         );
         yield* server.serve;
       })
     )
 ).pipe(
   Command.withDescription(
-    "Run locally and copy the printed DUMBRIDGE_LINK into the cloud agent."
+    "Run locally and copy the printed DUMBRIDGE_KEY into the cloud agent."
   )
 );
 
@@ -79,7 +79,7 @@ const run = Command.make(
   { script: Argument.string("script") },
   ({ script }) =>
     Effect.gen(function* () {
-      const link = yield* bridgeLink;
+      const link = yield* bridgeKey;
       const result = yield* runRemote({
         link,
         script,
@@ -91,7 +91,7 @@ const run = Command.make(
     })
 ).pipe(
   Command.withDescription(
-    "Run in the cloud agent using DUMBRIDGE_LINK to query the local served root."
+    "Run in the cloud agent using DUMBRIDGE_KEY to query the local served root."
   )
 );
 
@@ -104,7 +104,7 @@ const pull = Command.make(
   },
   ({ destination, remotePath }) =>
     Effect.gen(function* () {
-      const link = yield* bridgeLink;
+      const link = yield* bridgeKey;
       const request = {
         link,
         remotePath,
@@ -122,7 +122,7 @@ const pull = Command.make(
     })
 ).pipe(
   Command.withDescription(
-    "Run in the cloud agent using DUMBRIDGE_LINK to pull one local path."
+    "Run in the cloud agent using DUMBRIDGE_KEY to pull one local path."
   )
 );
 
@@ -136,7 +136,7 @@ const skill = Command.make("skill", {}, () =>
 
 const command = Command.make("dumbridge").pipe(
   Command.withDescription(
-    "Run serve locally, set DUMBRIDGE_LINK in the cloud, then use run or pull."
+    "Run serve locally, set DUMBRIDGE_KEY in the cloud, then use run or pull."
   ),
   Command.withSubcommands([serve, run, pull, skill])
 );

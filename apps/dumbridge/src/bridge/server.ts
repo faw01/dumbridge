@@ -1,9 +1,9 @@
 import {
-  type BridgeLink,
+  type BridgeKey,
   type Capability,
-  encodeBridgeLink,
+  encodeBridgeKey,
   mintCapability,
-} from "@dumbridge/bridge-link";
+} from "@dumbridge/bridge-key";
 import {
   type BridgeListener,
   BridgeListenerClosedError,
@@ -40,7 +40,7 @@ const defaultDeadlines: BridgeServerDeadlines = {
 };
 
 interface BridgeServer {
-  readonly link: BridgeLink;
+  readonly link: BridgeKey;
   readonly serve: Effect.Effect<never, BridgeListenerClosedError>;
 }
 
@@ -183,7 +183,7 @@ export const openBridge = Effect.fn("BridgeServer.open")(
       const listener = yield* options.transport.listen;
       const capability = mintCapability();
       const link = yield* Effect.fromResult(
-        encodeBridgeLink({
+        encodeBridgeKey({
           capability,
           locator: listener.locator.toString(),
           transport: "iroh",

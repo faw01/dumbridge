@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { fileURLToPath } from "node:url";
-import { encodeBridgeLink, mintCapability } from "@dumbridge/bridge-link";
+import { encodeBridgeKey, mintCapability } from "@dumbridge/bridge-key";
 import { Effect } from "effect";
 import packageJson from "../package.json" with { type: "json" };
 import { publicErrorMessage, resolveClientTransportOptions } from "../src/cli";
@@ -72,10 +72,10 @@ describe("dumbridge CLI", () => {
       "dumbridge pull [flags] <remote-path> [<destination>]"
     );
     expect(root.stdout).toContain("serve locally");
-    expect(root.stdout).toContain("DUMBRIDGE_LINK");
-    expect(serve.stdout).toContain("DUMBRIDGE_LINK");
-    expect(run.stdout).toContain("DUMBRIDGE_LINK");
-    expect(pullHelp.stdout).toContain("DUMBRIDGE_LINK");
+    expect(root.stdout).toContain("DUMBRIDGE_KEY");
+    expect(serve.stdout).toContain("DUMBRIDGE_KEY");
+    expect(run.stdout).toContain("DUMBRIDGE_KEY");
+    expect(pullHelp.stdout).toContain("DUMBRIDGE_KEY");
   });
 
   test("prints the bundled agent skill guide", async () => {
@@ -90,18 +90,18 @@ describe("dumbridge CLI", () => {
     expect(result.stdout).toBe(guide);
   });
 
-  test("reports a missing bridge link without an Effect cause dump", async () => {
+  test("reports a missing bridge key without an Effect cause dump", async () => {
     const result = await invoke("run", "true");
 
     expect(result.exitCode).toBe(1);
     expect(result.stdout).toBe("");
-    expect(result.stderr).toBe("dumbridge: DUMBRIDGE_LINK is not set.\n");
+    expect(result.stderr).toBe("dumbridge: DUMBRIDGE_KEY is not set.\n");
   });
 
   test("reports an invalid pull path before attempting a connection", async () => {
     const link = Effect.runSync(
       Effect.fromResult(
-        encodeBridgeLink({
+        encodeBridgeKey({
           capability: mintCapability(),
           locator: "unused-client",
           transport: "iroh",
@@ -109,7 +109,7 @@ describe("dumbridge CLI", () => {
       )
     );
     const result = await invokeWithEnvironment(
-      { DUMBRIDGE_LINK: link },
+      { DUMBRIDGE_KEY: link },
       "pull",
       "../secret"
     );

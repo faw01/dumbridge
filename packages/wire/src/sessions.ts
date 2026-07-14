@@ -2,7 +2,7 @@ import {
   type Capability,
   capabilitiesEqual,
   parseCapability,
-} from "@dumbridge/bridge-link";
+} from "@dumbridge/bridge-key";
 import { Result } from "effect";
 import { decodeAuthenticatedRequestFrame, decodeFrameBody } from "./codec";
 import {

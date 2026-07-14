@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { encodeCapability, makeCapability } from "@dumbridge/bridge-link";
+import { encodeCapability, makeCapability } from "@dumbridge/bridge-key";
 import {
   type BridgeRequest,
   encodeFrame,

@@ -1,8 +1,8 @@
 import {
-  type BridgeLinkError,
+  type BridgeKeyError,
   type Capability,
-  parseBridgeLink,
-} from "@dumbridge/bridge-link";
+  parseBridgeKey,
+} from "@dumbridge/bridge-key";
 import {
   BridgeLocator,
   type BridgeSession,
@@ -35,7 +35,7 @@ const connectRetryDelay: Duration.Input = "100 millis";
 const maximumConnectAttempts = 2;
 
 const ClientOperation = Schema.Literals([
-  "bridge-link",
+  "bridge-key",
   "connect",
   "pull-response",
   "request",
@@ -98,16 +98,16 @@ const withClientDeadline = <A, E, R>(
     })
   );
 
-const decodeLink = (link: string) =>
-  Effect.fromResult(parseBridgeLink(link)).pipe(
-    Effect.mapError((_error: BridgeLinkError) =>
-      clientError("bridge-link", "DUMBRIDGE_LINK is invalid.")
+const decodeKey = (link: string) =>
+  Effect.fromResult(parseBridgeKey(link)).pipe(
+    Effect.mapError((_error: BridgeKeyError) =>
+      clientError("bridge-key", "DUMBRIDGE_KEY is invalid.")
     )
   );
 
 const openSession = (transport: BridgeTransport, link: string) =>
   Effect.gen(function* () {
-    const decoded = yield* decodeLink(link);
+    const decoded = yield* decodeKey(link);
     const session = yield* transport
       .connect(BridgeLocator.fromString(decoded.locator))
       .pipe(

@@ -3,10 +3,10 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-  encodeBridgeLink,
+  encodeBridgeKey,
   mintCapability,
-  parseBridgeLink,
-} from "@dumbridge/bridge-link";
+  parseBridgeKey,
+} from "@dumbridge/bridge-key";
 import { makeIrohTransport } from "@dumbridge/bridge-transport/iroh";
 import { Effect, Result } from "effect";
 import { pullRemote, runRemote } from "../../src/bridge/client";
@@ -159,9 +159,9 @@ describe("dumbridge application", () => {
           const transport = makeLoopbackTransport();
           const server = yield* openBridge({ root: servedRoot, transport });
           yield* server.serve.pipe(Effect.forkScoped);
-          const decoded = success(parseBridgeLink(server.link));
-          const wrongLink = success(
-            encodeBridgeLink({
+          const decoded = success(parseBridgeKey(server.link));
+          const wrongKey = success(
+            encodeBridgeKey({
               capability: mintCapability(),
               locator: decoded.locator,
               transport: "iroh",
@@ -169,7 +169,7 @@ describe("dumbridge application", () => {
           );
 
           return yield* runRemote({
-            link: wrongLink,
+            link: wrongKey,
             script: "cat .env",
             transport,
           }).pipe(Effect.flip);
