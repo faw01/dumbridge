@@ -118,6 +118,9 @@ const decodeKey = (link: string) =>
     )
   );
 
+const transientConnectFailure = (error: unknown) =>
+  clientError("connect", "Could not connect to the bridge process.", error);
+
 const openSession = (transport: BridgeTransport, link: string) =>
   Effect.gen(function* () {
     const decoded = yield* decodeKey(link);
@@ -125,18 +128,8 @@ const openSession = (transport: BridgeTransport, link: string) =>
       .connect(BridgeLocator.fromString(decoded.locator))
       .pipe(
         Effect.catchTags({
-          BridgeConnectError: (error) =>
-            clientError(
-              "connect",
-              "Could not connect to the bridge process.",
-              error
-            ),
-          BridgeDeadlineExceededError: (error) =>
-            clientError(
-              "connect",
-              "Could not connect to the bridge process.",
-              error
-            ),
+          BridgeConnectError: transientConnectFailure,
+          BridgeDeadlineExceededError: transientConnectFailure,
         })
       );
     return { capability: decoded.capability, session };
