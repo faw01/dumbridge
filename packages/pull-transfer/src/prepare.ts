@@ -89,8 +89,7 @@ const verifyPullSourcePromise = async (options: {
   readonly signal: AbortSignal;
 }) => {
   options.signal.throwIfAborted();
-  await Effect.runPromise(options.servedRoot.verify());
-  options.signal.throwIfAborted();
+  options.servedRoot.verifySync();
   const view = options.servedRoot.openPullView();
 
   let discoveredEntries = 0;
@@ -200,8 +199,8 @@ const verifyPullSourcePromise = async (options: {
   if (totalBytes !== options.manifest.totalBytes) {
     throw changed(options.manifest.name);
   }
-  await Effect.runPromise(options.servedRoot.verify());
   options.signal.throwIfAborted();
+  options.servedRoot.verifySync();
 };
 
 const preparePullPromise = async (
@@ -215,8 +214,7 @@ const preparePullPromise = async (
   prepareSignal.throwIfAborted();
   const limits = limitsFrom(options.limits);
   const parts = pathParts(options.remotePath);
-  await Effect.runPromise(options.servedRoot.verify());
-  prepareSignal.throwIfAborted();
+  options.servedRoot.verifySync();
   const view = options.servedRoot.openPullView();
   const target = await view.inspect(options.remotePath, {}, prepareSignal);
 
@@ -336,8 +334,8 @@ const preparePullPromise = async (
     name: manifestName,
     totalBytes,
   };
-  await Effect.runPromise(options.servedRoot.verify());
   prepareSignal.throwIfAborted();
+  options.servedRoot.verifySync();
 
   return {
     manifest,
