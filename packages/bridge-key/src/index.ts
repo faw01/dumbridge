@@ -112,8 +112,14 @@ export const checkBridgeKeyExpiry = (
         })
       );
 
-export const redactBridgeKey = (_link: string): string =>
-  `${bridgeKeyPrefix}[REDACTED]`;
+const bridgeKeyTokenPattern = /dumbridge1_[A-Za-z0-9_-]+/g;
+
+/**
+ * Scrubs every bridge-key-shaped token from text bound for error output or
+ * logs; the last line of defense when a raw key lands inside a message.
+ */
+export const redactBridgeKey = (text: string): string =>
+  text.replace(bridgeKeyTokenPattern, `${bridgeKeyPrefix}[REDACTED]`);
 
 export const capabilitiesEqual = (
   left: Uint8Array,

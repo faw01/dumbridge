@@ -184,7 +184,7 @@ describe("dumbridge application", () => {
     expect(error).toMatchObject({
       _tag: "BridgeClientError",
       message:
-        "The bridge rejected DUMBRIDGE_KEY: the key does not match this bridge. Copy the current key printed by dumbridge serve.",
+        "The bridge rejected the bridge key: the key does not match this bridge. Copy the current key printed by dumbridge serve.",
       operation: "bridge-key",
     });
     expect(JSON.stringify(error)).not.toContain("TOKEN=local-only");

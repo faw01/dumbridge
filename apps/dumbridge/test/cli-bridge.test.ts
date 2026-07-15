@@ -205,7 +205,7 @@ describe("dumbridge CLI bridge", () => {
       expect(rejected).toEqual({
         exitCode: 1,
         stderr:
-          "dumbridge: The bridge rejected DUMBRIDGE_KEY: the key does not match this bridge. Copy the current key printed by dumbridge serve.\n",
+          "dumbridge: The bridge rejected the bridge key: the key does not match this bridge. Copy the current key printed by dumbridge serve.\n",
         stdout: "",
       });
     } finally {
