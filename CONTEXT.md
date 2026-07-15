@@ -36,6 +36,10 @@ _Avoid_: Exec, command endpoint
 Copy one selected file or directory from the served root into the remote working directory.
 _Avoid_: Download, sync
 
+**Connection path**:
+The route a session's bytes travel: direct (peer-to-peer) or via relay. Run and pull report the path selected at connect time in one stderr line; a relayed session may later upgrade to direct without a new report.
+_Avoid_: Route, network path, transport mode
+
 **Remote path**:
 The canonical, Windows-safe relative path that selects one file or directory below the served root; both bridge sides accept and reject the same remote paths.
 _Avoid_: Safe relative path, source path, virtual path
