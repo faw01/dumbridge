@@ -1,5 +1,5 @@
 import { lstatSync, realpathSync } from "node:fs";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { Effect } from "effect";
 import {
   InvalidServedRootError,
@@ -28,11 +28,27 @@ import {
 } from "./read-view";
 import type { SourceFileExpectation, SourceRevision } from "./source-revision";
 
+const maximumDisplayNameCharacters = 64;
+
+// The sanitized display is the only part of the host path allowed to leave
+// this module: the final component the sharer chose, stripped of terminal
+// control characters and bounded, so no message can echo the raw host path.
+const displayNameFrom = (hostPath: string) => {
+  const name = basename(hostPath)
+    // biome-ignore lint/suspicious/noControlCharactersInRegex: stripping control characters is the point of this sanitizer
+    .replaceAll(/[\u0000-\u001f\u007f-\u009f]/g, "")
+    .slice(0, maximumDisplayNameCharacters)
+    .trim();
+  return name.length === 0 ? "served-root" : name;
+};
+
 export class ServedRoot {
+  readonly displayName: string;
   readonly #hostPath: string;
   readonly #identity: ServedRootIdentity;
 
   private constructor(hostPath: string, identity: ServedRootIdentity) {
+    this.displayName = displayNameFrom(hostPath);
     this.#hostPath = hostPath;
     this.#identity = identity;
   }
@@ -266,6 +282,9 @@ export class ServedRoot {
         fileSystem: fileSystemFacade(fileSystem),
         get limitExceeded() {
           return fileSystem.limitExceeded;
+        },
+        get outsideRootPath() {
+          return fileSystem.outsideRootPath;
         },
         get sourceFailure() {
           return fileSystem.sourceFailure;

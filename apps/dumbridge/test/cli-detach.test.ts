@@ -197,7 +197,7 @@ describe.skipIf(process.platform === "win32")(
       });
       expect(run).toEqual({
         exitCode: 0,
-        stderr: "",
+        stderr: "dumbridge: serving 'served' as /workspace (read-only)\n",
         stdout: "not in git\n",
       });
 
@@ -247,7 +247,11 @@ describe.skipIf(process.platform === "win32")(
 
       expect(isAlive(record.pid)).toBe(true);
       const run = await runCli(["run", "cat note.txt"], { DUMBRIDGE_KEY: key });
-      expect(run).toEqual({ exitCode: 0, stderr: "", stdout: "alive\n" });
+      expect(run).toEqual({
+        exitCode: 0,
+        stderr: "dumbridge: serving 'served' as /workspace (read-only)\n",
+        stdout: "alive\n",
+      });
 
       const stop = await runCli(["serve", "--stop"]);
       expect(stop.exitCode).toBe(0);

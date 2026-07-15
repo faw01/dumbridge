@@ -814,7 +814,8 @@ describe("bridge application supervision", () => {
 
     expect(error).toMatchObject({
       _tag: "BridgeClientError",
-      message: "Could not connect to the bridge process.",
+      message:
+        "The bridge process is unreachable. Check that dumbridge serve is still running on the local machine.",
       operation: "connect",
     });
     expect(error.cause).toBeInstanceOf(BridgeConnectError);
@@ -865,8 +866,10 @@ describe("bridge application supervision", () => {
 
           yield* TestClock.adjust("1 hour");
           const result = yield* server.serve.pipe(Effect.flip);
-          expect(expired.state.writes).toHaveLength(0);
-          expect(expired.state.finishCalls).toBe(0);
+          expect(decodeRunEvents(expired.state.writes)).toEqual([
+            { code: "expired-key", type: "reject" },
+          ]);
+          expect(expired.state.finishCalls).toBe(1);
           expect(expired.state.closeCalls).toBe(1);
           return result;
         })
@@ -908,8 +911,10 @@ describe("bridge application supervision", () => {
           const fiber = yield* server.serve.pipe(Effect.flip, Effect.forkChild);
           yield* TestClock.adjust("4 hours");
           const result = yield* Fiber.join(fiber);
-          expect(lateArrival.state.writes).toHaveLength(0);
-          expect(lateArrival.state.finishCalls).toBe(0);
+          expect(decodeRunEvents(lateArrival.state.writes)).toEqual([
+            { code: "expired-key", type: "reject" },
+          ]);
+          expect(lateArrival.state.finishCalls).toBe(1);
           expect(lateArrival.state.closeCalls).toBe(1);
           return result;
         })

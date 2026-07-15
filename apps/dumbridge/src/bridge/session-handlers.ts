@@ -11,9 +11,10 @@ import {
   FrameTooLargeError,
   type PullFailureCode,
   type PullResponseEvent,
+  type RejectCode,
   type RunResponseEvent,
 } from "@dumbridge/wire";
-import { Effect, Result, Schema, Stream } from "effect";
+import { type Duration, Effect, Result, Schema, Stream } from "effect";
 import { sendFrame } from "./channel";
 
 const responseChunkBytes = 64 * 1024;
@@ -74,13 +75,21 @@ const executeShell = (shell: SafeShell, script: string) =>
     })
   );
 
+export type BannerSender = (
+  session: BridgeSession
+) => Effect.Effect<void, Effect.Error<ReturnType<typeof sendFrame>>>;
+
 export const handleRun = (
   session: BridgeSession,
   shell: SafeShell,
-  script: string
+  script: string,
+  sendBanner: BannerSender
 ) =>
   Effect.gen(function* () {
     const result = yield* executeShell(shell, script);
+    // Sent only after the shell produced a response, so the one banner is
+    // not spent on a session that terminates without answering.
+    yield* sendBanner(session);
     yield* sendOutput(session, "stdout", result.stdout);
     yield* sendOutput(session, "stderr", result.stderr);
     yield* sendFrame(session, {
@@ -168,6 +177,23 @@ const pullFailureCode = (error: unknown): PullFailureCode | undefined => {
 const sendPullFailure = (session: BridgeSession, code: PullFailureCode) =>
   sendFrame(session, { code, type: "pull-error" }).pipe(
     Effect.flatMap(() => session.finish)
+  );
+
+// Bounded independently because a reject is sent outside the run and pull
+// deadlines; without it a peer that never acknowledges could pin an accept
+// worker for the whole transport io deadline.
+const rejectSendDeadline: Duration.Input = "5 seconds";
+
+// A best-effort courtesy: the session still fails with its original error so
+// the serve log records the tag even when the peer is already gone.
+export const sendReject = (session: BridgeSession, code: RejectCode) =>
+  sendFrame(session, { code, type: "reject" }).pipe(
+    Effect.flatMap(() => session.finish),
+    Effect.timeoutOrElse({
+      duration: rejectSendDeadline,
+      orElse: () => Effect.void,
+    }),
+    Effect.ignore
   );
 
 export const handlePull = (

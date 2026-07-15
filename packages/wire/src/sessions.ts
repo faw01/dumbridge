@@ -20,6 +20,8 @@ import type {
   BridgeRequest,
   PullResponseEvent,
   RawFrame,
+  RejectCode,
+  RejectEvent,
   RunResponseEvent,
 } from "./protocol";
 import type { PullFileEntry, PullManifest } from "./pull-manifest";
@@ -34,6 +36,25 @@ import {
 export type RequestSession = WireSession<BridgeRequest>;
 export type RunResponseSession = WireSession<RunResponseEvent>;
 export type PullResponseSession = WireSession<PullResponseEvent>;
+
+// A reject may only replace an entire response: once the bridge has started
+// answering, a trailing reject is a protocol violation, not a result.
+const acceptReject = (
+  code: RejectCode,
+  payload: Uint8Array,
+  started: boolean,
+  orderMessage: string
+): Result.Result<SessionEvent<RejectEvent>, WireDecodeError> => {
+  if (started) {
+    return Result.fail(illegal("order", orderMessage));
+  }
+  if (payload.byteLength !== 0) {
+    return Result.fail(
+      illegal("payload", "Reject frame payload must be empty.")
+    );
+  }
+  return Result.succeed(emit({ code, type: "reject" }));
+};
 
 export const makeRequestSession = (
   expectedCapability: Capability,
@@ -133,7 +154,7 @@ export const makeRunResponseSession = (
     return Result.fail(resolved.failure);
   }
   const limits = resolved.success;
-  let state: "stdout" | "stderr" | "complete" = "stdout";
+  let state: "banner" | "stdout" | "stderr" | "complete" = "banner";
   let outputBytes = 0;
   const acceptOutput = (
     payload: Uint8Array,
@@ -152,37 +173,75 @@ export const makeRunResponseSession = (
     }
     return Result.succeed(emit({ payload, type }));
   };
+  const acceptRunReject = (
+    code: RejectCode,
+    payload: Uint8Array
+  ): Result.Result<SessionEvent<RunResponseEvent>, WireDecodeError> => {
+    const rejected = acceptReject(
+      code,
+      payload,
+      state !== "banner",
+      "Run response contains an unexpected frame."
+    );
+    if (Result.isSuccess(rejected)) {
+      state = "complete";
+    }
+    return rejected;
+  };
+  const acceptBanner = (
+    served: string,
+    payload: Uint8Array
+  ): Result.Result<SessionEvent<RunResponseEvent>, WireDecodeError> => {
+    if (state !== "banner") {
+      return Result.fail(
+        illegal("order", "Run response contains an unexpected frame.")
+      );
+    }
+    if (payload.byteLength !== 0) {
+      return Result.fail(
+        illegal("payload", "Banner frame payload must be empty.")
+      );
+    }
+    state = "stdout";
+    return Result.succeed(emit({ served, type: "banner" }));
+  };
+  const acceptExit = (
+    header: { readonly code: number; readonly truncated: boolean },
+    payload: Uint8Array
+  ): Result.Result<SessionEvent<RunResponseEvent>, WireDecodeError> => {
+    if (payload.byteLength !== 0) {
+      return Result.fail(
+        illegal("payload", "Exit frame payload must be empty.")
+      );
+    }
+    state = "complete";
+    return Result.succeed(
+      emit({ code: header.code, truncated: header.truncated, type: "exit" })
+    );
+  };
   const session = makeSession<RunResponseEvent>(
     limits,
     decodeFrameBody,
     (frame) => {
-      if (frame.header.type === "stdout" && state === "stdout") {
-        return acceptOutput(frame.payload, "stdout");
+      if (frame.header.type === "reject") {
+        return acceptRunReject(frame.header.code, frame.payload);
+      }
+      if (frame.header.type === "banner") {
+        return acceptBanner(frame.header.served, frame.payload);
       }
       if (
-        frame.header.type === "stderr" &&
-        (state === "stdout" || state === "stderr")
+        frame.header.type === "stdout" &&
+        (state === "banner" || state === "stdout")
       ) {
+        state = "stdout";
+        return acceptOutput(frame.payload, "stdout");
+      }
+      if (frame.header.type === "stderr" && state !== "complete") {
         state = "stderr";
         return acceptOutput(frame.payload, "stderr");
       }
-      if (
-        frame.header.type === "exit" &&
-        (state === "stdout" || state === "stderr")
-      ) {
-        if (frame.payload.byteLength !== 0) {
-          return Result.fail(
-            illegal("payload", "Exit frame payload must be empty.")
-          );
-        }
-        state = "complete";
-        return Result.succeed(
-          emit({
-            code: frame.header.code,
-            truncated: frame.header.truncated,
-            type: "exit",
-          })
-        );
+      if (frame.header.type === "exit" && state !== "complete") {
+        return acceptExit(frame.header, frame.payload);
       }
       return Result.fail(
         illegal("order", "Run response contains an unexpected frame.")
@@ -385,6 +444,18 @@ export const makePullResponseSession = (
   const consume = (frame: RawFrame): PullConsumeResult => {
     if (frame.header.type === "pull-error") {
       return acceptFailure(frame);
+    }
+    if (frame.header.type === "reject") {
+      const rejected = acceptReject(
+        frame.header.code,
+        frame.payload,
+        state !== "manifest",
+        "Pull response contains an unexpected frame."
+      );
+      if (Result.isSuccess(rejected)) {
+        state = "complete";
+      }
+      return rejected;
     }
     switch (state) {
       case "manifest":

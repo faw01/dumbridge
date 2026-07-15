@@ -132,6 +132,9 @@ describe("dumbridge application", () => {
       )
     );
 
+    expect(result.discovery.served).toBe("served");
+    expect(result.preview.served).toBeUndefined();
+    expect(result.overlayWrite.served).toBeUndefined();
     expect(result.discovery.stdout).toContain(
       "./.agents/skills/wayfinder/SKILL.md"
     );
@@ -180,11 +183,10 @@ describe("dumbridge application", () => {
 
     expect(error).toMatchObject({
       _tag: "BridgeClientError",
+      message:
+        "The bridge rejected DUMBRIDGE_KEY: the key does not match this bridge. Copy the current key printed by dumbridge serve.",
+      operation: "bridge-key",
     });
-    if (error._tag !== "BridgeClientError") {
-      throw new Error("expected a bridge client error");
-    }
-    expect(["request", "run-response"]).toContain(error.operation);
     expect(JSON.stringify(error)).not.toContain("TOKEN=local-only");
   }, 10_000);
 });

@@ -3,6 +3,12 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  encodeBridgeKey,
+  mintCapability,
+  parseBridgeKey,
+} from "@dumbridge/bridge-key";
+import { Result } from "effect";
 
 const cli = fileURLToPath(new URL("../src/cli.ts", import.meta.url));
 const bridgeKeyLine = /^DUMBRIDGE_KEY=(\S+)\r?\n/m;
@@ -128,12 +134,28 @@ describe("dumbridge CLI bridge", () => {
       await writeFile(join(servedRoot, "uncommitted.txt"), "not in git\n");
       const environment = cleanEnvironment({ DUMBRIDGE_KEY: link });
 
+      // The banner shows the sanitized root display: the hostile directory
+      // name keeps its text but loses every control character, so it cannot
+      // fake a DUMBRIDGE_KEY line or inject an escape sequence.
+      const bannerName =
+        process.platform === "win32"
+          ? "served"
+          : "servedDUMBRIDGE_KEY=counterfeit[31m";
       const run = await runCli(["run", "cat uncommitted.txt"], environment);
       expect(run).toEqual({
         exitCode: 0,
-        stderr: "",
+        stderr: `dumbridge: serving '${bannerName}' as /workspace (read-only)\n`,
         stdout: "not in git\n",
       });
+      expect(run.stderr).not.toContain("\u001b");
+      expect(run.stderr).not.toMatch(bridgeKeyLine);
+
+      const outside = await runCli(["run", "ls ../../Downloads"], environment);
+      expect(outside.exitCode).not.toBe(0);
+      expect(outside.stderr).toContain(
+        "dumbridge: '/Downloads' is outside the served root; the served root is visible at /workspace.\n"
+      );
+      expect(outside.stderr).not.toContain("serving");
 
       const destination = join(cloudRoot, "pulled.txt");
       const pull = await runCli(
@@ -160,6 +182,30 @@ describe("dumbridge CLI bridge", () => {
       expect(missing).toEqual({
         exitCode: 1,
         stderr: "dumbridge: The remote path does not exist.\n",
+        stdout: "",
+      });
+
+      const decoded = parseBridgeKey(link);
+      if (Result.isFailure(decoded)) {
+        throw decoded.failure;
+      }
+      const wrongKey = encodeBridgeKey({
+        capability: mintCapability(),
+        expiresAt: Number.MAX_SAFE_INTEGER,
+        locator: decoded.success.locator,
+        transport: "iroh",
+      });
+      if (Result.isFailure(wrongKey)) {
+        throw wrongKey.failure;
+      }
+      const rejected = await runCli(
+        ["run", "true"],
+        cleanEnvironment({ DUMBRIDGE_KEY: wrongKey.success })
+      );
+      expect(rejected).toEqual({
+        exitCode: 1,
+        stderr:
+          "dumbridge: The bridge rejected DUMBRIDGE_KEY: the key does not match this bridge. Copy the current key printed by dumbridge serve.\n",
         stdout: "",
       });
     } finally {

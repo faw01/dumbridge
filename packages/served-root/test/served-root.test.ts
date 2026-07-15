@@ -137,4 +137,62 @@ describe("ServedRoot", () => {
       "served root changed after bridge start"
     );
   });
+
+  test("displays only the sanitized final path component", async () => {
+    const plain = await Effect.runPromise(ServedRoot.make(servedPath));
+    expect(plain.displayName).toBe("served");
+    expect(plain.displayName).not.toContain(fixtureRoot);
+
+    if (process.platform !== "win32") {
+      const hostile = join(
+        fixtureRoot,
+        "GitHub\nDUMBRIDGE_KEY=counterfeit\u001b[31m"
+      );
+      await mkdir(hostile);
+      const sanitized = await Effect.runPromise(ServedRoot.make(hostile));
+      expect(sanitized.displayName).toBe("GitHubDUMBRIDGE_KEY=counterfeit[31m");
+      expect(sanitized.displayName).not.toContain("\u001b");
+      expect(sanitized.displayName).not.toContain("\n");
+    }
+  });
+
+  test("records the first read miss outside the served root", async () => {
+    await writeFile(join(servedPath, "inside.txt"), "inside\n");
+    const root = await Effect.runPromise(ServedRoot.make(servedPath));
+    const view = root.openReadView({
+      maxFileReadBytes: 1024,
+      maxOverlayBytes: 1024,
+      maxOverlayEntries: 32,
+    });
+    view.begin(new AbortController().signal);
+
+    await expect(
+      view.fileSystem.readFileBuffer("/workspace/missing.txt")
+    ).rejects.toThrow();
+    expect(view.outsideRootPath).toBeUndefined();
+
+    await expect(view.fileSystem.stat("/Downloads")).rejects.toThrow();
+    expect(view.outsideRootPath).toBe("/Downloads");
+
+    await expect(
+      view.fileSystem.readFileBuffer("/etc/passwd")
+    ).rejects.toThrow();
+    expect(view.outsideRootPath).toBe("/Downloads");
+  });
+
+  test("keeps overlay scratch reads outside the root unbranded", async () => {
+    const root = await Effect.runPromise(ServedRoot.make(servedPath));
+    const view = root.openReadView({
+      maxFileReadBytes: 1024,
+      maxOverlayBytes: 1024,
+      maxOverlayEntries: 32,
+    });
+    view.begin(new AbortController().signal);
+
+    await view.fileSystem.writeFile("/tmp/scratch.txt", "scratch\n");
+    expect(await view.fileSystem.readFile("/tmp/scratch.txt", "utf8")).toBe(
+      "scratch\n"
+    );
+    expect(view.outsideRootPath).toBeUndefined();
+  });
 });

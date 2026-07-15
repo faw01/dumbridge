@@ -205,6 +205,13 @@ const run = Command.make(
         script,
         transport: clientTransport(),
       });
+      // The banner goes to stderr so piped stdout stays exactly the script's.
+      if (result.served !== undefined) {
+        yield* write(
+          process.stderr,
+          `dumbridge: serving '${result.served}' as /workspace (read-only)\n`
+        );
+      }
       yield* write(process.stdout, result.stdout);
       yield* write(process.stderr, result.stderr);
       process.exitCode = result.exitCode;

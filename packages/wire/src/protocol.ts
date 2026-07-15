@@ -13,9 +13,20 @@ export const lengthPrefixBytes = 4;
 export const maximumFrameBytes = 1024 * 1024;
 export const maximumHeaderBytes = maximumFrameBytes - lengthPrefixBytes;
 const maximumScriptCharacters = 64 * 1024;
+const maximumServedDisplayCharacters = 64;
+
+// The served root display travels to a client terminal, so the wire refuses
+// C0 and C1 control characters that could smuggle escape sequences.
+const ServedDisplaySchema = Schema.String.check(
+  Schema.isNonEmpty(),
+  Schema.isMaxLength(maximumServedDisplayCharacters),
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: rejecting control characters is the point of this check
+  Schema.isPattern(/^[^\u0000-\u001f\u007f-\u009f]+$/)
+);
 
 const frameTypeNames = [
   "auth",
+  "banner",
   "complete",
   "exit",
   "file-chunk",
@@ -24,6 +35,7 @@ const frameTypeNames = [
   "manifest",
   "pull",
   "pull-error",
+  "reject",
   "run",
   "stderr",
   "stdout",
@@ -100,6 +112,17 @@ const PullErrorHeaderSchema = Schema.Struct({
   protocol: Schema.Literal(protocol),
   type: Schema.Literal("pull-error"),
 });
+const BannerHeaderSchema = Schema.Struct({
+  protocol: Schema.Literal(protocol),
+  served: ServedDisplaySchema,
+  type: Schema.Literal("banner"),
+});
+const RejectCodeSchema = Schema.Literals(["expired-key", "invalid-key"]);
+const RejectHeaderSchema = Schema.Struct({
+  code: RejectCodeSchema,
+  protocol: Schema.Literal(protocol),
+  type: Schema.Literal("reject"),
+});
 export const RequestHeaderSchema = Schema.Union([
   RunHeaderSchema,
   PullHeaderSchema,
@@ -109,6 +132,7 @@ export const WireHeaderSchema = Schema.Union([
   AuthHeaderSchema,
   RunHeaderSchema,
   PullHeaderSchema,
+  BannerHeaderSchema,
   StdoutHeaderSchema,
   StderrHeaderSchema,
   ExitHeaderSchema,
@@ -118,6 +142,7 @@ export const WireHeaderSchema = Schema.Union([
   FileEndHeaderSchema,
   CompleteHeaderSchema,
   PullErrorHeaderSchema,
+  RejectHeaderSchema,
 ]);
 export const WireHeaderJson = Schema.fromJsonString(WireHeaderSchema);
 export const HeaderEnvelopeSchema = Schema.Struct({
@@ -127,18 +152,26 @@ export const HeaderEnvelopeSchema = Schema.Struct({
 
 export type WireHeader = typeof WireHeaderSchema.Type;
 export type PullFailureCode = typeof PullFailureCodeSchema.Type;
+export type RejectCode = typeof RejectCodeSchema.Type;
 
 export type BridgeRequest =
   | { readonly script: string; readonly type: "run" }
   | { readonly remotePath: string; readonly type: "pull" };
 
+export interface RejectEvent {
+  readonly code: RejectCode;
+  readonly type: "reject";
+}
+
 export type RunResponseEvent =
+  | { readonly served: string; readonly type: "banner" }
   | { readonly payload: Uint8Array; readonly type: "stdout" | "stderr" }
   | {
       readonly code: number;
       readonly truncated: boolean;
       readonly type: "exit";
-    };
+    }
+  | RejectEvent;
 
 export type PullResponseEvent =
   | { readonly manifest: PullManifest; readonly type: "manifest" }
@@ -154,7 +187,8 @@ export type PullResponseEvent =
     }
   | { readonly digest: string; readonly type: "file-end" }
   | { readonly code: PullFailureCode; readonly type: "pull-error" }
-  | { readonly type: "complete" };
+  | { readonly type: "complete" }
+  | RejectEvent;
 
 export type WireFrame =
   | { readonly capability: Capability; readonly type: "auth" }

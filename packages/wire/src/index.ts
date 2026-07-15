@@ -1,5 +1,6 @@
 export { encodeFrame } from "./codec";
 export {
+  AuthenticationError,
   FrameTooLargeError,
   type WireDecodeError,
   type WireEncodeError,
@@ -14,6 +15,7 @@ export type {
   BridgeRequest,
   PullFailureCode,
   PullResponseEvent,
+  RejectCode,
   RunResponseEvent,
   WireFrame,
 } from "./protocol";
