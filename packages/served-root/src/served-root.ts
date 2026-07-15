@@ -185,27 +185,33 @@ export class ServedRoot {
 
   #assertObservedPaths(paths: readonly string[]) {
     for (const virtualPath of paths) {
-      const segments = hostSegmentsFrom(virtualPath);
-      if (segments === undefined) {
-        continue;
-      }
-      let hostPath = this.#hostPath;
-      for (const [index, segment] of segments.entries()) {
-        hostPath = join(hostPath, segment);
-        try {
-          const stats = lstatSync(hostPath);
-          if (stats.isSymbolicLink() && index < segments.length - 1) {
-            throw servedRootChanged();
-          }
-        } catch (cause) {
-          if (cause instanceof ServedRootChangedError) {
-            throw cause;
-          }
-          if (isMissingPath(cause)) {
-            break;
-          }
+      this.#assertObservedPath(virtualPath);
+    }
+  }
+
+  // A symlink as the final component is only reported, never followed, but a
+  // symlinked earlier component would re-route every path below it.
+  #assertObservedPath(virtualPath: string) {
+    const segments = hostSegmentsFrom(virtualPath);
+    if (segments === undefined) {
+      return;
+    }
+    let hostPath = this.#hostPath;
+    for (const [index, segment] of segments.entries()) {
+      hostPath = join(hostPath, segment);
+      try {
+        const stats = lstatSync(hostPath);
+        if (stats.isSymbolicLink() && index < segments.length - 1) {
           throw servedRootChanged();
         }
+      } catch (cause) {
+        if (cause instanceof ServedRootChangedError) {
+          throw cause;
+        }
+        if (isMissingPath(cause)) {
+          break;
+        }
+        throw servedRootChanged();
       }
     }
   }
