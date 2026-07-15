@@ -1,9 +1,9 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, it } from "@effect/vitest";
 import { Result } from "effect";
 import { maximumRemotePathCharacters, parseRemotePath } from "../src/index";
 
 describe("remote path", () => {
-  test("accepts canonical relative paths and returns their segments", () => {
+  it("accepts canonical relative paths and returns their segments", () => {
     const accepted: readonly (readonly [string, readonly string[]])[] = [
       ["a", ["a"]],
       [".agents", [".agents"]],
@@ -27,7 +27,7 @@ describe("remote path", () => {
     }
   });
 
-  test("rejects traversal, absolute, separator-trick, and Windows-unsafe paths", () => {
+  it("rejects traversal, absolute, separator-trick, and Windows-unsafe paths", () => {
     const rejected: readonly string[] = [
       "",
       "/absolute",

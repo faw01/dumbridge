@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, it } from "@effect/vitest";
 import { encodeCapability, makeCapability } from "@dumbridge/bridge-key";
 import {
   type BridgeRequest,
@@ -79,7 +79,7 @@ const manifest = {
 } satisfies PullManifest;
 
 describe("request session", () => {
-  test("decodes frames split across arbitrary input chunks", () => {
+  it("decodes frames split across arbitrary input chunks", () => {
     const session = success(makeRequestSession(capability));
     const request = joinChunks(
       encoded({ capability, type: "auth" }),
@@ -96,7 +96,7 @@ describe("request session", () => {
     expect(Result.isSuccess(session.finish())).toBe(true);
   });
 
-  test("authenticates before parsing a coalesced request", () => {
+  it("authenticates before parsing a coalesced request", () => {
     const session = success(makeRequestSession(capability));
     const pushed = session.push(
       joinChunks(
@@ -112,7 +112,7 @@ describe("request session", () => {
     expect(Result.isSuccess(session.finish())).toBe(true);
   });
 
-  test("does not decode request fields before authentication", () => {
+  it("does not decode request fields before authentication", () => {
     const secret = "UNTRUSTED_LOCAL_SCRIPT";
     const session = success(makeRequestSession(capability));
     const pushed = session.push(
@@ -134,7 +134,7 @@ describe("request session", () => {
     }
   });
 
-  test("owns a snapshot of the expected capability", () => {
+  it("owns a snapshot of the expected capability", () => {
     const mutableExpected = success(makeCapability(capabilityBytes));
     const session = success(makeRequestSession(mutableExpected));
     mutableExpected.fill(0);
@@ -144,7 +144,7 @@ describe("request session", () => {
     expect(Result.isSuccess(authenticated)).toBe(true);
   });
 
-  test("stops at failed authentication before parsing trailing bytes", () => {
+  it("stops at failed authentication before parsing trailing bytes", () => {
     const session = success(makeRequestSession(capability));
     const pushed = session.push(
       joinChunks(
@@ -162,7 +162,7 @@ describe("request session", () => {
     }
   });
 
-  test("rejects unauthenticated, duplicate, and payload-bearing requests", () => {
+  it("rejects unauthenticated, duplicate, and payload-bearing requests", () => {
     const unauthenticated = success(makeRequestSession(capability));
     const withoutAuth = unauthenticated.push(
       encoded({ remotePath: ".agents", type: "pull" })
@@ -206,7 +206,7 @@ describe("request session", () => {
     }
   });
 
-  test("rejects Windows-unsafe pull paths at encode and decode seams", () => {
+  it("rejects Windows-unsafe pull paths at encode and decode seams", () => {
     const paths = [
       "folder/CON",
       "folder/CON .txt",
@@ -243,7 +243,7 @@ describe("request session", () => {
     }
   });
 
-  test("never retains untrusted protocol or type strings in errors", () => {
+  it("never retains untrusted protocol or type strings in errors", () => {
     const secret = "dumbridge1_SECRET_BEARER";
     const protocolSession = success(makeRequestSession(capability));
     const unsupported = protocolSession.push(
@@ -266,7 +266,7 @@ describe("request session", () => {
     }
   });
 
-  test("rejects malformed and oversized frames before allocation or dispatch", () => {
+  it("rejects malformed and oversized frames before allocation or dispatch", () => {
     const malformedSession = success(makeRequestSession(capability));
     const malformed = malformedSession.push(rawFrameFromText("{"));
     expect(Result.isFailure(malformed)).toBe(true);
@@ -298,7 +298,7 @@ describe("request session", () => {
 });
 
 describe("run response session", () => {
-  test("accepts bounded stdout then stderr and exactly one exit", () => {
+  it("accepts bounded stdout then stderr and exactly one exit", () => {
     const session = success(makeRunResponseSession());
     const stdout = Uint8Array.from([0, 255, 1]);
     const stderr = new TextEncoder().encode("warning");
@@ -329,7 +329,7 @@ describe("run response session", () => {
     expect(Result.isSuccess(session.finish())).toBe(true);
   });
 
-  test("rejects output order, exit payloads, and missing exit", () => {
+  it("rejects output order, exit payloads, and missing exit", () => {
     const outOfOrder = success(makeRunResponseSession());
     const orderResult = outOfOrder.push(
       joinChunks(
@@ -376,7 +376,7 @@ describe("run response session", () => {
     }
   });
 
-  test("rejects empty output frames at encode and decode boundaries", () => {
+  it("rejects empty output frames at encode and decode boundaries", () => {
     const encoding = encodeFrame({
       payload: new Uint8Array(),
       type: "stdout",
@@ -402,7 +402,7 @@ describe("run response session", () => {
     }
   });
 
-  test("enforces aggregate output and whole-session frame limits", () => {
+  it("enforces aggregate output and whole-session frame limits", () => {
     const outputLimited = success(
       makeRunResponseSession({ maxOutputBytes: 4 })
     );
@@ -452,7 +452,7 @@ describe("run response session", () => {
     }
   });
 
-  test("accepts a leading banner and reports its served display", () => {
+  it("accepts a leading banner and reports its served display", () => {
     const session = success(makeRunResponseSession());
     const pushed = session.push(
       joinChunks(
@@ -470,7 +470,7 @@ describe("run response session", () => {
     expect(Result.isSuccess(session.finish())).toBe(true);
   });
 
-  test("rejects a banner after output and control characters in its display", () => {
+  it("rejects a banner after output and control characters in its display", () => {
     const late = success(makeRunResponseSession());
     const lateResult = late.push(
       joinChunks(
@@ -508,7 +508,7 @@ describe("run response session", () => {
     }
   });
 
-  test("accepts a reject only in place of the whole run response", () => {
+  it("accepts a reject only in place of the whole run response", () => {
     const rejected = success(makeRunResponseSession());
     const pushed = rejected.push(
       encoded({ code: "invalid-key", type: "reject" })
@@ -549,7 +549,7 @@ describe("run response session", () => {
     }
   });
 
-  test("accepts valid frames independently of transport chunk coalescing", () => {
+  it("accepts valid frames independently of transport chunk coalescing", () => {
     const frames = [
       ...Array.from({ length: 100 }, () =>
         encoded({ payload: Uint8Array.of(1), type: "stdout" })
@@ -569,7 +569,7 @@ describe("run response session", () => {
 });
 
 describe("pull response session", () => {
-  test("round trips a lossless manifest and ordered file stream", () => {
+  it("round trips a lossless manifest and ordered file stream", () => {
     const firstChunk = Uint8Array.from([0, 255]);
     const secondChunk = Uint8Array.of(1);
     const session = success(makePullResponseSession());
@@ -608,7 +608,7 @@ describe("pull response session", () => {
     expect(Result.isSuccess(session.finish())).toBe(true);
   });
 
-  test("accepts bounded pull failures before or during a transfer", () => {
+  it("accepts bounded pull failures before or during a transfer", () => {
     const secret = "/Users/example/private/secret.txt";
     const beforeManifest = success(makePullResponseSession());
     const encodedFailure = encoded({
@@ -647,7 +647,7 @@ describe("pull response session", () => {
     expect(Result.isSuccess(duringFile.finish())).toBe(true);
   });
 
-  test("rejects pull failure payloads and unknown failure codes", () => {
+  it("rejects pull failure payloads and unknown failure codes", () => {
     const payloadSession = success(makePullResponseSession());
     const payload = payloadSession.push(
       rawFrame(
@@ -684,7 +684,7 @@ describe("pull response session", () => {
     }
   });
 
-  test("accepts a reject only in place of the pull manifest", () => {
+  it("accepts a reject only in place of the pull manifest", () => {
     const rejected = success(makePullResponseSession());
     const pushed = rejected.push(
       encoded({ code: "invalid-key", type: "reject" })
@@ -711,7 +711,7 @@ describe("pull response session", () => {
     }
   });
 
-  test("rejects out-of-order files and incorrect chunk offsets", () => {
+  it("rejects out-of-order files and incorrect chunk offsets", () => {
     const incompleteTransfer = success(makePullResponseSession());
     const earlyComplete = incompleteTransfer.push(
       joinChunks(
@@ -744,7 +744,7 @@ describe("pull response session", () => {
     }
   });
 
-  test("rejects a file digest that differs from its manifest", () => {
+  it("rejects a file digest that differs from its manifest", () => {
     const session = success(makePullResponseSession());
     const result = session.push(
       joinChunks(
@@ -768,7 +768,7 @@ describe("pull response session", () => {
     }
   });
 
-  test("rejects payloads on control frames", () => {
+  it("rejects payloads on control frames", () => {
     const session = success(makePullResponseSession());
     success(session.push(encoded({ manifest, type: "manifest" })));
     const result = session.push(
@@ -792,7 +792,7 @@ describe("pull response session", () => {
     }
   });
 
-  test("enforces manifest entry and aggregate transfer limits", () => {
+  it("enforces manifest entry and aggregate transfer limits", () => {
     const entryLimited = success(
       makePullResponseSession({ maxManifestEntries: 1 })
     );
@@ -820,7 +820,7 @@ describe("pull response session", () => {
     }
   });
 
-  test("keeps the protocol manifest ceiling aligned with pull planning", () => {
+  it("keeps the protocol manifest ceiling aligned with pull planning", () => {
     expect(
       Result.isSuccess(makePullResponseSession({ maxManifestEntries: 4096 }))
     ).toBe(true);
@@ -837,7 +837,7 @@ describe("pull response session", () => {
     }
   });
 
-  test("rejects inconsistent manifest totals at both encode and decode seams", () => {
+  it("rejects inconsistent manifest totals at both encode and decode seams", () => {
     const inconsistent = { ...manifest, totalBytes: 4 };
     const encoding = encodeFrame({ manifest: inconsistent, type: "manifest" });
     expect(Result.isFailure(encoding)).toBe(true);
@@ -865,7 +865,7 @@ describe("pull response session", () => {
     }
   });
 
-  test("rejects Windows-unsafe manifest entry paths at encode and decode seams", () => {
+  it("rejects Windows-unsafe manifest entry paths at encode and decode seams", () => {
     const unsafe = {
       ...manifest,
       entries: [
@@ -899,7 +899,7 @@ describe("pull response session", () => {
     }
   });
 
-  test("rejects manifests that omit declared parent directories", () => {
+  it("rejects manifests that omit declared parent directories", () => {
     const missingParent = {
       ...manifest,
       entries: [

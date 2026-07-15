@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, it } from "@effect/vitest";
 import {
   capabilitiesEqual,
   checkBridgeKeyExpiry,
@@ -14,7 +14,7 @@ const capabilityBytes = Uint8Array.from({ length: 32 }, (_, index) => index);
 const testExpiresAt = 1_752_600_000_000;
 
 describe("BridgeKey", () => {
-  test("mints a fresh 32-byte capability", () => {
+  it("mints a fresh 32-byte capability", () => {
     const first = mintCapability();
     const second = mintCapability();
 
@@ -23,7 +23,7 @@ describe("BridgeKey", () => {
     expect(capabilitiesEqual(first, second)).toBe(false);
   });
 
-  test("rejects capabilities that are not exactly 32 bytes", () => {
+  it("rejects capabilities that are not exactly 32 bytes", () => {
     const short = makeCapability(new Uint8Array(31));
     const long = makeCapability(new Uint8Array(33));
 
@@ -36,7 +36,7 @@ describe("BridgeKey", () => {
     }
   });
 
-  test("compares validated capabilities without exposing either value", () => {
+  it("compares validated capabilities without exposing either value", () => {
     const first = makeCapability(capabilityBytes);
     const same = makeCapability(capabilityBytes);
     const different = makeCapability(
@@ -56,7 +56,7 @@ describe("BridgeKey", () => {
     expect(capabilitiesEqual(first.success, different.success)).toBe(false);
   });
 
-  test("round trips an opaque Iroh locator and capability", () => {
+  it("round trips an opaque Iroh locator and capability", () => {
     const capability = makeCapability(capabilityBytes);
     expect(Result.isSuccess(capability)).toBe(true);
     if (Result.isFailure(capability)) {
@@ -91,7 +91,7 @@ describe("BridgeKey", () => {
     expect([...decoded.success.capability]).toEqual([...capabilityBytes]);
   });
 
-  test("parses a version 1 key without an expiry deadline", () => {
+  it("parses a version 1 key without an expiry deadline", () => {
     const capability = makeCapability(capabilityBytes);
     if (Result.isFailure(capability)) {
       throw capability.failure;
@@ -117,7 +117,7 @@ describe("BridgeKey", () => {
     ).toBe(true);
   });
 
-  test("reports key expiry only once the deadline passes", () => {
+  it("reports key expiry only once the deadline passes", () => {
     expect(
       Result.isSuccess(checkBridgeKeyExpiry(testExpiresAt, testExpiresAt - 1))
     ).toBe(true);
@@ -136,7 +136,7 @@ describe("BridgeKey", () => {
     }
   });
 
-  test("redacts the complete bearer value", () => {
+  it("redacts the complete bearer value", () => {
     const capability = makeCapability(capabilityBytes);
     if (Result.isFailure(capability)) {
       throw capability.failure;
@@ -158,7 +158,7 @@ describe("BridgeKey", () => {
     expect(redacted).not.toContain("iroh-secret-locator");
   });
 
-  test("scrubs every key token embedded in surrounding text", () => {
+  it("scrubs every key token embedded in surrounding text", () => {
     const capability = makeCapability(capabilityBytes);
     if (Result.isFailure(capability)) {
       throw capability.failure;
@@ -183,7 +183,7 @@ describe("BridgeKey", () => {
     expect(redactBridgeKey("no key here")).toBe("no key here");
   });
 
-  test("rejects malformed and oversized bridge keys with typed errors", () => {
+  it("rejects malformed and oversized bridge keys with typed errors", () => {
     const malformed = parseBridgeKey("dumbridge1_***");
     const oversized = parseBridgeKey(`dumbridge1_${"a".repeat(16_384)}`);
 
