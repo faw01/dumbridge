@@ -44,7 +44,6 @@ export const oneChunk = (chunk: Uint8Array) => Stream.make(chunk);
 export const streamSource = (source: PullSource) =>
   Effect.forEach(
     source.manifest.entries.filter((entry) => entry.kind === "file"),
-    // Sequential on purpose: tests model the server's ordered transfer.
     (entry) =>
       Stream.runDrain(source.read(entry, new AbortController().signal)),
     { discard: true }

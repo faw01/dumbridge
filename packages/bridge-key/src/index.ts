@@ -25,7 +25,6 @@ const LocatorSchema = Schema.String.check(
   Schema.isMaxLength(maximumLocatorLength)
 );
 
-// Epoch milliseconds; keys minted before key TTL existed (version 1) omit it.
 const ExpiresAtSchema = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0));
 
 const BridgeKeyPayloadV1Schema = Schema.Struct({
@@ -94,11 +93,6 @@ export class BridgeKeyExpiredError extends Schema.TaggedErrorClass<BridgeKeyExpi
 
 export type BridgeKeyError = InvalidBridgeKeyError | InvalidCapabilityError;
 
-/**
- * Both bridge sides share this comparison so expiry wording stays identical:
- * the client checks the deadline parsed from the key, the bridge process
- * checks the deadline it recorded at mint time.
- */
 export const checkBridgeKeyExpiry = (
   expiresAt: number | undefined,
   nowMillis: number
@@ -114,10 +108,6 @@ export const checkBridgeKeyExpiry = (
 
 const bridgeKeyTokenPattern = /dumbridge1_[A-Za-z0-9_-]+/g;
 
-/**
- * Scrubs every bridge-key-shaped token from text bound for error output or
- * logs; the last line of defense when a raw key lands inside a message.
- */
 export const redactBridgeKey = (text: string): string =>
   text.replace(bridgeKeyTokenPattern, `${bridgeKeyPrefix}[REDACTED]`);
 

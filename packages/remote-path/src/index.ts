@@ -55,8 +55,6 @@ const isCanonicalRemotePath = (path: string, segments: readonly string[]) =>
   !windowsDrivePattern.test(path) &&
   segments.every(isCanonicalSegment);
 
-// The schema stays private so the brand can only be minted here, after the
-// canonical checks above have passed.
 const brandRemotePath = Schema.decodeUnknownSync(RemotePathSchema);
 
 export const parseRemotePath = (

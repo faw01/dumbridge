@@ -492,8 +492,6 @@ describe("SafeShell", () => {
         maxFileReadBytes: Number.MAX_SAFE_INTEGER,
         maxLoopIterations: Number.MAX_SAFE_INTEGER,
       });
-      // Interrupt only after the loop observably read the file once, so the
-      // test never passes by interrupting a script that had not started.
       const firstRead = Promise.withResolvers<void>();
       const originalOpen = hostFileSystem.open;
       const open = vi.spyOn(hostFileSystem, "open");

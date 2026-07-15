@@ -185,8 +185,6 @@ const serve = Command.make(
       const keyTtl = Option.isSome(ttl)
         ? yield* parseServeTtl(ttl.value)
         : undefined;
-      // The detached child re-reads --ttl through this same command, so the
-      // raw flag is forwarded to it after the validation above.
       return yield* detach
         ? serveDetached(root.value, Option.isSome(ttl) ? ttl.value : undefined)
         : serveForeground(root.value, keyTtl);
@@ -208,7 +206,6 @@ const run = Command.make(
         script,
         transport: clientTransport(),
       });
-      // The banner goes to stderr so piped stdout stays exactly the script's.
       if (result.served !== undefined) {
         yield* write(
           process.stderr,
@@ -289,9 +286,6 @@ const pullErrorMessages = {
   ServedRootChangedError: "The served root changed during the pull.",
 } satisfies Record<PullErrorTag, string>;
 
-// Every failure the CLI prints flows through here, so the key scrubber
-// covers the whole error surface even if a future message interpolates a
-// raw key by mistake.
 export const publicErrorMessage = (error: unknown): string => {
   if (typeof error === "object" && error !== null && "_tag" in error) {
     const tag = String(error._tag);

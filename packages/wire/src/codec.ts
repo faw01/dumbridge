@@ -91,8 +91,6 @@ const encodeRawFrame = (
   return Result.succeed(encoded);
 };
 
-// Zero-length payloads carry no bytes, so every payload-free frame may share
-// one immutable instance.
 const emptyPayload = new Uint8Array();
 
 type RawFrameResult = Result.Result<RawFrame, WireEncodeError>;

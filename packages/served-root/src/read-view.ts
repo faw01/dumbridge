@@ -36,8 +36,6 @@ const safeHostReadCodes = [
   "ESTALE",
 ];
 
-// A symlink anywhere, a non-directory ancestor, or a non-file leaf ends the
-// read before any bytes are served.
 const assertHostComponentKind = (stats: Stats, isLeaf: boolean) => {
   if (stats.isSymbolicLink()) {
     throw Object.assign(new Error("symbolic links are disabled"), {
@@ -77,7 +75,6 @@ export interface ServedRootReadView {
   readonly begin: (signal: AbortSignal) => void;
   readonly fileSystem: IFileSystem;
   readonly limitExceeded: ServedRootLimit | undefined;
-  /** First virtual path a read missed outside the served root, if any. */
   readonly outsideRootPath: string | undefined;
   readonly sourceFailure:
     | ServedRootChangedError
@@ -371,8 +368,6 @@ export class RequestBudgetOverlayFs extends OverlayFs {
     return stats.size;
   }
 
-  // Charge or refund the difference between the estimated and observed sizes
-  // so the read budget tracks what the request actually consumed.
   private retrueReadReservation(reserved: number, actual: number): number {
     if (actual > reserved) {
       this.reserve("file-read", actual - reserved);
@@ -382,9 +377,6 @@ export class RequestBudgetOverlayFs extends OverlayFs {
     return actual;
   }
 
-  // Read the verified size in bounded chunks, then probe one byte past the
-  // end: growth past the reservation is a limit failure, shrinkage is a
-  // source change, and neither may serve mixed bytes.
   private async readVerifiedContent(
     handle: HostFileHandle,
     size: number,
@@ -746,8 +738,6 @@ export const fileSystemFacade = (
   return Object.freeze(facade);
 };
 
-// Overlay errors carry the POSIX code in the message rather than a code
-// property, so both shapes are treated as a missing path.
 const isMissingRead = (error: unknown) => {
   if (!(error instanceof Error)) {
     return false;

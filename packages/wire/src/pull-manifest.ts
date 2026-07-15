@@ -93,8 +93,6 @@ const parentsAreDeclared = (
   return true;
 };
 
-// An entry must be a canonical remote path, strictly after its predecessor,
-// and below directories the manifest has already declared.
 const entryPlacementViolation = (
   entry: PullManifestEntry,
   previousPath: string | undefined,
@@ -111,9 +109,6 @@ const entryPlacementViolation = (
   }
 };
 
-// Byte budget accounting: no file may pass the per-file ceiling, and the
-// running total may neither overflow safe integers nor pass the transfer
-// ceiling.
 const addFileBytes = (
   totalBytes: number,
   entry: PullFileEntry,

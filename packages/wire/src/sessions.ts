@@ -37,8 +37,6 @@ export type RequestSession = WireSession<BridgeRequest>;
 export type RunResponseSession = WireSession<RunResponseEvent>;
 export type PullResponseSession = WireSession<PullResponseEvent>;
 
-// A reject may only replace an entire response: once the bridge has started
-// answering, a trailing reject is a protocol violation, not a result.
 const acceptReject = (
   code: RejectCode,
   payload: Uint8Array,

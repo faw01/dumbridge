@@ -62,8 +62,6 @@ const failedShellResult = (message: string): CompletedShellResult => ({
   truncated: true,
 });
 
-// The served root errors stay in the error channel so the session terminates
-// without a response; inference proves the pass-through.
 const executeShell = (shell: SafeShell, script: string) =>
   shell.execute(script).pipe(
     Effect.map((result) => ({ ...result, truncated: false })),
@@ -87,8 +85,6 @@ export const handleRun = (
 ) =>
   Effect.gen(function* () {
     const result = yield* executeShell(shell, script);
-    // Sent only after the shell produced a response, so the one banner is
-    // not spent on a session that terminates without answering.
     yield* sendBanner(session);
     yield* sendOutput(session, "stdout", result.stdout);
     yield* sendOutput(session, "stderr", result.stderr);
@@ -147,9 +143,6 @@ const sendPullSource = (
     yield* session.finish;
   });
 
-// Client-side-only tags (destination exists, remote limit) cannot occur in
-// the server's pull path; they are mapped anyway so the compiler proves every
-// pull error owns a bounded wire code.
 const pullFailureCodes: Record<PullErrorTag, PullFailureCode> = {
   PullDestinationExistsError: "io",
   PullIntegrityError: "source-changed",
@@ -179,13 +172,8 @@ const sendPullFailure = (session: BridgeSession, code: PullFailureCode) =>
     Effect.flatMap(() => session.finish)
   );
 
-// Bounded independently because a reject is sent outside the run and pull
-// deadlines; without it a peer that never acknowledges could pin an accept
-// worker for the whole transport io deadline.
 const rejectSendDeadline: Duration.Input = "5 seconds";
 
-// A best-effort courtesy: the session still fails with its original error so
-// the serve log records the tag even when the peer is already gone.
 export const sendReject = (session: BridgeSession, code: RejectCode) =>
   sendFrame(session, { code, type: "reject" }).pipe(
     Effect.flatMap(() => session.finish),

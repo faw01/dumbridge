@@ -12,8 +12,6 @@ const sourceError = (message: string) => new BridgeKeySourceError({ message });
 
 const lineBreakPattern = /[\r\n]/;
 
-// Validation failures never quote the file or stdin content: the content is
-// presumed to be a real bearer key that landed in the wrong shape.
 const validateKeyText = (
   raw: string,
   emptyMessage: string,
@@ -64,13 +62,6 @@ const environmentKey = Config.redacted("DUMBRIDGE_KEY").pipe(
   )
 );
 
-/**
- * The one key-resolution order for run and pull: an explicit --key-file wins
- * ('-' reads stdin), otherwise the DUMBRIDGE_KEY environment variable.
- * Stdin is never read implicitly, so piping other data into run stays safe.
- * The value is trimmed of surrounding whitespace and wrapped in Redacted the
- * moment it is read.
- */
 export const resolveBridgeKey = (
   keyFile: Option.Option<string>
 ): Effect.Effect<Redacted.Redacted<string>, BridgeKeySourceError> =>

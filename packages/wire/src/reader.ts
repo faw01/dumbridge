@@ -122,9 +122,6 @@ class IncrementalFrameReader {
     return Result.succeed(events);
   }
 
-  // One completed frame body: charge it against the session frame budget,
-  // decode it, hand it to the protocol state machine, then rearm for the
-  // next length prefix.
   private finishFrame<A>(
     body: Uint8Array,
     limits: WireSessionLimits,

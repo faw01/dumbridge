@@ -24,9 +24,6 @@ const proxyNames = new Set([
 let fixture = "";
 let servedRoot = "";
 let stateDirectory = "";
-// Only pids observed in a record written by a real `serve --detach` may be
-// killed in teardown; a pid from a hand-written fixture record could belong
-// to an unrelated host process.
 let spawnedServePids: number[] = [];
 
 beforeEach(async () => {
@@ -37,7 +34,6 @@ beforeEach(async () => {
   await mkdir(servedRoot, { recursive: true });
 });
 
-// Tests must never leave an orphaned detached serve behind, even on failure.
 afterEach(async () => {
   for (const pid of spawnedServePids) {
     try {
@@ -141,8 +137,6 @@ describe("dumbridge serve flags", () => {
 
   test("stopping a stale record cleans it up without failing", async () => {
     await mkdir(stateDirectory, { recursive: true });
-    // A start time far before the current boot marks the record stale no
-    // matter which process owns the pid today, so nothing gets signaled.
     await writeFile(
       join(stateDirectory, "detached-serve.json"),
       JSON.stringify({
@@ -164,9 +158,6 @@ describe("dumbridge serve flags", () => {
   });
 });
 
-// Windows delivers no real SIGTERM, so the graceful detach lifecycle is
-// exercised on POSIX; the state-file logic is covered everywhere by
-// detached-serve.test.ts.
 describe.skipIf(process.platform === "win32")(
   "dumbridge serve --detach",
   () => {
@@ -227,9 +218,6 @@ describe.skipIf(process.platform === "win32")(
       const record = await trackSpawnedServe();
       await writeFile(join(servedRoot, "note.txt"), "alive\n");
 
-      // A same-locator key with a wrong capability forces the child's
-      // session-failure warning while its startup pipes are already destroyed;
-      // the write must not kill the detached serve.
       const parsed = Effect.runSync(Effect.fromResult(parseBridgeKey(key)));
       const forged = encodeBridgeKey({
         capability: mintCapability(),
