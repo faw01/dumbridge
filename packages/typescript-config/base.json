@@ -11,6 +11,7 @@
     "noFallthroughCasesInSwitch": true,
     "noImplicitOverride": true,
     "noUncheckedIndexedAccess": true,
+    "plugins": [{ "name": "@effect/language-service" }],
     "resolveJsonModule": true,
     "skipLibCheck": true,
     "strict": true,

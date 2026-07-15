@@ -1,4 +1,5 @@
-import { describe, expect, test } from "bun:test";
+import { readFile } from "node:fs/promises";
+import { describe, expect, it } from "@effect/vitest";
 
 const patchUrl = new URL(
   "../../../patches/iroh-ffi-proxy.patch",
@@ -10,10 +11,10 @@ const documentationUrl = new URL(
 );
 
 describe("Iroh FFI proxy source patch", () => {
-  test("pins and documents the two proxy builder methods", async () => {
+  it("pins and documents the two proxy builder methods", async () => {
     const [patch, documentation] = await Promise.all([
-      Bun.file(patchUrl).text(),
-      Bun.file(documentationUrl).text(),
+      readFile(patchUrl, "utf8"),
+      readFile(documentationUrl, "utf8"),
     ]);
 
     expect(patch).toContain("pub fn proxy_from_env(&self)");

@@ -1,4 +1,3 @@
-import { describe, expect, test } from "bun:test";
 import { fileURLToPath } from "node:url";
 import {
   BridgeDeadlineExceededError,
@@ -14,6 +13,7 @@ import {
   makeIrohTransport,
   normalizeIrohAddress,
 } from "@dumbridge/bridge-transport/iroh";
+import { describe, expect, it } from "@effect/vitest";
 import { EndpointAddr, EndpointId } from "@number0/iroh";
 import { Effect, Fiber, Option } from "effect";
 import { TestClock } from "effect/testing";
@@ -114,14 +114,14 @@ interface FinishLifecycleProbe {
 }
 
 describe("Iroh bridge transport", () => {
-  test("exchanges bounded binary sessions through a scoped listener", async () => {
-    const payload = Uint8Array.from(
-      { length: 150_000 },
-      (_, index) => index % 256
-    );
+  it.live("exchanges bounded binary sessions through a scoped listener", () =>
+    Effect.gen(function* () {
+      const payload = Uint8Array.from(
+        { length: 150_000 },
+        (_, index) => index % 256
+      );
 
-    const reply = await Effect.runPromise(
-      Effect.scoped(
+      const reply = yield* Effect.scoped(
         Effect.gen(function* () {
           const transport = makeLoopbackTransport();
           const listener = yield* transport.listen;
@@ -144,18 +144,18 @@ describe("Iroh bridge transport", () => {
 
           return response;
         })
-      )
-    );
+      );
 
-    expect(reply).toEqual(payload);
-  });
+      expect(reply).toEqual(payload);
+    })
+  );
 
-  test("serializes complete concurrent logical writes", async () => {
-    const first = new Uint8Array(320_000).fill(0xa5);
-    const second = new Uint8Array(320_000).fill(0x5a);
+  it.live("serializes complete concurrent logical writes", () =>
+    Effect.gen(function* () {
+      const first = new Uint8Array(320_000).fill(0xa5);
+      const second = new Uint8Array(320_000).fill(0x5a);
 
-    const received = await Effect.runPromise(
-      Effect.scoped(
+      const received = yield* Effect.scoped(
         Effect.gen(function* () {
           const transport = makeLoopbackTransport();
           const listener = yield* transport.listen;
@@ -173,209 +173,201 @@ describe("Iroh bridge transport", () => {
 
           return yield* Fiber.join(serverFiber);
         })
-      )
-    );
-    let transitions = 0;
-    for (let index = 1; index < received.byteLength; index += 1) {
-      if (received[index] !== received[index - 1]) {
-        transitions += 1;
+      );
+      let transitions = 0;
+      for (let index = 1; index < received.byteLength; index += 1) {
+        if (received[index] !== received[index - 1]) {
+          transitions += 1;
+        }
       }
-    }
 
-    expect(received.byteLength).toBe(first.byteLength + second.byteLength);
-    expect(transitions).toBe(1);
-  });
+      expect(received.byteLength).toBe(first.byteLength + second.byteLength);
+      expect(transitions).toBe(1);
+    })
+  );
 
-  test("rejects an invalid opaque locator with a typed failure", async () => {
-    const transport = makeLoopbackTransport();
-    const secretLocator = "not-an-iroh-ticket-private-value";
-    const error = await Effect.runPromise(
-      Effect.scoped(
+  it.live("rejects an invalid opaque locator with a typed failure", () =>
+    Effect.gen(function* () {
+      const transport = makeLoopbackTransport();
+      const secretLocator = "not-an-iroh-ticket-private-value";
+      const error = yield* Effect.scoped(
         transport
           .connect(BridgeLocator.fromString(secretLocator))
           .pipe(Effect.flip)
-      )
-    );
+      );
 
-    expect(error).toBeInstanceOf(BridgeLocatorInvalidError);
-    expect(JSON.stringify(error)).not.toContain(secretLocator);
-    expect(String(error)).not.toContain(secretLocator);
-  });
+      expect(error).toBeInstanceOf(BridgeLocatorInvalidError);
+      expect(JSON.stringify(error)).not.toContain(secretLocator);
+      expect(String(error)).not.toContain(secretLocator);
+    })
+  );
 
-  test("reports the current proxy binding gap explicitly", async () => {
-    const error = await Effect.runPromise(
-      configureIrohProxy(
+  it.effect("reports the current proxy binding gap explicitly", () =>
+    Effect.gen(function* () {
+      const error = yield* configureIrohProxy(
         {},
         { _tag: "FromEnvironment" },
         {
           HTTPS_PROXY: "https://proxy.example",
         }
-      ).pipe(Effect.flip)
-    );
+      ).pipe(Effect.flip);
 
-    expect(error).toBeInstanceOf(BridgeProxyUnsupportedError);
-    if (error instanceof BridgeProxyUnsupportedError) {
-      expect(error.requested).toBe("environment");
-    }
-  });
+      expect(error).toBeInstanceOf(BridgeProxyUnsupportedError);
+      if (error instanceof BridgeProxyUnsupportedError) {
+        expect(error.requested).toBe("environment");
+      }
+    })
+  );
 
-  test("resolves Iroh proxy precedence before generic proxy fallbacks", async () => {
-    const configured: string[] = [];
-    const builder = {
-      proxyUrl: (url: string) => configured.push(url),
-    };
+  it.effect(
+    "resolves Iroh proxy precedence before generic proxy fallbacks",
+    () =>
+      Effect.gen(function* () {
+        const configured: string[] = [];
+        const builder = {
+          proxyUrl: (url: string) => configured.push(url),
+        };
 
-    await Effect.runPromise(
-      configureIrohProxy(
-        builder,
-        { _tag: "FromEnvironment" },
-        {
-          HTTP_PROXY: "http://first.example",
-          HTTPS_PROXY: "https://third.example",
-          http_proxy: "http://second.example",
-        }
-      )
-    );
-    await Effect.runPromise(
-      configureIrohProxy(
-        builder,
-        { _tag: "FromEnvironment" },
-        {
-          HTTP_PROXY: "http://ignored.example",
-          http_proxy: "http://cgi-safe.example",
-          REQUEST_METHOD: "GET",
-        }
-      )
-    );
-    await Effect.runPromise(
-      configureIrohProxy(
-        builder,
-        { _tag: "FromEnvironment" },
-        {
-          ALL_PROXY: "http://fallback.example",
-          HTTPS_PROXY: "https://preferred.example",
-        }
-      )
-    );
-    await Effect.runPromise(
-      configureIrohProxy(
-        builder,
-        { _tag: "FromEnvironment" },
-        {
-          ALL_PROXY: "http://all-proxy.example",
-          all_proxy: "http://lower-all-proxy.example",
-        }
-      )
-    );
-    await Effect.runPromise(
-      configureIrohProxy(
-        builder,
-        { _tag: "FromEnvironment" },
-        {
-          all_proxy: "http://lower-all-proxy.example",
-        }
-      )
-    );
-
-    expect(configured).toEqual([
-      "http://first.example/",
-      "http://cgi-safe.example/",
-      "https://preferred.example/",
-      "http://all-proxy.example/",
-      "http://lower-all-proxy.example/",
-    ]);
-  });
-
-  test("fails closed when proxy environment variables are missing or invalid", async () => {
-    const secret = "proxy-secret-credential";
-    const builder = { proxyUrl: () => undefined };
-    const [missing, malformed, invalidAllProxy] = await Effect.runPromise(
-      Effect.all([
-        configureIrohProxy(builder, { _tag: "FromEnvironment" }, {}).pipe(
-          Effect.flip
-        ),
-        configureIrohProxy(
+        yield* configureIrohProxy(
           builder,
           { _tag: "FromEnvironment" },
           {
-            HTTP_PROXY: `not-a-url-${secret}`,
-            https_proxy: `socks5://${secret}@proxy.example`,
+            HTTP_PROXY: "http://first.example",
+            HTTPS_PROXY: "https://third.example",
+            http_proxy: "http://second.example",
           }
-        ).pipe(Effect.flip),
-        configureIrohProxy(
+        );
+        yield* configureIrohProxy(
           builder,
           { _tag: "FromEnvironment" },
           {
-            ALL_PROXY: `socks5://${secret}@proxy.example`,
+            HTTP_PROXY: "http://ignored.example",
+            http_proxy: "http://cgi-safe.example",
+            REQUEST_METHOD: "GET",
           }
-        ).pipe(Effect.flip),
-      ])
-    );
+        );
+        yield* configureIrohProxy(
+          builder,
+          { _tag: "FromEnvironment" },
+          {
+            ALL_PROXY: "http://fallback.example",
+            HTTPS_PROXY: "https://preferred.example",
+          }
+        );
+        yield* configureIrohProxy(
+          builder,
+          { _tag: "FromEnvironment" },
+          {
+            ALL_PROXY: "http://all-proxy.example",
+            all_proxy: "http://lower-all-proxy.example",
+          }
+        );
+        yield* configureIrohProxy(
+          builder,
+          { _tag: "FromEnvironment" },
+          {
+            all_proxy: "http://lower-all-proxy.example",
+          }
+        );
 
-    expect(missing).toBeInstanceOf(BridgeProxyConfigurationError);
-    expect(malformed).toBeInstanceOf(BridgeProxyConfigurationError);
-    expect(invalidAllProxy).toBeInstanceOf(BridgeProxyConfigurationError);
-    expect(JSON.stringify(malformed)).not.toContain(secret);
-    expect(String(malformed)).not.toContain(secret);
-    expect(JSON.stringify(invalidAllProxy)).not.toContain(secret);
-    expect(String(invalidAllProxy)).not.toContain(secret);
-  });
+        expect(configured).toEqual([
+          "http://first.example/",
+          "http://cgi-safe.example/",
+          "https://preferred.example/",
+          "http://all-proxy.example/",
+          "http://lower-all-proxy.example/",
+        ]);
+      })
+  );
 
-  test("does not expose a proxy URL when native configuration fails", async () => {
-    const secret = "proxy-secret-credential";
-    const error = await Effect.runPromise(
-      configureIrohProxy(
+  it.effect(
+    "fails closed when proxy environment variables are missing or invalid",
+    () =>
+      Effect.gen(function* () {
+        const secret = "proxy-secret-credential";
+        const builder = { proxyUrl: () => undefined };
+        const [missing, malformed, invalidAllProxy] = yield* Effect.all([
+          configureIrohProxy(builder, { _tag: "FromEnvironment" }, {}).pipe(
+            Effect.flip
+          ),
+          configureIrohProxy(
+            builder,
+            { _tag: "FromEnvironment" },
+            {
+              HTTP_PROXY: `not-a-url-${secret}`,
+              https_proxy: `socks5://${secret}@proxy.example`,
+            }
+          ).pipe(Effect.flip),
+          configureIrohProxy(
+            builder,
+            { _tag: "FromEnvironment" },
+            {
+              ALL_PROXY: `socks5://${secret}@proxy.example`,
+            }
+          ).pipe(Effect.flip),
+        ]);
+
+        expect(missing).toBeInstanceOf(BridgeProxyConfigurationError);
+        expect(malformed).toBeInstanceOf(BridgeProxyConfigurationError);
+        expect(invalidAllProxy).toBeInstanceOf(BridgeProxyConfigurationError);
+        expect(JSON.stringify(malformed)).not.toContain(secret);
+        expect(String(malformed)).not.toContain(secret);
+        expect(JSON.stringify(invalidAllProxy)).not.toContain(secret);
+        expect(String(invalidAllProxy)).not.toContain(secret);
+      })
+  );
+
+  it.effect("does not expose a proxy URL when native configuration fails", () =>
+    Effect.gen(function* () {
+      const secret = "proxy-secret-credential";
+      const error = yield* configureIrohProxy(
         {
           proxyUrl: () => {
             throw new Error(`https://${secret}@proxy.example`);
           },
         },
         { _tag: "Url", url: `https://${secret}@proxy.example` }
-      ).pipe(Effect.flip)
-    );
+      ).pipe(Effect.flip);
 
-    expect(error).toBeInstanceOf(BridgeProxyConfigurationError);
-    expect(JSON.stringify(error)).not.toContain(secret);
-    expect(String(error)).not.toContain(secret);
-  });
+      expect(error).toBeInstanceOf(BridgeProxyConfigurationError);
+      expect(JSON.stringify(error)).not.toContain(secret);
+      expect(String(error)).not.toContain(secret);
+    })
+  );
 
-  test("normalizes mixed locators to the selected reachability", async () => {
-    const id = EndpointId.fromBytes(new Array<number>(32).fill(1));
-    const directAddresses = ["127.0.0.1:4242", "[::1]:4242"];
-    const relayUrl = "https://relay.example/";
-    const mixed = new EndpointAddr(id, relayUrl, directAddresses);
-    const [directOnly, relayOnly, directOrRelay] = await Effect.runPromise(
-      Effect.all([
+  it.effect("normalizes mixed locators to the selected reachability", () =>
+    Effect.gen(function* () {
+      const id = EndpointId.fromBytes(new Array<number>(32).fill(1));
+      const directAddresses = ["127.0.0.1:4242", "[::1]:4242"];
+      const relayUrl = "https://relay.example/";
+      const mixed = new EndpointAddr(id, relayUrl, directAddresses);
+      const [directOnly, relayOnly, directOrRelay] = yield* Effect.all([
         normalizeIrohAddress(mixed, "direct-only"),
         normalizeIrohAddress(mixed, "relay-only"),
         normalizeIrohAddress(mixed, "direct-or-relay"),
-      ])
-    );
+      ]);
 
-    expect(directOnly.relayUrl()).toBeNull();
-    expect(directOnly.directAddresses()).toEqual(directAddresses);
-    expect(relayOnly.relayUrl()).toBe(relayUrl);
-    expect(relayOnly.directAddresses()).toEqual([]);
-    expect(directOrRelay.relayUrl()).toBe(relayUrl);
-    expect(directOrRelay.directAddresses()).toEqual(directAddresses);
+      expect(directOnly.relayUrl()).toBeNull();
+      expect(directOnly.directAddresses()).toEqual(directAddresses);
+      expect(relayOnly.relayUrl()).toBe(relayUrl);
+      expect(relayOnly.directAddresses()).toEqual([]);
+      expect(directOrRelay.relayUrl()).toBe(relayUrl);
+      expect(directOrRelay.directAddresses()).toEqual(directAddresses);
 
-    const noRelayError = await Effect.runPromise(
-      normalizeIrohAddress(
+      const noRelayError = yield* normalizeIrohAddress(
         new EndpointAddr(id, null, directAddresses),
         "relay-only"
-      ).pipe(Effect.flip)
-    );
-    const noDirectError = await Effect.runPromise(
-      normalizeIrohAddress(
+      ).pipe(Effect.flip);
+      const noDirectError = yield* normalizeIrohAddress(
         new EndpointAddr(id, relayUrl, []),
         "direct-only"
-      ).pipe(Effect.flip)
-    );
-    expect(noRelayError).toBeInstanceOf(BridgeLocatorInvalidError);
-    expect(noDirectError).toBeInstanceOf(BridgeLocatorInvalidError);
-  });
+      ).pipe(Effect.flip);
+      expect(noRelayError).toBeInstanceOf(BridgeLocatorInvalidError);
+      expect(noDirectError).toBeInstanceOf(BridgeLocatorInvalidError);
+    })
+  );
 
-  test("falls back to a direct locator when home relay readiness expires", async () => {
+  it("falls back to a direct locator when home relay readiness expires", async () => {
     const result = await runProbe<RelayProbe>("relay-timeout");
 
     expect(result.onlineCalls).toBe(1);
@@ -384,7 +376,7 @@ describe("Iroh bridge transport", () => {
     expect(result.closeCalls).toBe(1);
   });
 
-  test("keeps relay and direct routes when the home relay is ready", async () => {
+  it("keeps relay and direct routes when the home relay is ready", async () => {
     const result = await runProbe<RelayProbe>("relay-ready");
 
     expect(result.onlineCalls).toBe(1);
@@ -393,7 +385,7 @@ describe("Iroh bridge transport", () => {
     expect(result.closeCalls).toBe(1);
   });
 
-  test("bounds listener binding and closes a late endpoint", async () => {
+  it("bounds listener binding and closes a late endpoint", async () => {
     const result = await runProbe<BindProbe>("bind-listen");
 
     expect(result.errorTag).toBe("BridgeDeadlineExceededError");
@@ -401,7 +393,7 @@ describe("Iroh bridge transport", () => {
     expect(result.closeCalls).toBe(1);
   });
 
-  test("bounds client binding and closes a late endpoint", async () => {
+  it("bounds client binding and closes a late endpoint", async () => {
     const result = await runProbe<BindProbe>("bind-connect");
 
     expect(result.errorTag).toBe("BridgeDeadlineExceededError");
@@ -409,14 +401,14 @@ describe("Iroh bridge transport", () => {
     expect(result.closeCalls).toBe(1);
   });
 
-  test("closes an endpoint interrupted during bind handoff", async () => {
+  it("closes an endpoint interrupted during bind handoff", async () => {
     const result = await runProbe<BindInterruptProbe>("bind-interrupt-handoff");
 
     expect(result.endpointUseCalls).toBe(0);
     expect(result.closeCalls).toBe(1);
   });
 
-  test("closes sessions after ordinary native I/O failures", async () => {
+  it("closes sessions after ordinary native I/O failures", async () => {
     const result = await runProbe<SessionFailureProbe>("session-failures");
 
     expect(result.read.errorTag).toBe("BridgeReadError");
@@ -427,7 +419,7 @@ describe("Iroh bridge transport", () => {
     expect(result.finish.closeCalls).toBe(1);
   });
 
-  test("waits for peer delivery acknowledgement before closing", async () => {
+  it("waits for peer delivery acknowledgement before closing", async () => {
     const result = await runProbe<FinishLifecycleProbe>("finish-success");
 
     expect(result.errorTag).toBeNull();
@@ -436,7 +428,7 @@ describe("Iroh bridge transport", () => {
     expect(result.events).toEqual(["finish", "stopped", "close"]);
   });
 
-  test("sanitizes a peer stream stop and closes the session", async () => {
+  it("sanitizes a peer stream stop and closes the session", async () => {
     const result = await runProbe<FinishLifecycleProbe>("finish-peer-stop");
 
     expect(result.errorTag).toBe("BridgeFinishError");
@@ -446,7 +438,7 @@ describe("Iroh bridge transport", () => {
     expect(result.message).not.toContain("0");
   });
 
-  test("bounds peer delivery acknowledgement and closes on timeout", async () => {
+  it("bounds peer delivery acknowledgement and closes on timeout", async () => {
     const result = await runProbe<FinishLifecycleProbe>("finish-timeout");
 
     expect(result.errorTag).toBe("BridgeDeadlineExceededError");
@@ -455,19 +447,19 @@ describe("Iroh bridge transport", () => {
     expect(result.events).toEqual(["finish", "stopped", "close"]);
   });
 
-  test("keeps an idle listener open past its accept deadline", async () => {
-    const transport = makeIrohTransport({
-      deadlines: {
-        accept: "20 millis",
-        connect: "1 second",
-        io: "1 second",
-        listen: "1 second",
-      },
-      reachability: "direct-only",
-    });
-    const payload = Uint8Array.of(7, 8, 9);
-    const received = await Effect.runPromise(
-      Effect.scoped(
+  it.live("keeps an idle listener open past its accept deadline", () =>
+    Effect.gen(function* () {
+      const transport = makeIrohTransport({
+        deadlines: {
+          accept: "20 millis",
+          connect: "1 second",
+          io: "1 second",
+          listen: "1 second",
+        },
+        reachability: "direct-only",
+      });
+      const payload = Uint8Array.of(7, 8, 9);
+      const received = yield* Effect.scoped(
         Effect.gen(function* () {
           const listener = yield* transport.listen;
           const serverFiber = yield* listener.accept.pipe(
@@ -482,16 +474,16 @@ describe("Iroh bridge transport", () => {
 
           return yield* Fiber.join(serverFiber);
         })
-      )
-    );
+      );
 
-    expect(received).toEqual(payload);
-  });
+      expect(received).toEqual(payload);
+    })
+  );
 
-  test("keeps a quiet default session open beyond thirty seconds", async () => {
-    const payload = Uint8Array.of(7, 8, 9);
-    const received = await Effect.runPromise(
-      Effect.scoped(
+  it.live("keeps a quiet default session open beyond thirty seconds", () =>
+    Effect.gen(function* () {
+      const payload = Uint8Array.of(7, 8, 9);
+      const received = yield* Effect.scoped(
         Effect.gen(function* () {
           const transport = makeIrohTransport({ reachability: "direct-only" });
           const listener = yield* transport.listen;
@@ -523,24 +515,24 @@ describe("Iroh bridge transport", () => {
             Effect.provide(TestClock.layer({ warningDelay: "10 seconds" }))
           );
         })
-      )
-    );
+      );
 
-    expect(received).toEqual(payload);
-  });
+      expect(received).toEqual(payload);
+    })
+  );
 
-  test("closes a byte session whose read deadline expires", async () => {
-    const transport = makeIrohTransport({
-      deadlines: {
-        accept: "1 second",
-        connect: "1 second",
-        io: "50 millis",
-        listen: "1 second",
-      },
-      reachability: "direct-only",
-    });
-    const error = await Effect.runPromise(
-      Effect.scoped(
+  it.live("closes a byte session whose read deadline expires", () =>
+    Effect.gen(function* () {
+      const transport = makeIrohTransport({
+        deadlines: {
+          accept: "1 second",
+          connect: "1 second",
+          io: "50 millis",
+          listen: "1 second",
+        },
+        reachability: "direct-only",
+      });
+      const error = yield* Effect.scoped(
         Effect.gen(function* () {
           const listener = yield* transport.listen;
           const serverFiber = yield* listener.accept.pipe(
@@ -565,39 +557,39 @@ describe("Iroh bridge transport", () => {
           yield* client.close;
           return failure;
         })
-      )
-    );
+      );
 
-    expect(error).toBeInstanceOf(BridgeDeadlineExceededError);
-    if (error instanceof BridgeDeadlineExceededError) {
-      expect(error.operation).toBe("read");
-    }
-  });
+      expect(error).toBeInstanceOf(BridgeDeadlineExceededError);
+      if (error instanceof BridgeDeadlineExceededError) {
+        expect(error.operation).toBe("read");
+      }
+    })
+  );
 
-  test("revokes a listener when its scope closes", async () => {
-    const transport = makeIrohTransport({
-      deadlines: {
-        accept: "1 second",
-        connect: "200 millis",
-        io: "1 second",
-        listen: "1 second",
-      },
-      reachability: "direct-only",
-    });
-    const locator = await Effect.runPromise(
-      Effect.scoped(
+  it.live("revokes a listener when its scope closes", () =>
+    Effect.gen(function* () {
+      const transport = makeIrohTransport({
+        deadlines: {
+          accept: "1 second",
+          connect: "200 millis",
+          io: "1 second",
+          listen: "1 second",
+        },
+        reachability: "direct-only",
+      });
+      const locator = yield* Effect.scoped(
         Effect.gen(function* () {
           const listener = yield* transport.listen;
           return listener.locator;
         })
-      )
-    );
-    const error = await Effect.runPromise(
-      Effect.scoped(transport.connect(locator)).pipe(Effect.flip)
-    );
+      );
+      const error = yield* Effect.scoped(transport.connect(locator)).pipe(
+        Effect.flip
+      );
 
-    expect(["BridgeConnectError", "BridgeDeadlineExceededError"]).toContain(
-      error._tag
-    );
-  });
+      expect(["BridgeConnectError", "BridgeDeadlineExceededError"]).toContain(
+        error._tag
+      );
+    })
+  );
 });

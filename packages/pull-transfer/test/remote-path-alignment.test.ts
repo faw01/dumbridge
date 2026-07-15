@@ -1,7 +1,7 @@
-import { describe, expect, test } from "bun:test";
 import { readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { encodeFrame, type PullManifest } from "@dumbridge/wire";
+import { describe, expect, it } from "@effect/vitest";
 import { Effect, Result } from "effect";
 import { materializePull, resolvePullDestination } from "../src/index";
 import { oneChunk, withFixture } from "./support";
@@ -40,7 +40,7 @@ const receiverAcceptsPath = (remotePath: string) =>
   Result.isSuccess(resolvePullDestination(remotePath, "ignored-destination"));
 
 describe("remote path alignment", () => {
-  test("wire and receiver accept and reject identical pull paths", () => {
+  it("wire and receiver accept and reject identical pull paths", () => {
     for (const [remotePath, accepted] of candidates) {
       const wireAccepts = Result.isSuccess(
         encodeFrame({ remotePath, type: "pull" })
@@ -52,55 +52,72 @@ describe("remote path alignment", () => {
     }
   });
 
-  test("wire and receiver accept and reject identical manifest entry paths", () =>
-    withFixture(async ({ workspace }) => {
-      const singleSegment = candidates.filter(
-        ([path]) => path.length > 0 && !path.includes("/")
-      );
-      const outcomes = await Promise.all(
-        singleSegment.map(async ([entryPath, accepted], index) => {
-          const manifest: PullManifest = {
-            digestAlgorithm: "sha256",
-            entries: [
-              { digest: emptySha256, kind: "file", path: entryPath, size: 0 },
-            ],
-            kind: "file",
-            name: entryPath,
-            totalBytes: 0,
-          };
-          const wireAccepts = Result.isSuccess(
-            encodeFrame({ manifest, type: "manifest" })
+  it.effect(
+    "wire and receiver accept and reject identical manifest entry paths",
+    () =>
+      withFixture(({ workspace }) =>
+        Effect.gen(function* () {
+          const singleSegment = candidates.filter(
+            ([path]) => path.length > 0 && !path.includes("/")
           );
-          const receiverAccepts = await Effect.runPromise(
-            materializePull({
-              destination: join(workspace, `entry-${index}`),
-              manifest,
-              read: () => oneChunk(new Uint8Array()),
-            }).pipe(
-              Effect.map(() => true),
-              Effect.catch((error) =>
-                error._tag === "PullPathError"
-                  ? Effect.succeed(false)
-                  : Effect.fail(error)
-              )
-            )
+          const outcomes = yield* Effect.all(
+            singleSegment.map(([entryPath, accepted], index) => {
+              const manifest: PullManifest = {
+                digestAlgorithm: "sha256",
+                entries: [
+                  {
+                    digest: emptySha256,
+                    kind: "file",
+                    path: entryPath,
+                    size: 0,
+                  },
+                ],
+                kind: "file",
+                name: entryPath,
+                totalBytes: 0,
+              };
+              const wireAccepts = Result.isSuccess(
+                encodeFrame({ manifest, type: "manifest" })
+              );
+              return materializePull({
+                destination: join(workspace, `entry-${index}`),
+                manifest,
+                read: () => oneChunk(new Uint8Array()),
+              }).pipe(
+                Effect.map(() => true),
+                Effect.catch((error) =>
+                  error._tag === "PullPathError"
+                    ? Effect.succeed(false)
+                    : Effect.fail(error)
+                ),
+                Effect.map((receiverAccepts) => ({
+                  accepted,
+                  entryPath,
+                  index,
+                  receiverAccepts,
+                  wireAccepts,
+                }))
+              );
+            }),
+            { concurrency: "unbounded" }
           );
-          return { accepted, entryPath, index, receiverAccepts, wireAccepts };
-        })
-      );
 
-      for (const outcome of outcomes) {
-        expect(`${outcome.entryPath}:${outcome.wireAccepts}`).toBe(
-          `${outcome.entryPath}:${outcome.accepted}`
-        );
-        expect(`${outcome.entryPath}:${outcome.receiverAccepts}`).toBe(
-          `${outcome.entryPath}:${outcome.accepted}`
-        );
-      }
-      const materialized = outcomes
-        .filter((outcome) => outcome.accepted)
-        .map((outcome) => `entry-${outcome.index}`)
-        .sort();
-      expect((await readdir(workspace)).sort()).toEqual(materialized);
-    }));
+          for (const outcome of outcomes) {
+            expect(`${outcome.entryPath}:${outcome.wireAccepts}`).toBe(
+              `${outcome.entryPath}:${outcome.accepted}`
+            );
+            expect(`${outcome.entryPath}:${outcome.receiverAccepts}`).toBe(
+              `${outcome.entryPath}:${outcome.accepted}`
+            );
+          }
+          const materialized = outcomes
+            .filter((outcome) => outcome.accepted)
+            .map((outcome) => `entry-${outcome.index}`)
+            .sort();
+          expect(
+            (yield* Effect.promise(() => readdir(workspace))).sort()
+          ).toEqual(materialized);
+        })
+      )
+  );
 });

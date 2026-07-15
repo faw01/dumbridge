@@ -1,4 +1,3 @@
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { mkdir, mkdtemp, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -28,6 +27,14 @@ import {
   type RunResponseEvent,
   type WireFrame,
 } from "@dumbridge/wire";
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "@effect/vitest";
 import {
   Duration,
   Effect,
@@ -162,829 +169,920 @@ const decodeRunEvents = (writes: readonly Uint8Array[]) => {
 };
 
 describe("bridge application supervision", () => {
-  test("accepts another session while one handshake is stalled", async () => {
-    let attempts = 0;
-    let acceptedSession: BridgeSession | undefined;
-    const listener: BridgeListener = {
-      accept: Effect.suspend(() => {
-        attempts += 1;
-        if (attempts === 1) {
-          return Effect.never;
-        }
-        if (attempts === 2) {
-          return acceptedSession === undefined
-            ? Effect.die("healthy session was not prepared")
-            : Effect.succeed(acceptedSession);
-        }
-        return Effect.fail(
-          new BridgeListenerClosedError({ message: "listener closed" })
-        );
-      }),
-      locator: BridgeLocator.fromString("concurrent-listener"),
-    };
-    const server = await Effect.runPromise(
-      Effect.scoped(
+  it.effect("accepts another session while one handshake is stalled", () =>
+    Effect.gen(function* () {
+      let attempts = 0;
+      let acceptedSession: BridgeSession | undefined;
+      const listener: BridgeListener = {
+        accept: Effect.suspend(() => {
+          attempts += 1;
+          if (attempts === 1) {
+            return Effect.never;
+          }
+          if (attempts === 2) {
+            return acceptedSession === undefined
+              ? Effect.die("healthy session was not prepared")
+              : Effect.succeed(acceptedSession);
+          }
+          return Effect.fail(
+            new BridgeListenerClosedError({ message: "listener closed" })
+          );
+        }),
+        locator: BridgeLocator.fromString("concurrent-listener"),
+      };
+      const server = yield* Effect.scoped(
         openBridge({
           maxConcurrentSessions: 2,
           root: fixture,
           transport: listenerTransport(listener),
         })
-      )
-    );
-    const request = requestFor(server.link, {
-      script: "cat note.txt",
-      type: "run",
-    });
-    const healthy = scriptedSession({ reads: [request] });
-    acceptedSession = healthy.session;
+      );
+      const request = requestFor(server.link, {
+        script: "cat note.txt",
+        type: "run",
+      });
+      const healthy = scriptedSession({ reads: [request] });
+      acceptedSession = healthy.session;
 
-    const end = await Effect.runPromise(
-      Effect.scoped(server.serve.pipe(Effect.flip))
-    );
+      const end = yield* Effect.scoped(server.serve.pipe(Effect.flip));
 
-    expect(end).toBeInstanceOf(BridgeListenerClosedError);
-    expect(attempts).toBe(3);
-    expect(healthy.state.closeCalls).toBe(1);
-    expect(decodeRunEvents(healthy.state.writes)).toContainEqual({
-      payload: new TextEncoder().encode("live\n"),
-      type: "stdout",
-    });
-  });
+      expect(end).toBeInstanceOf(BridgeListenerClosedError);
+      expect(attempts).toBe(3);
+      expect(healthy.state.closeCalls).toBe(1);
+      expect(decodeRunEvents(healthy.state.writes)).toContainEqual({
+        payload: new TextEncoder().encode("live\n"),
+        type: "stdout",
+      });
+    })
+  );
 
-  test("backs off persistent accept failures and resets after an accepted session", async () => {
-    let attempts = 0;
-    const accepted = scriptedSession({});
-    const accepts: BridgeListener["accept"][] = [
-      Effect.fail(new BridgeAcceptError({ message: "first failure" })),
-      Effect.fail(new BridgeAcceptError({ message: "second failure" })),
-      Effect.succeed(accepted.session),
-      Effect.fail(new BridgeAcceptError({ message: "failure after success" })),
-      Effect.fail(new BridgeListenerClosedError({ message: "closed" })),
-    ];
-    const listener: BridgeListener = {
-      accept: Effect.suspend(() => {
-        const next = accepts[attempts];
-        attempts += 1;
-        return (
-          next ??
-          Effect.fail(new BridgeListenerClosedError({ message: "closed" }))
-        );
-      }),
-      locator: BridgeLocator.fromString("backoff-listener"),
-    };
+  it.effect(
+    "backs off persistent accept failures and resets after an accepted session",
+    () =>
+      Effect.gen(function* () {
+        let attempts = 0;
+        const accepted = scriptedSession({});
+        const accepts: BridgeListener["accept"][] = [
+          Effect.fail(new BridgeAcceptError({ message: "first failure" })),
+          Effect.fail(new BridgeAcceptError({ message: "second failure" })),
+          Effect.succeed(accepted.session),
+          Effect.fail(
+            new BridgeAcceptError({ message: "failure after success" })
+          ),
+          Effect.fail(new BridgeListenerClosedError({ message: "closed" })),
+        ];
+        const listener: BridgeListener = {
+          accept: Effect.suspend(() => {
+            const next = accepts[attempts];
+            attempts += 1;
+            return (
+              next ??
+              Effect.fail(new BridgeListenerClosedError({ message: "closed" }))
+            );
+          }),
+          locator: BridgeLocator.fromString("backoff-listener"),
+        };
 
-    const end = await Effect.runPromise(
-      Effect.scoped(
-        Effect.gen(function* () {
-          const server = yield* openBridge({
-            maxConcurrentSessions: 1,
-            root: fixture,
-            transport: listenerTransport(listener),
-          });
-          const fiber = yield* server.serve.pipe(Effect.forkChild);
+        const end = yield* Effect.scoped(
+          Effect.gen(function* () {
+            const server = yield* openBridge({
+              maxConcurrentSessions: 1,
+              root: fixture,
+              transport: listenerTransport(listener),
+            });
+            const fiber = yield* server.serve.pipe(Effect.forkChild);
 
-          yield* Effect.yieldNow;
-          expect(attempts).toBe(1);
-          yield* Effect.yieldNow;
-          yield* Effect.yieldNow;
-          expect(attempts).toBe(1);
+            yield* Effect.yieldNow;
+            expect(attempts).toBe(1);
+            yield* Effect.yieldNow;
+            yield* Effect.yieldNow;
+            expect(attempts).toBe(1);
 
-          yield* TestClock.adjust("9 millis");
-          expect(attempts).toBe(1);
-          yield* TestClock.adjust("1 millis");
-          expect(attempts).toBe(2);
+            yield* TestClock.adjust("9 millis");
+            expect(attempts).toBe(1);
+            yield* TestClock.adjust("1 millis");
+            expect(attempts).toBe(2);
 
-          yield* TestClock.adjust("19 millis");
-          expect(attempts).toBe(2);
-          yield* TestClock.adjust("1 millis");
-          expect(attempts).toBe(4);
-          expect(accepted.state.closeCalls).toBe(1);
+            yield* TestClock.adjust("19 millis");
+            expect(attempts).toBe(2);
+            yield* TestClock.adjust("1 millis");
+            expect(attempts).toBe(4);
+            expect(accepted.state.closeCalls).toBe(1);
 
-          yield* TestClock.adjust("9 millis");
-          expect(attempts).toBe(4);
-          yield* TestClock.adjust("1 millis");
-          return yield* Fiber.join(fiber).pipe(Effect.flip);
-        })
-      ).pipe(Effect.provide(TestClock.layer({ warningDelay: "10 seconds" })))
-    );
+            yield* TestClock.adjust("9 millis");
+            expect(attempts).toBe(4);
+            yield* TestClock.adjust("1 millis");
+            return yield* Fiber.join(fiber).pipe(Effect.flip);
+          })
+        ).pipe(Effect.provide(TestClock.layer({ warningDelay: "10 seconds" })));
 
-    expect(end).toBeInstanceOf(BridgeListenerClosedError);
-    expect(attempts).toBe(5);
-    expect(accepted.state.closeCalls).toBe(1);
-  });
+        expect(end).toBeInstanceOf(BridgeListenerClosedError);
+        expect(attempts).toBe(5);
+        expect(accepted.state.closeCalls).toBe(1);
+      })
+  );
 
-  test("recovers from transient accepts and a slow-drip request", async () => {
-    const accepts: BridgeListener["accept"][] = [];
-    const listener = listenerFrom(accepts);
-    const server = await Effect.runPromise(
-      Effect.scoped(
+  it.effect("recovers from transient accepts and a slow-drip request", () =>
+    Effect.gen(function* () {
+      const accepts: BridgeListener["accept"][] = [];
+      const listener = listenerFrom(accepts);
+      const server = yield* Effect.scoped(
         openBridge({
           deadlines: { request: "20 millis" },
           maxConcurrentSessions: 1,
           root: fixture,
           transport: listenerTransport(listener),
         })
-      )
-    );
+      );
 
-    const request = requestFor(server.link, {
-      script: "cat note.txt",
-      type: "run",
-    });
-    const slow = scriptedSession({
-      readDelay: "5 millis",
-      reads: Array.from(request, (byte) => Uint8Array.of(byte)),
-    });
-    const healthy = scriptedSession({ reads: [request] });
-    accepts.push(
-      Effect.fail(new BridgeAcceptError({ message: "handshake failed" })),
-      Effect.fail(
-        new BridgeDeadlineExceededError({
-          message: "accept deadline exceeded",
-          operation: "accept",
-        })
-      ),
-      Effect.succeed(slow.session),
-      Effect.succeed(healthy.session),
-      Effect.fail(new BridgeListenerClosedError({ message: "listener closed" }))
-    );
+      const request = requestFor(server.link, {
+        script: "cat note.txt",
+        type: "run",
+      });
+      const slow = scriptedSession({
+        readDelay: "5 millis",
+        reads: Array.from(request, (byte) => Uint8Array.of(byte)),
+      });
+      const healthy = scriptedSession({ reads: [request] });
+      accepts.push(
+        Effect.fail(new BridgeAcceptError({ message: "handshake failed" })),
+        Effect.fail(
+          new BridgeDeadlineExceededError({
+            message: "accept deadline exceeded",
+            operation: "accept",
+          })
+        ),
+        Effect.succeed(slow.session),
+        Effect.succeed(healthy.session),
+        Effect.fail(
+          new BridgeListenerClosedError({ message: "listener closed" })
+        )
+      );
 
-    const end = await Effect.runPromise(
-      Effect.scoped(server.serve.pipe(Effect.flip))
-    );
+      // One sweep covers the accept backoffs (10 + 20 millis) and the
+      // 20-milli request deadline that cuts off the slow drip.
+      const end = yield* Effect.gen(function* () {
+        const fiber = yield* Effect.scoped(server.serve.pipe(Effect.flip)).pipe(
+          Effect.forkChild
+        );
+        yield* Effect.yieldNow;
+        yield* TestClock.adjust("100 millis");
+        return yield* Fiber.join(fiber);
+      }).pipe(Effect.provide(TestClock.layer({ warningDelay: "10 seconds" })));
 
-    expect(end).toBeInstanceOf(BridgeListenerClosedError);
-    expect(slow.state.closeCalls).toBe(1);
-    expect(healthy.state.closeCalls).toBe(1);
-    const events = decodeRunEvents(healthy.state.writes);
-    expect(events).toContainEqual({
-      payload: new TextEncoder().encode("live\n"),
-      type: "stdout",
-    });
-    expect(events.at(-1)).toMatchObject({ code: 0, type: "exit" });
-  });
+      expect(end).toBeInstanceOf(BridgeListenerClosedError);
+      expect(slow.state.closeCalls).toBe(1);
+      expect(healthy.state.closeCalls).toBe(1);
+      const events = decodeRunEvents(healthy.state.writes);
+      expect(events).toContainEqual({
+        payload: new TextEncoder().encode("live\n"),
+        type: "stdout",
+      });
+      expect(events.at(-1)).toMatchObject({ code: 0, type: "exit" });
+    })
+  );
 
-  test("terminates without a response when the served root changes", async () => {
-    const accepts: BridgeListener["accept"][] = [];
-    const listener = listenerFrom(accepts);
-    const server = await Effect.runPromise(
-      Effect.scoped(
+  it.effect("terminates without a response when the served root changes", () =>
+    Effect.gen(function* () {
+      const accepts: BridgeListener["accept"][] = [];
+      const listener = listenerFrom(accepts);
+      const server = yield* Effect.scoped(
         openBridge({
           maxConcurrentSessions: 1,
           root: fixture,
           transport: listenerTransport(listener),
         })
-      )
-    );
-    const request = requestFor(server.link, {
-      script: "cat note.txt",
-      type: "run",
-    });
-    const changedRootSession = scriptedSession({ reads: [request] });
-    accepts.push(
-      Effect.succeed(changedRootSession.session),
-      Effect.fail(new BridgeListenerClosedError({ message: "listener closed" }))
-    );
-    const logEntries: {
-      readonly logLevel: LogLevel.LogLevel;
-      readonly message: unknown;
-    }[] = [];
-    const capturingLogger = Logger.make((options) => {
-      logEntries.push({ logLevel: options.logLevel, message: options.message });
-    });
-    const originalRoot = `${fixture}-original`;
+      );
+      const request = requestFor(server.link, {
+        script: "cat note.txt",
+        type: "run",
+      });
+      const changedRootSession = scriptedSession({ reads: [request] });
+      accepts.push(
+        Effect.succeed(changedRootSession.session),
+        Effect.fail(
+          new BridgeListenerClosedError({ message: "listener closed" })
+        )
+      );
+      const logEntries: {
+        readonly logLevel: LogLevel.LogLevel;
+        readonly message: unknown;
+      }[] = [];
+      const capturingLogger = Logger.make((options) => {
+        logEntries.push({
+          logLevel: options.logLevel,
+          message: options.message,
+        });
+      });
+      const originalRoot = `${fixture}-original`;
 
-    try {
-      await rename(fixture, originalRoot);
-      await mkdir(fixture);
-      await writeFile(join(fixture, "note.txt"), "replacement secret\n");
+      yield* Effect.gen(function* () {
+        yield* Effect.promise(async () => {
+          await rename(fixture, originalRoot);
+          await mkdir(fixture);
+          await writeFile(join(fixture, "note.txt"), "replacement secret\n");
+        });
 
-      const end = await Effect.runPromise(
-        Effect.scoped(server.serve.pipe(Effect.flip)).pipe(
+        const end = yield* Effect.scoped(server.serve.pipe(Effect.flip)).pipe(
           Effect.provide(Logger.layer([capturingLogger]))
+        );
+
+        expect(end).toBeInstanceOf(BridgeListenerClosedError);
+        expect(changedRootSession.state.writes).toHaveLength(0);
+        expect(changedRootSession.state.finishCalls).toBe(0);
+        expect(changedRootSession.state.closeCalls).toBe(1);
+        const warnings = logEntries.filter(
+          (entry) => entry.logLevel === "Warn"
+        );
+        expect(warnings).toHaveLength(1);
+        const logged = JSON.stringify(logEntries);
+        expect(logged).toContain("ServedRootChangedError");
+        expect(logged).not.toContain(fixture);
+        expect(logged).not.toContain("replacement secret");
+        expect(logged).not.toContain(server.link);
+      }).pipe(
+        Effect.ensuring(
+          Effect.promise(() =>
+            rm(originalRoot, { force: true, recursive: true })
+          )
+        )
+      );
+    })
+  );
+
+  it.effect("honors configured run deadlines beyond thirty seconds", () =>
+    Effect.gen(function* () {
+      const executionStarted = Promise.withResolvers<void>();
+      let executionWasAborted = false;
+      const execute = vi.spyOn(Bash.prototype, "exec");
+      execute.mockImplementation((_script, options) => {
+        executionStarted.resolve();
+        return new Promise<never>((_resolve, reject) => {
+          const signal = options?.signal;
+          const abort = () => {
+            executionWasAborted = true;
+            reject(signal?.reason ?? new Error("execution aborted"));
+          };
+          if (signal?.aborted) {
+            abort();
+            return;
+          }
+          signal?.addEventListener("abort", abort, { once: true });
+        });
+      });
+
+      const end = yield* Effect.scoped(
+        Effect.gen(function* () {
+          const accepts: BridgeListener["accept"][] = [];
+          const listener = listenerFrom(accepts);
+          const server = yield* openBridge({
+            deadlines: { run: "40 seconds" },
+            maxConcurrentSessions: 1,
+            root: fixture,
+            transport: listenerTransport(listener),
+          });
+          const request = requestFor(server.link, {
+            script: "cat note.txt",
+            type: "run",
+          });
+          const stalled = scriptedSession({ reads: [request] });
+          accepts.push(
+            Effect.succeed(stalled.session),
+            Effect.fail(
+              new BridgeListenerClosedError({ message: "listener closed" })
+            )
+          );
+          const fiber = yield* server.serve.pipe(Effect.flip, Effect.forkChild);
+
+          yield* Effect.promise(() => executionStarted.promise);
+          yield* TestClock.adjust("31 seconds");
+          expect(stalled.state.writes).toHaveLength(0);
+          expect(stalled.state.finishCalls).toBe(0);
+          expect(stalled.state.closeCalls).toBe(0);
+          expect(executionWasAborted).toBe(false);
+
+          yield* TestClock.adjust("9 seconds");
+          const result = yield* Fiber.join(fiber);
+          expect(stalled.state.writes).toHaveLength(0);
+          expect(stalled.state.finishCalls).toBe(0);
+          expect(stalled.state.closeCalls).toBe(1);
+          expect(executionWasAborted).toBe(true);
+          return result;
+        })
+      ).pipe(
+        Effect.provide(TestClock.layer({ warningDelay: "10 seconds" })),
+        Effect.ensuring(
+          Effect.sync(() => {
+            execute.mockRestore();
+          })
         )
       );
 
       expect(end).toBeInstanceOf(BridgeListenerClosedError);
-      expect(changedRootSession.state.writes).toHaveLength(0);
-      expect(changedRootSession.state.finishCalls).toBe(0);
-      expect(changedRootSession.state.closeCalls).toBe(1);
-      const warnings = logEntries.filter((entry) => entry.logLevel === "Warn");
-      expect(warnings).toHaveLength(1);
-      const logged = JSON.stringify(logEntries);
-      expect(logged).toContain("ServedRootChangedError");
-      expect(logged).not.toContain(fixture);
-      expect(logged).not.toContain("replacement secret");
-      expect(logged).not.toContain(server.link);
-    } finally {
-      await rm(originalRoot, { force: true, recursive: true });
-    }
-  });
+    })
+  );
 
-  test("honors configured run deadlines beyond thirty seconds", async () => {
-    const executionStarted = Promise.withResolvers<void>();
-    let executionWasAborted = false;
-    const execute = spyOn(Bash.prototype, "exec");
-    execute.mockImplementation((_script, options) => {
-      executionStarted.resolve();
-      return new Promise<never>((_resolve, reject) => {
-        const signal = options?.signal;
-        const abort = () => {
-          executionWasAborted = true;
-          reject(signal?.reason ?? new Error("execution aborted"));
-        };
-        if (signal?.aborted) {
-          abort();
-          return;
-        }
-        signal?.addEventListener("abort", abort, { once: true });
-      });
-    });
-
-    try {
-      const end = await Effect.runPromise(
-        Effect.scoped(
-          Effect.gen(function* () {
-            const accepts: BridgeListener["accept"][] = [];
-            const listener = listenerFrom(accepts);
-            const server = yield* openBridge({
-              deadlines: { run: "40 seconds" },
-              maxConcurrentSessions: 1,
-              root: fixture,
-              transport: listenerTransport(listener),
-            });
-            const request = requestFor(server.link, {
-              script: "cat note.txt",
-              type: "run",
-            });
-            const stalled = scriptedSession({ reads: [request] });
-            accepts.push(
-              Effect.succeed(stalled.session),
-              Effect.fail(
-                new BridgeListenerClosedError({ message: "listener closed" })
-              )
-            );
-            const fiber = yield* server.serve.pipe(
-              Effect.flip,
-              Effect.forkChild
-            );
-
-            yield* Effect.promise(() => executionStarted.promise);
-            yield* TestClock.adjust("31 seconds");
-            expect(stalled.state.writes).toHaveLength(0);
-            expect(stalled.state.finishCalls).toBe(0);
-            expect(stalled.state.closeCalls).toBe(0);
-            expect(executionWasAborted).toBe(false);
-
-            yield* TestClock.adjust("9 seconds");
-            const result = yield* Fiber.join(fiber);
-            expect(stalled.state.writes).toHaveLength(0);
-            expect(stalled.state.finishCalls).toBe(0);
-            expect(stalled.state.closeCalls).toBe(1);
-            expect(executionWasAborted).toBe(true);
-            return result;
+  it.effect(
+    "interrupts and closes a pull that exceeds its total deadline",
+    () =>
+      Effect.gen(function* () {
+        const accepts: BridgeListener["accept"][] = [];
+        const listener = listenerFrom(accepts);
+        const server = yield* Effect.scoped(
+          openBridge({
+            deadlines: { pull: "25 millis" },
+            maxConcurrentSessions: 1,
+            root: fixture,
+            transport: listenerTransport(listener),
           })
-        ).pipe(Effect.provide(TestClock.layer({ warningDelay: "10 seconds" })))
-      );
+        );
+        let writeWasInterrupted = false;
+        const stalledWriteStarted = Promise.withResolvers<void>();
+        const request = requestFor(server.link, {
+          remotePath: "note.txt",
+          type: "pull",
+        });
+        const stalled = scriptedSession({
+          onWrite: (index) =>
+            index === 2
+              ? Effect.suspend(() => {
+                  stalledWriteStarted.resolve();
+                  return Effect.never;
+                }).pipe(
+                  Effect.ensuring(
+                    Effect.sync(() => {
+                      writeWasInterrupted = true;
+                    })
+                  )
+                )
+              : Effect.void,
+          reads: [request],
+        });
+        accepts.push(
+          Effect.succeed(stalled.session),
+          Effect.fail(
+            new BridgeListenerClosedError({ message: "listener closed" })
+          )
+        );
 
-      expect(end).toBeInstanceOf(BridgeListenerClosedError);
-    } finally {
-      execute.mockRestore();
-    }
-  });
+        // The pull streams real bytes before stalling, so the deadline only
+        // advances once the third write is pending on the virtual clock.
+        const end = yield* Effect.gen(function* () {
+          const fiber = yield* Effect.scoped(
+            server.serve.pipe(Effect.flip)
+          ).pipe(Effect.forkChild);
+          yield* Effect.promise(() => stalledWriteStarted.promise);
+          yield* TestClock.adjust("25 millis");
+          return yield* Fiber.join(fiber);
+        }).pipe(
+          Effect.provide(TestClock.layer({ warningDelay: "10 seconds" }))
+        );
 
-  test("interrupts and closes a pull that exceeds its total deadline", async () => {
-    const accepts: BridgeListener["accept"][] = [];
-    const listener = listenerFrom(accepts);
-    const server = await Effect.runPromise(
-      Effect.scoped(
-        openBridge({
-          deadlines: { pull: "25 millis" },
-          maxConcurrentSessions: 1,
-          root: fixture,
-          transport: listenerTransport(listener),
-        })
-      )
-    );
-    let writeWasInterrupted = false;
-    const request = requestFor(server.link, {
-      remotePath: "note.txt",
-      type: "pull",
-    });
-    const stalled = scriptedSession({
-      onWrite: (index) =>
-        index === 2
-          ? Effect.never.pipe(
-              Effect.ensuring(
-                Effect.sync(() => {
-                  writeWasInterrupted = true;
-                })
-              )
-            )
-          : Effect.void,
-      reads: [request],
-    });
-    accepts.push(
-      Effect.succeed(stalled.session),
-      Effect.fail(new BridgeListenerClosedError({ message: "listener closed" }))
-    );
-
-    const end = await Effect.runPromise(
-      Effect.scoped(server.serve.pipe(Effect.flip))
-    );
-
-    expect(end).toBeInstanceOf(BridgeListenerClosedError);
-    expect(stalled.state.writes).toHaveLength(3);
-    expect(stalled.state.finishCalls).toBe(0);
-    expect(stalled.state.closeCalls).toBe(1);
-    expect(writeWasInterrupted).toBe(true);
-  });
-
-  test("returns a sanitized typed failure for an unavailable remote path", async () => {
-    const accepts: BridgeListener["accept"][] = [];
-    const listener = listenerFrom(accepts);
-    const server = await Effect.runPromise(
-      Effect.scoped(
-        openBridge({
-          maxConcurrentSessions: 1,
-          root: fixture,
-          transport: listenerTransport(listener),
-        })
-      )
-    );
-    const request = requestFor(server.link, {
-      remotePath: "missing.txt",
-      type: "pull",
-    });
-    const serverSession = scriptedSession({ reads: [request] });
-    accepts.push(
-      Effect.succeed(serverSession.session),
-      Effect.fail(new BridgeListenerClosedError({ message: "listener closed" }))
-    );
-
-    await Effect.runPromise(Effect.scoped(server.serve.pipe(Effect.flip)));
-
-    const decoder = success(makePullResponseSession());
-    const events: PullResponseEvent[] = [];
-    for (const write of serverSession.state.writes) {
-      events.push(...success(decoder.push(write)));
-    }
-    success(decoder.finish());
-    expect(events).toEqual([{ code: "not-found", type: "pull-error" }]);
-    expect(
-      new TextDecoder().decode(joinChunks(...serverSession.state.writes))
-    ).not.toContain(fixture);
-
-    const clientSession = scriptedSession({
-      reads: serverSession.state.writes,
-    });
-    const error = await Effect.runPromise(
-      pullRemote({
-        destination: join(fixture, "destination"),
-        link: server.link,
-        remotePath: "missing.txt",
-        transport: clientTransport(clientSession.session),
-      }).pipe(Effect.flip)
-    );
-
-    expect(error).toMatchObject({
-      _tag: "PullNotFoundError",
-      path: "missing.txt",
-    });
-    expect(clientSession.state.closeCalls).toBe(1);
-  });
-
-  test("returns a limit before an oversized pull manifest", async () => {
-    const wide = join(fixture, "wide");
-    await mkdir(wide);
-    const fileCount = 4096;
-    const batchSize = 128;
-    for (let start = 0; start < fileCount; start += batchSize) {
-      const end = Math.min(start + batchSize, fileCount);
-      // biome-ignore lint/performance/noAwaitInLoops: Batches avoid exhausting file descriptors.
-      await Promise.all(
-        Array.from({ length: end - start }, (_, offset) => {
-          const index = String(start + offset).padStart(4, "0");
-          const name = `${index}-${"x".repeat(145)}`;
-          return writeFile(join(wide, name), "");
-        })
-      );
-    }
-
-    const accepts: BridgeListener["accept"][] = [];
-    const listener = listenerFrom(accepts);
-    const server = await Effect.runPromise(
-      Effect.scoped(
-        openBridge({
-          maxConcurrentSessions: 1,
-          root: fixture,
-          transport: listenerTransport(listener),
-        })
-      )
-    );
-    const request = requestFor(server.link, {
-      remotePath: "wide",
-      type: "pull",
-    });
-    const serverSession = scriptedSession({ reads: [request] });
-    accepts.push(
-      Effect.succeed(serverSession.session),
-      Effect.fail(new BridgeListenerClosedError({ message: "listener closed" }))
-    );
-
-    await Effect.runPromise(Effect.scoped(server.serve.pipe(Effect.flip)));
-
-    const decoder = success(makePullResponseSession());
-    const events: PullResponseEvent[] = [];
-    for (const write of serverSession.state.writes) {
-      events.push(...success(decoder.push(write)));
-    }
-    success(decoder.finish());
-    expect(events).toEqual([{ code: "limit", type: "pull-error" }]);
-    expect(serverSession.state.writes).toHaveLength(1);
-    expect(serverSession.state.finishCalls).toBe(1);
-    expect(serverSession.state.closeCalls).toBe(1);
-  }, 30_000);
-
-  test("rejects an invalid remote path before opening a session", async () => {
-    let connectCalls = 0;
-    const capability = mintCapability();
-    const link = success(
-      encodeBridgeKey({
-        capability,
-        expiresAt: farFutureExpiry,
-        locator: "unused-client",
-        transport: "iroh",
+        expect(end).toBeInstanceOf(BridgeListenerClosedError);
+        expect(stalled.state.writes).toHaveLength(3);
+        expect(stalled.state.finishCalls).toBe(0);
+        expect(stalled.state.closeCalls).toBe(1);
+        expect(writeWasInterrupted).toBe(true);
       })
-    );
-    const transport: BridgeTransport = {
-      connect: () => {
-        connectCalls += 1;
-        return Effect.die("invalid paths must not connect");
-      },
-      listen: Effect.die("listener is not used in this test"),
-    };
+  );
 
-    const error = await Effect.runPromise(
-      pullRemote({
-        link,
-        remotePath: "../secret",
-        transport,
-      }).pipe(Effect.flip)
-    );
+  it.effect(
+    "returns a sanitized typed failure for an unavailable remote path",
+    () =>
+      Effect.gen(function* () {
+        const accepts: BridgeListener["accept"][] = [];
+        const listener = listenerFrom(accepts);
+        const server = yield* Effect.scoped(
+          openBridge({
+            maxConcurrentSessions: 1,
+            root: fixture,
+            transport: listenerTransport(listener),
+          })
+        );
+        const request = requestFor(server.link, {
+          remotePath: "missing.txt",
+          type: "pull",
+        });
+        const serverSession = scriptedSession({ reads: [request] });
+        accepts.push(
+          Effect.succeed(serverSession.session),
+          Effect.fail(
+            new BridgeListenerClosedError({ message: "listener closed" })
+          )
+        );
 
-    expect(error).toMatchObject({
-      _tag: "PullPathError",
-      path: "../secret",
-    });
-    expect(connectCalls).toBe(0);
-  });
+        yield* Effect.scoped(server.serve.pipe(Effect.flip));
 
-  test("represents a sanitized remote limit without fabricated measurements", async () => {
-    const capability = mintCapability();
-    const link = success(
-      encodeBridgeKey({
-        capability,
-        expiresAt: farFutureExpiry,
-        locator: "limited-client",
-        transport: "iroh",
+        const decoder = success(makePullResponseSession());
+        const events: PullResponseEvent[] = [];
+        for (const write of serverSession.state.writes) {
+          events.push(...success(decoder.push(write)));
+        }
+        success(decoder.finish());
+        expect(events).toEqual([{ code: "not-found", type: "pull-error" }]);
+        expect(
+          new TextDecoder().decode(joinChunks(...serverSession.state.writes))
+        ).not.toContain(fixture);
+
+        const clientSession = scriptedSession({
+          reads: serverSession.state.writes,
+        });
+        const error = yield* pullRemote({
+          destination: join(fixture, "destination"),
+          link: server.link,
+          remotePath: "missing.txt",
+          transport: clientTransport(clientSession.session),
+        }).pipe(Effect.flip);
+
+        expect(error).toMatchObject({
+          _tag: "PullNotFoundError",
+          path: "missing.txt",
+        });
+        expect(clientSession.state.closeCalls).toBe(1);
       })
-    );
-    const limited = scriptedSession({
-      reads: [encoded({ code: "limit", type: "pull-error" })],
-    });
+  );
 
-    const error = await Effect.runPromise(
-      pullRemote({
-        destination: join(fixture, "limited"),
-        link,
-        remotePath: "large.bin",
-        transport: clientTransport(limited.session),
-      }).pipe(Effect.flip)
-    );
+  it.effect(
+    "returns a limit before an oversized pull manifest",
+    () =>
+      Effect.gen(function* () {
+        const wide = join(fixture, "wide");
+        yield* Effect.promise(() => mkdir(wide));
+        const fileCount = 4096;
+        const batchSize = 128;
+        yield* Effect.promise(async () => {
+          for (let start = 0; start < fileCount; start += batchSize) {
+            const end = Math.min(start + batchSize, fileCount);
+            // biome-ignore lint/performance/noAwaitInLoops: Batches avoid exhausting file descriptors.
+            await Promise.all(
+              Array.from({ length: end - start }, (_, offset) => {
+                const index = String(start + offset).padStart(4, "0");
+                const name = `${index}-${"x".repeat(145)}`;
+                return writeFile(join(wide, name), "");
+              })
+            );
+          }
+        });
 
-    expect(error).toMatchObject({
-      _tag: "PullRemoteLimitError",
-      path: "large.bin",
-    });
-    expect(error).not.toHaveProperty("maximum");
-    expect(error).not.toHaveProperty("observed");
-    expect(limited.state.closeCalls).toBe(1);
-  });
+        const accepts: BridgeListener["accept"][] = [];
+        const listener = listenerFrom(accepts);
+        const server = yield* Effect.scoped(
+          openBridge({
+            maxConcurrentSessions: 1,
+            root: fixture,
+            transport: listenerTransport(listener),
+          })
+        );
+        const request = requestFor(server.link, {
+          remotePath: "wide",
+          type: "pull",
+        });
+        const serverSession = scriptedSession({ reads: [request] });
+        accepts.push(
+          Effect.succeed(serverSession.session),
+          Effect.fail(
+            new BridgeListenerClosedError({ message: "listener closed" })
+          )
+        );
 
-  test("bounds a client response even when every read makes progress", async () => {
-    const capability = mintCapability();
-    const link = success(
-      encodeBridgeKey({
-        capability,
-        expiresAt: farFutureExpiry,
-        locator: "test-client",
-        transport: "iroh",
-      })
-    );
-    const response = joinChunks(
-      encoded({ payload: new TextEncoder().encode("live\n"), type: "stdout" }),
-      encoded({ code: 0, truncated: false, type: "exit" })
-    );
-    const slow = scriptedSession({
-      readDelay: "5 millis",
-      reads: Array.from(response, (byte) => Uint8Array.of(byte)),
-    });
+        yield* Effect.scoped(server.serve.pipe(Effect.flip));
 
-    const error = await Effect.runPromise(
-      runRemote({
-        deadline: "25 millis",
-        link,
-        script: "cat note.txt",
-        transport: clientTransport(slow.session),
-      }).pipe(Effect.flip)
-    );
-
-    expect(error).toMatchObject({
-      _tag: "BridgeClientError",
-      message: "The bridge run response deadline was exceeded.",
-      operation: "run-response",
-    });
-    expect(slow.state.readCalls).toBeGreaterThan(1);
-    expect(slow.state.closeCalls).toBe(1);
-  });
-
-  test("retries one connection failure before sending the request", async () => {
-    const capability = mintCapability();
-    const link = success(
-      encodeBridgeKey({
-        capability,
-        expiresAt: farFutureExpiry,
-        locator: "retry-client",
-        transport: "iroh",
-      })
-    );
-    const response = joinChunks(
-      encoded({ payload: new TextEncoder().encode("live\n"), type: "stdout" }),
-      encoded({ code: 0, truncated: false, type: "exit" })
-    );
-    const connected = scriptedSession({ reads: [response] });
-    let connectCalls = 0;
-    const transport: BridgeTransport = {
-      connect: () => {
-        connectCalls += 1;
-        return connectCalls === 1
-          ? Effect.fail(
-              new BridgeConnectError({ message: "transient handshake failure" })
-            )
-          : Effect.succeed(connected.session);
-      },
-      listen: Effect.die("listener is not used in this test"),
-    };
-
-    const result = await Effect.runPromise(
-      runRemote({ link, script: "cat note.txt", transport })
-    );
-
-    expect(result.stdout).toBe("live\n");
-    expect(connectCalls).toBe(2);
-    expect(connected.state.finishCalls).toBe(1);
-    expect(connected.state.closeCalls).toBe(1);
-  });
-
-  test("does not retry deterministic connect failures", async () => {
-    const capability = mintCapability();
-    const link = success(
-      encodeBridgeKey({
-        capability,
-        expiresAt: farFutureExpiry,
-        locator: "deterministic-client",
-        transport: "iroh",
-      })
-    );
-    const deterministicFailures = [
-      new BridgeLocatorInvalidError({
-        message: "The bridge transport locator is invalid.",
+        const decoder = success(makePullResponseSession());
+        const events: PullResponseEvent[] = [];
+        for (const write of serverSession.state.writes) {
+          events.push(...success(decoder.push(write)));
+        }
+        success(decoder.finish());
+        expect(events).toEqual([{ code: "limit", type: "pull-error" }]);
+        expect(serverSession.state.writes).toHaveLength(1);
+        expect(serverSession.state.finishCalls).toBe(1);
+        expect(serverSession.state.closeCalls).toBe(1);
       }),
-      new BridgeProxyConfigurationError({
-        message: "The bridge proxy configuration is invalid.",
-        requested: "environment",
-      }),
-    ] as const;
+    30_000
+  );
 
-    for (const failure of deterministicFailures) {
+  it.effect("rejects an invalid remote path before opening a session", () =>
+    Effect.gen(function* () {
       let connectCalls = 0;
+      const capability = mintCapability();
+      const link = success(
+        encodeBridgeKey({
+          capability,
+          expiresAt: farFutureExpiry,
+          locator: "unused-client",
+          transport: "iroh",
+        })
+      );
       const transport: BridgeTransport = {
         connect: () => {
           connectCalls += 1;
-          return Effect.fail(failure);
+          return Effect.die("invalid paths must not connect");
         },
         listen: Effect.die("listener is not used in this test"),
       };
 
-      // biome-ignore lint/performance/noAwaitInLoops: Each failure kind is asserted independently.
-      const error = await Effect.runPromise(
-        runRemote({ link, script: "cat note.txt", transport }).pipe(Effect.flip)
-      );
+      const error = yield* pullRemote({
+        link,
+        remotePath: "../secret",
+        transport,
+      }).pipe(Effect.flip);
 
-      expect(error).toBe(failure);
-      expect(connectCalls).toBe(1);
-    }
-  });
+      expect(error).toMatchObject({
+        _tag: "PullPathError",
+        path: "../secret",
+      });
+      expect(connectCalls).toBe(0);
+    })
+  );
 
-  test("surfaces the transient cause after exhausting connect retries", async () => {
-    const capability = mintCapability();
-    const link = success(
-      encodeBridgeKey({
-        capability,
-        expiresAt: farFutureExpiry,
-        locator: "exhausted-client",
-        transport: "iroh",
-      })
-    );
-    let connectCalls = 0;
-    const transport: BridgeTransport = {
-      connect: () => {
-        connectCalls += 1;
-        return Effect.fail(
-          new BridgeConnectError({ message: "persistent handshake failure" })
+  it.effect(
+    "represents a sanitized remote limit without fabricated measurements",
+    () =>
+      Effect.gen(function* () {
+        const capability = mintCapability();
+        const link = success(
+          encodeBridgeKey({
+            capability,
+            expiresAt: farFutureExpiry,
+            locator: "limited-client",
+            transport: "iroh",
+          })
         );
-      },
-      listen: Effect.die("listener is not used in this test"),
-    };
+        const limited = scriptedSession({
+          reads: [encoded({ code: "limit", type: "pull-error" })],
+        });
 
-    const error = await Effect.runPromise(
-      runRemote({ link, script: "cat note.txt", transport }).pipe(Effect.flip)
-    );
+        const error = yield* pullRemote({
+          destination: join(fixture, "limited"),
+          link,
+          remotePath: "large.bin",
+          transport: clientTransport(limited.session),
+        }).pipe(Effect.flip);
 
-    expect(error).toMatchObject({
-      _tag: "BridgeClientError",
-      message:
-        "The bridge process is unreachable. Check that dumbridge serve is still running on the local machine.",
-      operation: "connect",
-    });
-    expect(error.cause).toBeInstanceOf(BridgeConnectError);
-    expect(connectCalls).toBe(2);
-  });
+        expect(error).toMatchObject({
+          _tag: "PullRemoteLimitError",
+          path: "large.bin",
+        });
+        expect(error).not.toHaveProperty("maximum");
+        expect(error).not.toHaveProperty("observed");
+        expect(limited.state.closeCalls).toBe(1);
+      })
+  );
 
-  test("mints keys with the default eight hour expiry deadline", async () => {
-    const server = await Effect.runPromise(
-      Effect.scoped(
+  it.effect(
+    "bounds a client response even when every read makes progress",
+    () =>
+      Effect.gen(function* () {
+        const capability = mintCapability();
+        const link = success(
+          encodeBridgeKey({
+            capability,
+            expiresAt: farFutureExpiry,
+            locator: "test-client",
+            transport: "iroh",
+          })
+        );
+        const response = joinChunks(
+          encoded({
+            payload: new TextEncoder().encode("live\n"),
+            type: "stdout",
+          }),
+          encoded({ code: 0, truncated: false, type: "exit" })
+        );
+        const slow = scriptedSession({
+          readDelay: "5 millis",
+          reads: Array.from(response, (byte) => Uint8Array.of(byte)),
+        });
+
+        const error = yield* Effect.gen(function* () {
+          const fiber = yield* runRemote({
+            deadline: "25 millis",
+            link,
+            script: "cat note.txt",
+            transport: clientTransport(slow.session),
+          }).pipe(Effect.flip, Effect.forkChild);
+          yield* Effect.yieldNow;
+          yield* TestClock.adjust("25 millis");
+          return yield* Fiber.join(fiber);
+        }).pipe(
+          Effect.provide(TestClock.layer({ warningDelay: "10 seconds" }))
+        );
+
+        expect(error).toMatchObject({
+          _tag: "BridgeClientError",
+          message: "The bridge run response deadline was exceeded.",
+          operation: "run-response",
+        });
+        expect(slow.state.readCalls).toBeGreaterThan(1);
+        expect(slow.state.closeCalls).toBe(1);
+      })
+  );
+
+  it.live("retries one connection failure before sending the request", () =>
+    Effect.gen(function* () {
+      const capability = mintCapability();
+      const link = success(
+        encodeBridgeKey({
+          capability,
+          expiresAt: farFutureExpiry,
+          locator: "retry-client",
+          transport: "iroh",
+        })
+      );
+      const response = joinChunks(
+        encoded({
+          payload: new TextEncoder().encode("live\n"),
+          type: "stdout",
+        }),
+        encoded({ code: 0, truncated: false, type: "exit" })
+      );
+      const connected = scriptedSession({ reads: [response] });
+      let connectCalls = 0;
+      const transport: BridgeTransport = {
+        connect: () => {
+          connectCalls += 1;
+          return connectCalls === 1
+            ? Effect.fail(
+                new BridgeConnectError({
+                  message: "transient handshake failure",
+                })
+              )
+            : Effect.succeed(connected.session);
+        },
+        listen: Effect.die("listener is not used in this test"),
+      };
+
+      const result = yield* runRemote({
+        link,
+        script: "cat note.txt",
+        transport,
+      });
+
+      expect(result.stdout).toBe("live\n");
+      expect(connectCalls).toBe(2);
+      expect(connected.state.finishCalls).toBe(1);
+      expect(connected.state.closeCalls).toBe(1);
+    })
+  );
+
+  it.effect("does not retry deterministic connect failures", () =>
+    Effect.gen(function* () {
+      const capability = mintCapability();
+      const link = success(
+        encodeBridgeKey({
+          capability,
+          expiresAt: farFutureExpiry,
+          locator: "deterministic-client",
+          transport: "iroh",
+        })
+      );
+      const deterministicFailures = [
+        new BridgeLocatorInvalidError({
+          message: "The bridge transport locator is invalid.",
+        }),
+        new BridgeProxyConfigurationError({
+          message: "The bridge proxy configuration is invalid.",
+          requested: "environment",
+        }),
+      ] as const;
+
+      // Sequential on purpose: each failure kind is asserted independently.
+      yield* Effect.forEach(deterministicFailures, (failure) => {
+        let connectCalls = 0;
+        const transport: BridgeTransport = {
+          connect: () => {
+            connectCalls += 1;
+            return Effect.fail(failure);
+          },
+          listen: Effect.die("listener is not used in this test"),
+        };
+
+        return runRemote({ link, script: "cat note.txt", transport }).pipe(
+          Effect.flip,
+          Effect.tap((error) =>
+            Effect.sync(() => {
+              expect(error).toBe(failure);
+              expect(connectCalls).toBe(1);
+            })
+          )
+        );
+      });
+    })
+  );
+
+  it.live("surfaces the transient cause after exhausting connect retries", () =>
+    Effect.gen(function* () {
+      const capability = mintCapability();
+      const link = success(
+        encodeBridgeKey({
+          capability,
+          expiresAt: farFutureExpiry,
+          locator: "exhausted-client",
+          transport: "iroh",
+        })
+      );
+      let connectCalls = 0;
+      const transport: BridgeTransport = {
+        connect: () => {
+          connectCalls += 1;
+          return Effect.fail(
+            new BridgeConnectError({ message: "persistent handshake failure" })
+          );
+        },
+        listen: Effect.die("listener is not used in this test"),
+      };
+
+      const error = yield* runRemote({
+        link,
+        script: "cat note.txt",
+        transport,
+      }).pipe(Effect.flip);
+
+      expect(error).toMatchObject({
+        _tag: "BridgeClientError",
+        message:
+          "The bridge process is unreachable. Check that dumbridge serve is still running on the local machine.",
+        operation: "connect",
+      });
+      expect(error.cause).toBeInstanceOf(BridgeConnectError);
+      expect(connectCalls).toBe(2);
+    })
+  );
+
+  it.effect("mints keys with the default eight hour expiry deadline", () =>
+    Effect.gen(function* () {
+      const server = yield* Effect.scoped(
         openBridge({
           root: fixture,
           transport: listenerTransport(listenerFrom([])),
         })
-      ).pipe(Effect.provide(TestClock.layer({ warningDelay: "10 seconds" })))
-    );
+      ).pipe(Effect.provide(TestClock.layer({ warningDelay: "10 seconds" })));
 
-    expect(server.expiresAt).toBe(Duration.toMillis("8 hours"));
-    expect(success(parseBridgeKey(server.link)).expiresAt).toBe(
-      server.expiresAt
-    );
-  });
+      expect(server.expiresAt).toBe(Duration.toMillis("8 hours"));
+      expect(success(parseBridgeKey(server.link)).expiresAt).toBe(
+        server.expiresAt
+      );
+    })
+  );
 
-  test("rejects a valid capability once the key expiry deadline passes", async () => {
-    const end = await Effect.runPromise(
-      Effect.scoped(
-        Effect.gen(function* () {
-          const accepts: BridgeListener["accept"][] = [];
-          const listener = listenerFrom(accepts);
-          const server = yield* openBridge({
-            maxConcurrentSessions: 1,
-            root: fixture,
-            transport: listenerTransport(listener),
-            ttl: "1 hour",
-          });
-          expect(server.expiresAt).toBe(Duration.toMillis("1 hour"));
+  it.effect(
+    "rejects a valid capability once the key expiry deadline passes",
+    () =>
+      Effect.gen(function* () {
+        const end = yield* Effect.scoped(
+          Effect.gen(function* () {
+            const accepts: BridgeListener["accept"][] = [];
+            const listener = listenerFrom(accepts);
+            const server = yield* openBridge({
+              maxConcurrentSessions: 1,
+              root: fixture,
+              transport: listenerTransport(listener),
+              ttl: "1 hour",
+            });
+            expect(server.expiresAt).toBe(Duration.toMillis("1 hour"));
 
-          const request = requestFor(server.link, {
-            script: "cat note.txt",
-            type: "run",
-          });
-          const expired = scriptedSession({ reads: [request] });
-          accepts.push(
-            Effect.succeed(expired.session),
-            Effect.fail(
-              new BridgeListenerClosedError({ message: "listener closed" })
-            )
-          );
+            const request = requestFor(server.link, {
+              script: "cat note.txt",
+              type: "run",
+            });
+            const expired = scriptedSession({ reads: [request] });
+            accepts.push(
+              Effect.succeed(expired.session),
+              Effect.fail(
+                new BridgeListenerClosedError({ message: "listener closed" })
+              )
+            );
 
-          yield* TestClock.adjust("1 hour");
-          const result = yield* server.serve.pipe(Effect.flip);
-          expect(decodeRunEvents(expired.state.writes)).toEqual([
-            { code: "expired-key", type: "reject" },
-          ]);
-          expect(expired.state.finishCalls).toBe(1);
-          expect(expired.state.closeCalls).toBe(1);
-          return result;
-        })
-      ).pipe(Effect.provide(TestClock.layer({ warningDelay: "10 seconds" })))
-    );
+            yield* TestClock.adjust("1 hour");
+            const result = yield* server.serve.pipe(Effect.flip);
+            expect(decodeRunEvents(expired.state.writes)).toEqual([
+              { code: "expired-key", type: "reject" },
+            ]);
+            expect(expired.state.finishCalls).toBe(1);
+            expect(expired.state.closeCalls).toBe(1);
+            return result;
+          })
+        ).pipe(Effect.provide(TestClock.layer({ warningDelay: "10 seconds" })));
 
-    expect(end).toBeInstanceOf(BridgeListenerClosedError);
-  });
-
-  test("rejects a request that finishes arriving after the key deadline", async () => {
-    const end = await Effect.runPromise(
-      Effect.scoped(
-        Effect.gen(function* () {
-          const accepts: BridgeListener["accept"][] = [];
-          const listener = listenerFrom(accepts);
-          const server = yield* openBridge({
-            deadlines: { request: "5 hours" },
-            maxConcurrentSessions: 1,
-            root: fixture,
-            transport: listenerTransport(listener),
-            ttl: "1 hour",
-          });
-
-          const request = requestFor(server.link, {
-            script: "cat note.txt",
-            type: "run",
-          });
-          const lateArrival = scriptedSession({
-            readDelay: "2 hours",
-            reads: [request],
-          });
-          accepts.push(
-            Effect.succeed(lateArrival.session),
-            Effect.fail(
-              new BridgeListenerClosedError({ message: "listener closed" })
-            )
-          );
-
-          const fiber = yield* server.serve.pipe(Effect.flip, Effect.forkChild);
-          yield* TestClock.adjust("4 hours");
-          const result = yield* Fiber.join(fiber);
-          expect(decodeRunEvents(lateArrival.state.writes)).toEqual([
-            { code: "expired-key", type: "reject" },
-          ]);
-          expect(lateArrival.state.finishCalls).toBe(1);
-          expect(lateArrival.state.closeCalls).toBe(1);
-          return result;
-        })
-      ).pipe(Effect.provide(TestClock.layer({ warningDelay: "10 seconds" })))
-    );
-
-    expect(end).toBeInstanceOf(BridgeListenerClosedError);
-  });
-
-  test("does not retry after request transmission starts", async () => {
-    const capability = mintCapability();
-    const link = success(
-      encodeBridgeKey({
-        capability,
-        expiresAt: farFutureExpiry,
-        locator: "request-failure-client",
-        transport: "iroh",
+        expect(end).toBeInstanceOf(BridgeListenerClosedError);
       })
-    );
-    const started = scriptedSession({});
-    const session: BridgeSession = {
-      ...started.session,
-      finish: Effect.fail(
-        new BridgeFinishError({ message: "forced request finish failure" })
-      ),
-    };
-    let connectCalls = 0;
-    const transport: BridgeTransport = {
-      connect: () => {
-        connectCalls += 1;
-        return Effect.succeed(session);
-      },
-      listen: Effect.die("listener is not used in this test"),
-    };
+  );
 
-    const error = await Effect.runPromise(
-      runRemote({ link, script: "cat note.txt", transport }).pipe(Effect.flip)
-    );
+  it.effect(
+    "rejects a request that finishes arriving after the key deadline",
+    () =>
+      Effect.gen(function* () {
+        const end = yield* Effect.scoped(
+          Effect.gen(function* () {
+            const accepts: BridgeListener["accept"][] = [];
+            const listener = listenerFrom(accepts);
+            const server = yield* openBridge({
+              deadlines: { request: "5 hours" },
+              maxConcurrentSessions: 1,
+              root: fixture,
+              transport: listenerTransport(listener),
+              ttl: "1 hour",
+            });
 
-    expect(error).toMatchObject({
-      _tag: "BridgeClientError",
-      operation: "request",
-    });
-    expect(error.cause).toBeInstanceOf(BridgeFinishError);
-    expect(connectCalls).toBe(1);
-    expect(started.state.writes).toHaveLength(2);
-    expect(started.state.closeCalls).toBe(1);
-  });
+            const request = requestFor(server.link, {
+              script: "cat note.txt",
+              type: "run",
+            });
+            const lateArrival = scriptedSession({
+              readDelay: "2 hours",
+              reads: [request],
+            });
+            accepts.push(
+              Effect.succeed(lateArrival.session),
+              Effect.fail(
+                new BridgeListenerClosedError({ message: "listener closed" })
+              )
+            );
 
-  test("keeps the bridge key out of a remapped invalid-key error", async () => {
-    const rejectedPayload = "bm90LXJlYWxseS1hLWJyaWRnZS1rZXk";
-    const transport: BridgeTransport = {
-      connect: () => Effect.die("invalid keys must not connect"),
-      listen: Effect.die("listener is not used in this test"),
-    };
+            const fiber = yield* server.serve.pipe(
+              Effect.flip,
+              Effect.forkChild
+            );
+            yield* TestClock.adjust("4 hours");
+            const result = yield* Fiber.join(fiber);
+            expect(decodeRunEvents(lateArrival.state.writes)).toEqual([
+              { code: "expired-key", type: "reject" },
+            ]);
+            expect(lateArrival.state.finishCalls).toBe(1);
+            expect(lateArrival.state.closeCalls).toBe(1);
+            return result;
+          })
+        ).pipe(Effect.provide(TestClock.layer({ warningDelay: "10 seconds" })));
 
-    const error = await Effect.runPromise(
-      runRemote({
+        expect(end).toBeInstanceOf(BridgeListenerClosedError);
+      })
+  );
+
+  it.effect("does not retry after request transmission starts", () =>
+    Effect.gen(function* () {
+      const capability = mintCapability();
+      const link = success(
+        encodeBridgeKey({
+          capability,
+          expiresAt: farFutureExpiry,
+          locator: "request-failure-client",
+          transport: "iroh",
+        })
+      );
+      const started = scriptedSession({});
+      const session: BridgeSession = {
+        ...started.session,
+        finish: Effect.fail(
+          new BridgeFinishError({ message: "forced request finish failure" })
+        ),
+      };
+      let connectCalls = 0;
+      const transport: BridgeTransport = {
+        connect: () => {
+          connectCalls += 1;
+          return Effect.succeed(session);
+        },
+        listen: Effect.die("listener is not used in this test"),
+      };
+
+      const error = yield* runRemote({
+        link,
+        script: "cat note.txt",
+        transport,
+      }).pipe(Effect.flip);
+
+      expect(error).toMatchObject({
+        _tag: "BridgeClientError",
+        operation: "request",
+      });
+      expect(error.cause).toBeInstanceOf(BridgeFinishError);
+      expect(connectCalls).toBe(1);
+      expect(started.state.writes).toHaveLength(2);
+      expect(started.state.closeCalls).toBe(1);
+    })
+  );
+
+  it.effect("keeps the bridge key out of a remapped invalid-key error", () =>
+    Effect.gen(function* () {
+      const rejectedPayload = "bm90LXJlYWxseS1hLWJyaWRnZS1rZXk";
+      const transport: BridgeTransport = {
+        connect: () => Effect.die("invalid keys must not connect"),
+        listen: Effect.die("listener is not used in this test"),
+      };
+
+      const error = yield* runRemote({
         link: `dumbridge1_${rejectedPayload}`,
         script: "cat note.txt",
         transport,
-      }).pipe(Effect.flip)
-    );
+      }).pipe(Effect.flip);
 
-    expect(error).toMatchObject({
-      _tag: "BridgeClientError",
-      message: "The bridge key is invalid.",
-      operation: "bridge-key",
-    });
-    expect(error.cause).toMatchObject({ _tag: "InvalidBridgeKeyError" });
-    expect(JSON.stringify(error)).not.toContain(rejectedPayload);
-  });
+      expect(error).toMatchObject({
+        _tag: "BridgeClientError",
+        message: "The bridge key is invalid.",
+        operation: "bridge-key",
+      });
+      expect(error.cause).toMatchObject({ _tag: "InvalidBridgeKeyError" });
+      expect(JSON.stringify(error)).not.toContain(rejectedPayload);
+    })
+  );
 });
