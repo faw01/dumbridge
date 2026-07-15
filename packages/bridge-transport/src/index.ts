@@ -32,6 +32,15 @@ export class BridgeDeadlineExceededError extends Schema.TaggedErrorClass<BridgeD
   }
 ) {}
 
+// A dial against a locator with no relay cannot fall back; the failure is
+// branded so callers can fail fast instead of retrying a hopeless holepunch.
+export class BridgeDirectConnectError extends Schema.TaggedErrorClass<BridgeDirectConnectError>()(
+  "BridgeDirectConnectError",
+  {
+    message: Schema.String,
+  }
+) {}
+
 export class BridgeFinishError extends Schema.TaggedErrorClass<BridgeFinishError>()(
   "BridgeFinishError",
   {
@@ -149,6 +158,7 @@ export interface BridgeTransport {
     BridgeSession,
     | BridgeConnectError
     | BridgeDeadlineExceededError
+    | BridgeDirectConnectError
     | BridgeLocatorInvalidError
     | BridgeProxyConfigurationError
     | BridgeProxyUnsupportedError,

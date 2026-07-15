@@ -7,6 +7,7 @@ import {
 } from "@dumbridge/bridge-key";
 import {
   type BridgeDeadlineExceededError,
+  type BridgeDirectConnectError,
   BridgeLocator,
   type BridgeLocatorInvalidError,
   type BridgeProxyConfigurationError,
@@ -63,7 +64,10 @@ class BridgeClientError extends Schema.TaggedErrorClass<BridgeClientError>()(
   }
 ) {}
 
+// A direct-only dial counts as non-retriable: it already spent its whole
+// connect deadline holepunching, so a second attempt only doubles the wait.
 type DeterministicConnectError =
+  | BridgeDirectConnectError
   | BridgeLocatorInvalidError
   | BridgeProxyConfigurationError
   | BridgeProxyUnsupportedError;

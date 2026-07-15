@@ -1,6 +1,7 @@
 import { fileURLToPath } from "node:url";
 import {
   BridgeDeadlineExceededError,
+  BridgeDirectConnectError,
   BridgeLocator,
   BridgeLocatorInvalidError,
   BridgeProxyConfigurationError,
@@ -14,7 +15,7 @@ import {
   normalizeIrohAddress,
 } from "@dumbridge/bridge-transport/iroh";
 import { describe, expect, it } from "@effect/vitest";
-import { EndpointAddr, EndpointId } from "@number0/iroh";
+import { EndpointAddr, EndpointId, EndpointTicket } from "@number0/iroh";
 import { Effect, Fiber, Option } from "effect";
 import { TestClock } from "effect/testing";
 
@@ -221,6 +222,37 @@ describe("Iroh bridge transport", () => {
     expect(result.noSelection).toBe("unknown");
     expect(result.snapshotFailure).toBe("unknown");
   });
+
+  it.live("fails fast with a branded error when a direct-only dial fails", () =>
+    Effect.gen(function* () {
+      const transport = makeIrohTransport({
+        deadlines: {
+          accept: "1 second",
+          connect: "500 millis",
+          io: "1 second",
+          listen: "1 second",
+        },
+      });
+      // TEST-NET-1 (RFC 5737) is never routable, so holepunching cannot
+      // succeed and there is no relay in the locator to fall back to.
+      const id = EndpointId.fromBytes(new Array<number>(32).fill(1));
+      const unreachable = new EndpointAddr(id, null, ["192.0.2.1:1"]);
+      const locator = BridgeLocator.fromString(
+        EndpointTicket.fromAddr(unreachable).toString()
+      );
+
+      const error = yield* Effect.scoped(transport.connect(locator)).pipe(
+        Effect.flip
+      );
+
+      expect(error).toBeInstanceOf(BridgeDirectConnectError);
+      if (error instanceof BridgeDirectConnectError) {
+        expect(error.message).toBe(
+          "Could not establish a direct connection to the bridge, and the bridge locator allows no relay fallback."
+        );
+      }
+    })
+  );
 
   it.live("rejects an invalid opaque locator with a typed failure", () =>
     Effect.gen(function* () {
@@ -623,9 +655,9 @@ describe("Iroh bridge transport", () => {
         Effect.flip
       );
 
-      expect(["BridgeConnectError", "BridgeDeadlineExceededError"]).toContain(
-        error._tag
-      );
+      // The revoked listener's locator was minted direct-only, so the failed
+      // dial is reported as a failed direct connection.
+      expect(error).toBeInstanceOf(BridgeDirectConnectError);
     })
   );
 });

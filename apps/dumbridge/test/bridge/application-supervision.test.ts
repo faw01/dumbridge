@@ -10,6 +10,7 @@ import {
   BridgeAcceptError,
   BridgeConnectError,
   BridgeDeadlineExceededError,
+  BridgeDirectConnectError,
   BridgeFinishError,
   type BridgeListener,
   BridgeListenerClosedError,
@@ -1112,6 +1113,12 @@ describe("bridge application supervision", () => {
         new BridgeProxyConfigurationError({
           message: "The bridge proxy configuration is invalid.",
           requested: "environment",
+        }),
+        // A failed direct-only dial already spent its full connect deadline;
+        // failing fast beats a second slow attempt.
+        new BridgeDirectConnectError({
+          message:
+            "Could not establish a direct connection to the bridge, and the bridge locator allows no relay fallback.",
         }),
       ] as const;
 

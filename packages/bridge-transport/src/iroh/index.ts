@@ -3,6 +3,7 @@ import { Effect } from "effect";
 import {
   BridgeConnectError,
   type BridgeDeadlines,
+  BridgeDirectConnectError,
   BridgeListenError,
   BridgeLocator,
   BridgeLocatorInvalidError,
@@ -158,6 +159,7 @@ const connect = (
       options.reachability
     );
 
+    const relayUrl = normalizedAddress.relayUrl();
     const builder = yield* Effect.try({
       catch: () =>
         new BridgeConnectError({
@@ -166,7 +168,6 @@ const connect = (
       try: () => {
         const configured = Endpoint.builder();
         configured.applyMinimal();
-        const relayUrl = normalizedAddress.relayUrl();
         configured.relayMode(
           relayUrl === null
             ? RelayMode.disabled()
@@ -186,17 +187,32 @@ const connect = (
           message: "Could not open the bridge client endpoint.",
         })
     );
+    // With RelayMode.disabled there is no fallback: a dial that cannot
+    // holepunch fails (or times out) instead of degrading to a relay, and the
+    // branded failure covers both shapes so callers do not retry it.
+    const dialFailure = () =>
+      relayUrl === null
+        ? new BridgeDirectConnectError({
+            message:
+              "Could not establish a direct connection to the bridge, and the bridge locator allows no relay fallback.",
+          })
+        : new BridgeConnectError({
+            message: "Could not connect to the bridge listener.",
+          });
     const connection = yield* withDeadline(
       "connect",
       options.deadlines.connect,
       Effect.tryPromise({
-        catch: () =>
-          new BridgeConnectError({
-            message: "Could not connect to the bridge listener.",
-          }),
+        catch: dialFailure,
         try: () => endpoint.connect(normalizedAddress, alpn),
       }),
       closeEndpoint(endpoint)
+    ).pipe(
+      relayUrl === null
+        ? Effect.catchTag("BridgeDeadlineExceededError", () =>
+            Effect.fail(dialFailure())
+          )
+        : (effect) => effect
     );
     const activeConnection = yield* acquireConnection(connection);
     const stream = yield* withDeadline(
