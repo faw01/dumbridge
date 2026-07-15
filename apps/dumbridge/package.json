@@ -29,7 +29,7 @@
     "check": "ultracite check src test scripts package.json tsconfig.json",
     "fix": "ultracite fix src test scripts package.json tsconfig.json",
     "prepack": "bun run build && bun run verify:tarball",
-    "test": "bun --bun vitest run && bun test test/cli.test.ts test/cli-bridge.test.ts test/cli-detach.test.ts test/verify-npm-tarball.test.ts",
+    "test": "bun --bun vitest run && bun test cli.test.ts cli-bridge.test.ts cli-detach.test.ts verify-npm-tarball.test.ts",
     "typecheck": "tsc --noEmit",
     "verify:tarball": "bun scripts/verify-npm-tarball.ts"
   },
