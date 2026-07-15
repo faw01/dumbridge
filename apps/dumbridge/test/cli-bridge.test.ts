@@ -234,4 +234,39 @@ describe("dumbridge CLI bridge", () => {
       await server.exited;
     }
   }, 40_000);
+
+  test("serve --direct-only reports a direct connection on run and pull", async () => {
+    const server = Bun.spawn(
+      [process.execPath, cli, "serve", "--direct-only", servedRoot],
+      {
+        env: cleanEnvironment(),
+        stderr: "pipe",
+        stdout: "pipe",
+      }
+    );
+
+    try {
+      const { link } = await withTimeout(readBridgeStartup(server.stdout), 5000);
+      await writeFile(join(servedRoot, "direct.txt"), "over a direct path\n");
+      const environment = cleanEnvironment({ DUMBRIDGE_KEY: link });
+
+      const run = await runCli(["run", "cat direct.txt"], environment);
+      expect(run).toMatchObject({
+        exitCode: 0,
+        stdout: "over a direct path\n",
+      });
+      expect(run.stderr).toContain("dumbridge: connected directly\n");
+      expect(run.stderr).not.toContain("via relay");
+
+      const pull = await runCli(
+        ["pull", "direct.txt", join(cloudRoot, "direct.txt")],
+        environment
+      );
+      expect(pull).toMatchObject({ exitCode: 0 });
+      expect(pull.stderr).toContain("dumbridge: connected directly\n");
+    } finally {
+      server.kill();
+      await server.exited;
+    }
+  }, 40_000);
 });

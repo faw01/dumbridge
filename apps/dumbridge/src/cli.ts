@@ -33,6 +33,7 @@ import { pullRemote, runRemote } from "./bridge/client";
 import {
   detachServe,
   hostServeProcessControl,
+  type ServeReachability,
   stopDetachedServe,
 } from "./bridge/detached-serve";
 import { openBridge } from "./bridge/server";
@@ -111,12 +112,18 @@ const stateDirectory = Config.string("DUMBRIDGE_STATE_DIR").pipe(
 const keyExpiryNotice = (expiresAtIso: string) =>
   `The key expires at ${expiresAtIso}. Run serve again for a fresh key.\n`;
 
-const serveForeground = (root: string, ttl: Duration.Duration | undefined) =>
+const serveForeground = (
+  root: string,
+  ttl: Duration.Duration | undefined,
+  reachability: ServeReachability | undefined
+) =>
   Effect.scoped(
     Effect.gen(function* () {
       const server = yield* openBridge({
         root,
-        transport: makeIrohTransport(),
+        transport: makeIrohTransport(
+          reachability === undefined ? {} : { reachability }
+        ),
         ...(ttl === undefined ? {} : { ttl }),
       });
       yield* write(
@@ -127,12 +134,17 @@ const serveForeground = (root: string, ttl: Duration.Duration | undefined) =>
     })
   );
 
-const serveDetached = (root: string, rawTtl: string | undefined) =>
+const serveDetached = (
+  root: string,
+  rawTtl: string | undefined,
+  reachability: ServeReachability | undefined
+) =>
   Effect.gen(function* () {
     const startup = yield* detachServe({
       control: hostServeProcessControl,
       root,
       stateDirectory: yield* stateDirectory,
+      ...(reachability === undefined ? {} : { reachability }),
       ...(rawTtl === undefined ? {} : { ttl: rawTtl }),
     });
     yield* write(
@@ -164,6 +176,16 @@ const serve = Command.make(
     detach: Flag.boolean("detach").pipe(
       Flag.withDescription("Start the server detached from this terminal.")
     ),
+    directOnly: Flag.boolean("direct-only").pipe(
+      Flag.withDescription(
+        "Mint a key with no relay fallback: sessions connect peer-to-peer or fail fast."
+      )
+    ),
+    relayOnly: Flag.boolean("relay-only").pipe(
+      Flag.withDescription(
+        "Mint a key whose initial dial goes through the relay. Best effort only: an established session may still upgrade to a direct path."
+      )
+    ),
     root: Argument.string("root").pipe(Argument.optional),
     stop: Flag.boolean("stop").pipe(
       Flag.withDescription("Stop the detached server, revoking its key.")
@@ -175,11 +197,16 @@ const serve = Command.make(
       )
     ),
   },
-  ({ detach, root, stop, ttl }) =>
+  ({ detach, directOnly, relayOnly, root, stop, ttl }) =>
     Effect.gen(function* () {
       if (detach && stop) {
         return yield* new CliError({
           message: "Use either --detach or --stop, not both.",
+        });
+      }
+      if (directOnly && relayOnly) {
+        return yield* new CliError({
+          message: "Use either --direct-only or --relay-only, not both.",
         });
       }
       if (stop) {
@@ -193,6 +220,11 @@ const serve = Command.make(
             message: "serve --stop does not take a --ttl.",
           });
         }
+        if (directOnly || relayOnly) {
+          return yield* new CliError({
+            message: "serve --stop does not take --direct-only or --relay-only.",
+          });
+        }
         return yield* serveStop;
       }
       if (Option.isNone(root)) {
@@ -203,9 +235,18 @@ const serve = Command.make(
       const keyTtl = Option.isSome(ttl)
         ? yield* parseServeTtl(ttl.value)
         : undefined;
+      const reachability: ServeReachability | undefined = directOnly
+        ? "direct-only"
+        : relayOnly
+          ? "relay-only"
+          : undefined;
       return yield* detach
-        ? serveDetached(root.value, Option.isSome(ttl) ? ttl.value : undefined)
-        : serveForeground(root.value, keyTtl);
+        ? serveDetached(
+            root.value,
+            Option.isSome(ttl) ? ttl.value : undefined,
+            reachability
+          )
+        : serveForeground(root.value, keyTtl, reachability);
     })
 ).pipe(
   Command.withDescription(

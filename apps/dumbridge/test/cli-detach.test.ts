@@ -109,6 +109,21 @@ describe("dumbridge serve flags", () => {
       stderr: "dumbridge: Use either --detach or --stop, not both.\n",
       stdout: "",
     });
+    const [bothPaths, stopWithPath] = await Promise.all([
+      runCli(["serve", "--direct-only", "--relay-only", servedRoot]),
+      runCli(["serve", "--stop", "--relay-only"]),
+    ]);
+    expect(bothPaths).toEqual({
+      exitCode: 1,
+      stderr: "dumbridge: Use either --direct-only or --relay-only, not both.\n",
+      stdout: "",
+    });
+    expect(stopWithPath).toEqual({
+      exitCode: 1,
+      stderr:
+        "dumbridge: serve --stop does not take --direct-only or --relay-only.\n",
+      stdout: "",
+    });
     expect(stopWithRoot).toEqual({
       exitCode: 1,
       stderr: "dumbridge: serve --stop does not take a root.\n",

@@ -102,6 +102,9 @@ describe("dumbridge CLI", () => {
     expect(serve.stdout).toContain("--ttl");
     expect(serve.stdout).toContain("--detach");
     expect(serve.stdout).toContain("--stop");
+    expect(serve.stdout).toContain("--direct-only");
+    expect(serve.stdout).toContain("--relay-only");
+    expect(serve.stdout).toContain("may still upgrade");
     expect(run.stdout).toContain("dumbridge run [flags] <script>");
     expect(pullHelp.stdout).toContain(
       "dumbridge pull [flags] <remote-path> [<destination>]"
