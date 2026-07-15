@@ -9,7 +9,7 @@
   "scripts": {
     "check": "ultracite check src test package.json tsconfig.json",
     "fix": "ultracite fix src test package.json tsconfig.json",
-    "test": "bun test",
+    "test": "bun --bun vitest run",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
