@@ -301,7 +301,7 @@ const run = Command.make(
     })
 ).pipe(
   Command.withDescription(
-    "Run in the cloud agent to query the local served root. The bridge key comes from --key-file when given ('-' reads stdin), otherwise from DUMBRIDGE_KEY."
+    "Run in the cloud agent to query the local served root. The bridge key comes from --key-file when given ('-' reads stdin), otherwise from DUMBRIDGE_KEY. One stderr line names the connection path selected at connect time (directly or via relay); a relayed session may still upgrade to direct afterwards."
   )
 );
 
@@ -334,7 +334,7 @@ const pull = Command.make(
     })
 ).pipe(
   Command.withDescription(
-    "Run in the cloud agent to pull one local path. The bridge key comes from --key-file when given ('-' reads stdin), otherwise from DUMBRIDGE_KEY."
+    "Run in the cloud agent to pull one local path. The bridge key comes from --key-file when given ('-' reads stdin), otherwise from DUMBRIDGE_KEY. One stderr line names the connection path selected at connect time (directly or via relay); a relayed session may still upgrade to direct afterwards."
   )
 );
 

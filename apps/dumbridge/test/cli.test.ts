@@ -106,9 +106,11 @@ describe("dumbridge CLI", () => {
     expect(serve.stdout).toContain("--relay-only");
     expect(serve.stdout).toContain("may still upgrade");
     expect(run.stdout).toContain("dumbridge run [flags] <script>");
+    expect(run.stdout).toContain("connection path");
     expect(pullHelp.stdout).toContain(
       "dumbridge pull [flags] <remote-path> [<destination>]"
     );
+    expect(pullHelp.stdout).toContain("connection path");
     expect(root.stdout).toContain("serve locally");
     expect(root.stdout).toContain("DUMBRIDGE_KEY");
     expect(serve.stdout).toContain("DUMBRIDGE_KEY");

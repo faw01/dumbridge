@@ -187,32 +187,29 @@ const connect = (
           message: "Could not open the bridge client endpoint.",
         })
     );
-    // With RelayMode.disabled there is no fallback: a dial that cannot
-    // holepunch fails (or times out) instead of degrading to a relay, and the
-    // branded failure covers both shapes so callers do not retry it.
-    const dialFailure = () =>
-      relayUrl === null
-        ? new BridgeDirectConnectError({
-            message:
-              "Could not establish a direct connection to the bridge, and the bridge locator allows no relay fallback.",
-          })
-        : new BridgeConnectError({
-            message: "Could not connect to the bridge listener.",
-          });
     const connection = yield* withDeadline(
       "connect",
       options.deadlines.connect,
       Effect.tryPromise({
-        catch: dialFailure,
+        catch: () =>
+          new BridgeConnectError({
+            message: "Could not connect to the bridge listener.",
+          }),
         try: () => endpoint.connect(normalizedAddress, alpn),
       }),
       closeEndpoint(endpoint)
     ).pipe(
-      relayUrl === null
-        ? Effect.catchTag("BridgeDeadlineExceededError", () =>
-            Effect.fail(dialFailure())
-          )
-        : (effect) => effect
+      // With RelayMode.disabled there is no fallback: a dial that cannot
+      // holepunch fails or times out instead of degrading to a relay, and
+      // both shapes surface as the branded failure so callers do not retry.
+      Effect.mapError((error) =>
+        relayUrl === null
+          ? new BridgeDirectConnectError({
+              message:
+                "Could not establish a direct connection to the bridge, and the bridge locator allows no relay fallback.",
+            })
+          : error
+      )
     );
     const activeConnection = yield* acquireConnection(connection);
     const stream = yield* withDeadline(
