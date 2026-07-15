@@ -71,6 +71,7 @@ Every dumbridge failure prints a branded `dumbridge:` message on stderr and exit
 - `'<path>' is outside the served root; the served root is visible at /workspace.` - a note appended to the script's stderr when a read left the one shared directory. Nothing above the served root exists here; go back to relative paths from `.`.
 - `remote read shell <name> limit exceeded: ...` - the script hit a per-request cap; the message states the ceiling, whether it is cumulative, and how to recover. For a `file-read` limit, narrow the query to fewer files or a subdirectory instead of retrying the broad form.
 - `remote read shell time budget of <duration> exceeded` - the script ran longer than the bridge allows for one `run`. Narrow the query; the budget does not grow on retry.
+- `The remote pull exceeded a safety limit: ...` - the selected path is too large for one `pull`; the message states the entry, per-file, and total ceilings. Pull a smaller file or subdirectory instead of retrying.
 - `The bridge ended the response before it completed.` - the serve process stopped or refused the query mid-response. Retry once, then ask the user to check `dumbridge serve`.
 - `The bridge process is unreachable.` - `dumbridge serve` stopped or the machine went offline. Ask the user to start it again and provide the new key.
 - `The bridge key expired at <timestamp>.` or `The bridge rejected the bridge key: the key has expired.` - the TTL ran out. Ask the user to rerun `dumbridge serve` and share the fresh key.
