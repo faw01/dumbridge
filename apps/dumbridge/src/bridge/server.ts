@@ -1,5 +1,6 @@
 import {
   type BridgeKey,
+  BridgeKeyExpiredError,
   type Capability,
   checkBridgeKeyExpiry,
   encodeBridgeKey,
@@ -13,13 +14,19 @@ import {
 } from "@dumbridge/bridge-transport";
 import { SafeShell } from "@dumbridge/safe-shell";
 import { ServedRoot } from "@dumbridge/served-root";
-import { type BridgeRequest, makeRequestSession } from "@dumbridge/wire";
+import {
+  AuthenticationError,
+  type BridgeRequest,
+  makeRequestSession,
+  type RejectCode,
+} from "@dumbridge/wire";
 import { Cause, Clock, Duration, Effect, Option } from "effect";
 import { WireEventReader } from "./channel";
 import {
   type BridgeSessionError,
   handlePull,
   handleRun,
+  sendReject,
   sessionError,
 } from "./session-handlers";
 
@@ -100,38 +107,58 @@ const ensureKeyNotExpired = (key: MintedKey) =>
     )
   );
 
-const handleSession = (
-  session: BridgeSession,
-  key: MintedKey,
-  root: ServedRoot,
-  shell: SafeShell,
-  deadlines: BridgeServerDeadlines
-) =>
-  ensureKeyNotExpired(key).pipe(
-    Effect.flatMap(() =>
-      withSessionDeadline(
-        "request",
-        deadlines.request,
-        readRequest(session, key.capability)
-      )
-    ),
-    // The deadline can pass while the request is still arriving, so re-check
-    // after authentication: an expired key never reaches the shell or a pull.
-    Effect.tap(() => ensureKeyNotExpired(key)),
+interface SessionContext {
+  /** Yields the sanitized root display exactly once per bridge process. */
+  readonly banner: Effect.Effect<string | undefined>;
+  readonly deadlines: BridgeServerDeadlines;
+  readonly key: MintedKey;
+  readonly root: ServedRoot;
+  readonly shell: SafeShell;
+}
+
+// Only pre-response failures may carry a reject code, so a reject frame can
+// never trail a partially written response. Both codes are disclosed solely
+// to callers the bridge has already tried to authenticate.
+const rejectCodeFor = (error: unknown): RejectCode | undefined => {
+  if (error instanceof AuthenticationError) {
+    return "invalid-key";
+  }
+  if (error instanceof BridgeKeyExpiredError) {
+    return "expired-key";
+  }
+};
+
+const handleSession = (session: BridgeSession, context: SessionContext) =>
+  withSessionDeadline(
+    "request",
+    context.deadlines.request,
+    readRequest(session, context.key.capability)
+  ).pipe(
+    // Expiry is checked after authentication so an expired key never reaches
+    // the shell or a pull, while unauthenticated callers learn nothing.
+    Effect.tap(() => ensureKeyNotExpired(context.key)),
     Effect.flatMap(
       (request): Effect.Effect<void, RequestHandlerError> =>
         request.type === "run"
           ? withSessionDeadline(
               "run",
-              deadlines.run,
-              handleRun(session, shell, request.script)
+              context.deadlines.run,
+              handleRun(session, context.shell, request.script, context.banner)
             )
           : withSessionDeadline(
               "pull",
-              deadlines.pull,
-              handlePull(session, root, request.remotePath)
+              context.deadlines.pull,
+              handlePull(session, context.root, request.remotePath)
             )
-    )
+    ),
+    Effect.catch((error) => {
+      const code = rejectCodeFor(error);
+      return code === undefined
+        ? Effect.fail(error)
+        : sendReject(session, code).pipe(
+            Effect.flatMap(() => Effect.fail(error))
+          );
+    })
   );
 
 // Failure payloads may carry request or path details; the serve log keeps only
@@ -154,10 +181,7 @@ const describeSessionFailure = (cause: Cause.Cause<unknown>): string =>
 
 const serveLoop = (
   listener: BridgeListener,
-  key: MintedKey,
-  root: ServedRoot,
-  shell: SafeShell,
-  deadlines: BridgeServerDeadlines
+  context: SessionContext
 ): Effect.Effect<never, BridgeListenerClosedError> => {
   const nextBackoffMillis = (failures: number) =>
     Math.min(maximumAcceptBackoffMillis, 10 * 2 ** Math.min(failures, 7));
@@ -168,7 +192,7 @@ const serveLoop = (
     Effect.scoped(
       listener.accept.pipe(
         Effect.flatMap((session) =>
-          handleSession(session, key, root, shell, deadlines).pipe(
+          handleSession(session, context).pipe(
             Effect.ensuring(session.close),
             Effect.tapCause((cause) =>
               Effect.logWarning(
@@ -203,15 +227,12 @@ const serveLoop = (
 
 const serveConcurrently = (
   listener: BridgeListener,
-  key: MintedKey,
-  root: ServedRoot,
-  shell: SafeShell,
-  deadlines: BridgeServerDeadlines,
+  context: SessionContext,
   concurrency: number
 ): Effect.Effect<never, BridgeListenerClosedError> =>
   Effect.forEach(
     Array.from({ length: concurrency }),
-    () => serveLoop(listener, key, root, shell, deadlines),
+    () => serveLoop(listener, context),
     { concurrency: "unbounded", discard: true }
   ).pipe(Effect.flatMap(() => Effect.never));
 
@@ -246,17 +267,29 @@ export const openBridge = Effect.fn("BridgeServer.open")(
         })
       );
 
+      // The first run against this bridge process carries the sanitized root
+      // display so the agent learns which root it is exploring.
+      let pendingBanner: string | undefined = root.displayName;
+      const banner = Effect.sync(() => {
+        const served = pendingBanner;
+        pendingBanner = undefined;
+        return served;
+      });
+
       return {
         expiresAt: key.expiresAt,
         link,
         serve: serveConcurrently(
           listener,
-          key,
-          root,
-          shell,
           {
-            ...defaultDeadlines,
-            ...options.deadlines,
+            banner,
+            deadlines: {
+              ...defaultDeadlines,
+              ...options.deadlines,
+            },
+            key,
+            root,
+            shell,
           },
           normalizeConcurrentSessions(options.maxConcurrentSessions)
         ),

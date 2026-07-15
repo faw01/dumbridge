@@ -11,6 +11,7 @@ import {
   FrameTooLargeError,
   type PullFailureCode,
   type PullResponseEvent,
+  type RejectCode,
   type RunResponseEvent,
 } from "@dumbridge/wire";
 import { Effect, Result, Schema, Stream } from "effect";
@@ -77,10 +78,17 @@ const executeShell = (shell: SafeShell, script: string) =>
 export const handleRun = (
   session: BridgeSession,
   shell: SafeShell,
-  script: string
+  script: string,
+  banner: Effect.Effect<string | undefined>
 ) =>
   Effect.gen(function* () {
     const result = yield* executeShell(shell, script);
+    // Consumed only after the shell produced a response, so the one banner
+    // is not spent on a session that terminates without answering.
+    const served = yield* banner;
+    if (served !== undefined) {
+      yield* sendFrame(session, { served, type: "banner" });
+    }
     yield* sendOutput(session, "stdout", result.stdout);
     yield* sendOutput(session, "stderr", result.stderr);
     yield* sendFrame(session, {
@@ -168,6 +176,14 @@ const pullFailureCode = (error: unknown): PullFailureCode | undefined => {
 const sendPullFailure = (session: BridgeSession, code: PullFailureCode) =>
   sendFrame(session, { code, type: "pull-error" }).pipe(
     Effect.flatMap(() => session.finish)
+  );
+
+// A best-effort courtesy: the session still fails with its original error so
+// the serve log records the tag even when the peer is already gone.
+export const sendReject = (session: BridgeSession, code: RejectCode) =>
+  sendFrame(session, { code, type: "reject" }).pipe(
+    Effect.flatMap(() => session.finish),
+    Effect.ignore
   );
 
 export const handlePull = (

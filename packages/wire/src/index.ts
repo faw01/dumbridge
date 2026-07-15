@@ -1,5 +1,6 @@
 export { encodeFrame } from "./codec";
 export {
+  AuthenticationError,
   FrameTooLargeError,
   type WireDecodeError,
   type WireEncodeError,

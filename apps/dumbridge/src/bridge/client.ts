@@ -24,6 +24,8 @@ import {
   type BridgeRequest,
   makePullResponseSession,
   makeRunResponseSession,
+  type RejectCode,
+  type RunResponseEvent,
 } from "@dumbridge/wire";
 import { Clock, type Duration, Effect, Option, Schema } from "effect";
 import { joinBytes, sendFrames, WireEventReader } from "./channel";
@@ -64,6 +66,8 @@ type DeterministicConnectError =
 
 interface RemoteRunResult {
   readonly exitCode: number;
+  /** Sanitized root display carried by the first run against a bridge. */
+  readonly served: string | undefined;
   readonly stderr: string;
   readonly stdout: string;
   readonly truncated: boolean;
@@ -121,7 +125,22 @@ const decodeKey = (link: string) =>
   );
 
 const transientConnectFailure = (error: unknown) =>
-  clientError("connect", "Could not connect to the bridge process.", error);
+  clientError(
+    "connect",
+    "The bridge process is unreachable. Check that dumbridge serve is still running on the local machine.",
+    error
+  );
+
+// One user string per reject code; the compiler keeps the table exhaustive.
+const rejectMessages: Record<RejectCode, string> = {
+  "expired-key":
+    "The bridge rejected DUMBRIDGE_KEY: the key has expired. Run dumbridge serve again to mint a fresh key.",
+  "invalid-key":
+    "The bridge rejected DUMBRIDGE_KEY: the key does not match this bridge. Copy the current key printed by dumbridge serve.",
+};
+
+const rejectedError = (code: RejectCode) =>
+  clientError("bridge-key", rejectMessages[code]);
 
 const openSession = (transport: BridgeTransport, link: string) =>
   Effect.gen(function* () {
@@ -141,15 +160,22 @@ const openSession = (transport: BridgeTransport, link: string) =>
     return { capability: decoded.capability, session };
   });
 
+// A bridge that rejects the key may stop reading while the request is still
+// in flight, failing the send. The failure is deferred so the response is
+// read anyway: a waiting reject frame explains the refusal far better than
+// a broken request write, which stays the root cause when no reject arrives.
 const finishRequest = (
   session: BridgeSession,
   capability: Capability,
   request: BridgeRequest
-) =>
+): Effect.Effect<BridgeClientError | undefined> =>
   sendFrames(session, [{ capability, type: "auth" }, request]).pipe(
     Effect.flatMap(() => session.finish),
-    Effect.mapError((error) =>
-      clientError("request", "Could not send the bridge request.", error)
+    Effect.as<BridgeClientError | undefined>(undefined),
+    Effect.catch((error) =>
+      Effect.succeed(
+        clientError("request", "Could not send the bridge request.", error)
+      )
     )
   );
 
@@ -169,6 +195,59 @@ const nextClientEvent = <A>(
       )
     );
 
+interface CollectedRunResponse {
+  readonly exitCode: number | undefined;
+  readonly reject: RejectCode | undefined;
+  readonly served: string | undefined;
+  readonly stderr: string;
+  readonly stdout: string;
+  readonly truncated: boolean;
+}
+
+const collectRunResponse = <E>(
+  nextEvent: () => Effect.Effect<Option.Option<RunResponseEvent>, E>
+): Effect.Effect<CollectedRunResponse, E> =>
+  Effect.gen(function* () {
+    const stdout: Uint8Array[] = [];
+    const stderr: Uint8Array[] = [];
+    let served: string | undefined;
+    let exitCode: number | undefined;
+    let truncated = false;
+
+    let next = yield* nextEvent();
+    while (Option.isSome(next)) {
+      if (next.value.type === "reject") {
+        return {
+          exitCode,
+          reject: next.value.code,
+          served,
+          stderr: "",
+          stdout: "",
+          truncated,
+        };
+      }
+      if (next.value.type === "banner") {
+        ({ served } = next.value);
+      } else if (next.value.type === "stdout") {
+        stdout.push(next.value.payload);
+      } else if (next.value.type === "stderr") {
+        stderr.push(next.value.payload);
+      } else if (next.value.type === "exit") {
+        ({ code: exitCode, truncated } = next.value);
+      }
+      next = yield* nextEvent();
+    }
+
+    return {
+      exitCode,
+      reject: undefined,
+      served,
+      stderr: new TextDecoder().decode(joinBytes(stderr)),
+      stdout: new TextDecoder().decode(joinBytes(stdout)),
+      truncated,
+    };
+  });
+
 export const runRemote = Effect.fn("BridgeClient.run")(
   (options: {
     readonly deadline?: Duration.Input;
@@ -187,7 +266,7 @@ export const runRemote = Effect.fn("BridgeClient.run")(
             options.link
           );
           yield* Effect.addFinalizer(() => session.close);
-          yield* finishRequest(session, capability, {
+          const requestFailure = yield* finishRequest(session, capability, {
             script: options.script,
             type: "run",
           });
@@ -204,34 +283,28 @@ export const runRemote = Effect.fn("BridgeClient.run")(
             )
           );
           const reader = new WireEventReader(session, decoder);
-          const stdout: Uint8Array[] = [];
-          const stderr: Uint8Array[] = [];
-          let exitCode: number | undefined;
-          let truncated = false;
+          const collected = yield* collectRunResponse(() =>
+            nextClientEvent(reader, "run-response").pipe(
+              Effect.mapError((error) => requestFailure ?? error)
+            )
+          );
 
-          let next = yield* nextClientEvent(reader, "run-response");
-          while (Option.isSome(next)) {
-            if (next.value.type === "stdout") {
-              stdout.push(next.value.payload);
-            } else if (next.value.type === "stderr") {
-              stderr.push(next.value.payload);
-            } else if (next.value.type === "exit") {
-              ({ code: exitCode, truncated } = next.value);
-            }
-            next = yield* nextClientEvent(reader, "run-response");
+          if (collected.reject !== undefined) {
+            return yield* rejectedError(collected.reject);
           }
-
-          if (exitCode === undefined) {
-            return yield* clientError(
-              "run-response",
-              "The bridge run response was incomplete."
-            );
+          if (collected.exitCode === undefined) {
+            return yield* requestFailure ??
+              clientError(
+                "run-response",
+                "The bridge run response was incomplete."
+              );
           }
           return {
-            exitCode,
-            stderr: new TextDecoder().decode(joinBytes(stderr)),
-            stdout: new TextDecoder().decode(joinBytes(stdout)),
-            truncated,
+            exitCode: collected.exitCode,
+            served: collected.served,
+            stderr: collected.stderr,
+            stdout: collected.stdout,
+            truncated: collected.truncated,
           };
         })
       )
@@ -269,7 +342,7 @@ export const pullRemote = Effect.fn("BridgeClient.pull")(
             options.link
           );
           yield* Effect.addFinalizer(() => session.close);
-          yield* finishRequest(session, capability, {
+          const requestFailure = yield* finishRequest(session, capability, {
             remotePath: options.remotePath,
             type: "pull",
           });
@@ -286,12 +359,18 @@ export const pullRemote = Effect.fn("BridgeClient.pull")(
             )
           );
           const reader = new WireEventReader(session, decoder);
-          const first = yield* nextPullEvent(reader, options.remotePath);
+          const first = yield* nextPullEvent(reader, options.remotePath).pipe(
+            Effect.mapError((error) => requestFailure ?? error)
+          );
+          if (Option.isSome(first) && first.value.type === "reject") {
+            return yield* rejectedError(first.value.code);
+          }
           if (Option.isNone(first) || first.value.type !== "manifest") {
-            return yield* clientError(
-              "pull-response",
-              "The bridge pull response was incomplete."
-            );
+            return yield* requestFailure ??
+              clientError(
+                "pull-response",
+                "The bridge pull response was incomplete."
+              );
           }
 
           const files = first.value.manifest.entries.filter(
