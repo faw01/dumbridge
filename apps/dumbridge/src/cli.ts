@@ -24,12 +24,12 @@ import skillGuide from "../../../skills/dumbridge/SKILL.md" with {
 };
 import packageJson from "../package.json" with { type: "json" };
 import { pullRemote, runRemote } from "./bridge/client";
-import { openBridge } from "./bridge/server";
 import {
   detachServe,
   hostServeProcessControl,
   stopDetachedServe,
-} from "./detached-serve";
+} from "./bridge/detached-serve";
+import { openBridge } from "./bridge/server";
 import { resolveBridgeKey } from "./key-source";
 
 export class CliError extends Schema.TaggedErrorClass<CliError>()("CliError", {

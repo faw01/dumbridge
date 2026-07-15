@@ -9,7 +9,7 @@ import {
   detachServe,
   type ServeProcessControl,
   stopDetachedServe,
-} from "../src/detached-serve";
+} from "../../src/bridge/detached-serve";
 
 let stateDirectory = "";
 
