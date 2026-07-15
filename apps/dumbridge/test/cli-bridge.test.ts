@@ -172,12 +172,11 @@ describe("dumbridge CLI bridge", () => {
         ["run", 'grep -rl "Port Meridian" .'],
         environment
       );
-      expect(overLimit).toEqual({
-        exitCode: 1,
-        stderr:
-          "dumbridge: remote read shell file-read limit exceeded: one run may read at most 4 MiB in total across every file it opens; narrow the query to fewer files or a subdirectory\n",
-        stdout: "",
-      });
+      expect(overLimit).toMatchObject({ exitCode: 1, stdout: "" });
+      expect(overLimit.stderr).toMatch(pathLine);
+      expect(overLimit.stderr).toContain(
+        "dumbridge: remote read shell file-read limit exceeded: one run may read at most 4 MiB in total across every file it opens; narrow the query to fewer files or a subdirectory\n"
+      );
 
       const destination = join(cloudRoot, "pulled.txt");
       const pull = await runCli(
