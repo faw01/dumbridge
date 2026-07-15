@@ -473,51 +473,68 @@ describe("bridge application supervision", () => {
     })
   );
 
-  it.live("interrupts and closes a pull that exceeds its total deadline", () =>
-    Effect.gen(function* () {
-      const accepts: BridgeListener["accept"][] = [];
-      const listener = listenerFrom(accepts);
-      const server = yield* Effect.scoped(
-        openBridge({
-          deadlines: { pull: "25 millis" },
-          maxConcurrentSessions: 1,
-          root: fixture,
-          transport: listenerTransport(listener),
-        })
-      );
-      let writeWasInterrupted = false;
-      const request = requestFor(server.link, {
-        remotePath: "note.txt",
-        type: "pull",
-      });
-      const stalled = scriptedSession({
-        onWrite: (index) =>
-          index === 2
-            ? Effect.never.pipe(
-                Effect.ensuring(
-                  Effect.sync(() => {
-                    writeWasInterrupted = true;
-                  })
+  it.effect(
+    "interrupts and closes a pull that exceeds its total deadline",
+    () =>
+      Effect.gen(function* () {
+        const accepts: BridgeListener["accept"][] = [];
+        const listener = listenerFrom(accepts);
+        const server = yield* Effect.scoped(
+          openBridge({
+            deadlines: { pull: "25 millis" },
+            maxConcurrentSessions: 1,
+            root: fixture,
+            transport: listenerTransport(listener),
+          })
+        );
+        let writeWasInterrupted = false;
+        const stalledWriteStarted = Promise.withResolvers<void>();
+        const request = requestFor(server.link, {
+          remotePath: "note.txt",
+          type: "pull",
+        });
+        const stalled = scriptedSession({
+          onWrite: (index) =>
+            index === 2
+              ? Effect.suspend(() => {
+                  stalledWriteStarted.resolve();
+                  return Effect.never;
+                }).pipe(
+                  Effect.ensuring(
+                    Effect.sync(() => {
+                      writeWasInterrupted = true;
+                    })
+                  )
                 )
-              )
-            : Effect.void,
-        reads: [request],
-      });
-      accepts.push(
-        Effect.succeed(stalled.session),
-        Effect.fail(
-          new BridgeListenerClosedError({ message: "listener closed" })
-        )
-      );
+              : Effect.void,
+          reads: [request],
+        });
+        accepts.push(
+          Effect.succeed(stalled.session),
+          Effect.fail(
+            new BridgeListenerClosedError({ message: "listener closed" })
+          )
+        );
 
-      const end = yield* Effect.scoped(server.serve.pipe(Effect.flip));
+        // The pull streams real bytes before stalling, so the deadline only
+        // advances once the third write is pending on the virtual clock.
+        const end = yield* Effect.gen(function* () {
+          const fiber = yield* Effect.scoped(
+            server.serve.pipe(Effect.flip)
+          ).pipe(Effect.forkChild);
+          yield* Effect.promise(() => stalledWriteStarted.promise);
+          yield* TestClock.adjust("25 millis");
+          return yield* Fiber.join(fiber);
+        }).pipe(
+          Effect.provide(TestClock.layer({ warningDelay: "10 seconds" }))
+        );
 
-      expect(end).toBeInstanceOf(BridgeListenerClosedError);
-      expect(stalled.state.writes).toHaveLength(3);
-      expect(stalled.state.finishCalls).toBe(0);
-      expect(stalled.state.closeCalls).toBe(1);
-      expect(writeWasInterrupted).toBe(true);
-    })
+        expect(end).toBeInstanceOf(BridgeListenerClosedError);
+        expect(stalled.state.writes).toHaveLength(3);
+        expect(stalled.state.finishCalls).toBe(0);
+        expect(stalled.state.closeCalls).toBe(1);
+        expect(writeWasInterrupted).toBe(true);
+      })
   );
 
   it.effect(
