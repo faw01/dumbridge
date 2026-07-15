@@ -1,5 +1,5 @@
 import { Buffer } from "node:buffer";
-import { promises as hostFileSystem } from "node:fs";
+import { promises as hostFileSystem, type Stats } from "node:fs";
 import { join } from "node:path";
 import { type IFileSystem, OverlayFs } from "just-bash";
 import {
@@ -35,6 +35,26 @@ const safeHostReadCodes = [
   "EPERM",
   "ESTALE",
 ];
+
+// A symlink anywhere, a non-directory ancestor, or a non-file leaf ends the
+// read before any bytes are served.
+const assertHostComponentKind = (stats: Stats, isLeaf: boolean) => {
+  if (stats.isSymbolicLink()) {
+    throw Object.assign(new Error("symbolic links are disabled"), {
+      code: "ENOENT",
+    });
+  }
+  if (!(isLeaf || stats.isDirectory())) {
+    throw Object.assign(new Error("path component is not a directory"), {
+      code: "ENOTDIR",
+    });
+  }
+  if (isLeaf && !stats.isFile()) {
+    throw Object.assign(new Error("unsupported file type"), {
+      code: stats.isDirectory() ? "EISDIR" : "EFTYPE",
+    });
+  }
+};
 
 // Unknown errno values collapse to EIO so a host read failure can never leak
 // detail beyond the allowlisted codes into shell-visible messages.
@@ -315,22 +335,9 @@ export class RequestBudgetOverlayFs extends OverlayFs {
       const stats = await this.whileRequestOpen(() =>
         hostFileSystem.lstat(current)
       );
-      if (stats.isSymbolicLink()) {
-        throw Object.assign(new Error("symbolic links are disabled"), {
-          code: "ENOENT",
-        });
-      }
-      if (index < location.segments.length - 1 && !stats.isDirectory()) {
-        throw Object.assign(new Error("path component is not a directory"), {
-          code: "ENOTDIR",
-        });
-      }
-      if (index === location.segments.length - 1 && !stats.isFile()) {
-        throw Object.assign(new Error("unsupported file type"), {
-          code: stats.isDirectory() ? "EISDIR" : "EFTYPE",
-        });
-      }
-      if (index === location.segments.length - 1) {
+      const isLeaf = index === location.segments.length - 1;
+      assertHostComponentKind(stats, isLeaf);
+      if (isLeaf) {
         leafIdentity = {
           device: stats.dev,
           inode: stats.ino,
