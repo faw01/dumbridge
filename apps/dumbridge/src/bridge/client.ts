@@ -22,13 +22,14 @@ import {
 } from "@dumbridge/pull-transfer";
 import {
   type BridgeRequest,
+  encodeFrame,
   makePullResponseSession,
   makeRunResponseSession,
   type RejectCode,
   type RunResponseEvent,
 } from "@dumbridge/wire";
 import { Clock, type Duration, Effect, Option, Schema } from "effect";
-import { joinBytes, sendFrames, WireEventReader } from "./channel";
+import { joinBytes, WireEventReader } from "./channel";
 import {
   finishPullResponse,
   makeRemoteRead,
@@ -160,24 +161,42 @@ const openSession = (transport: BridgeTransport, link: string) =>
     return { capability: decoded.capability, session };
   });
 
-// A bridge that rejects the key may stop reading while the request is still
-// in flight, failing the send. The failure is deferred so the response is
-// read anyway: a waiting reject frame explains the refusal far better than
-// a broken request write, which stays the root cause when no reject arrives.
+const requestSendFailure = (error: unknown) =>
+  clientError("request", "Could not send the bridge request.", error);
+
+// Local encoding failures fail immediately: nothing was sent, so no reject
+// frame can be waiting. Transport failures are deferred instead, because a
+// bridge that rejects the key may stop reading mid-request and its reject
+// frame explains the refusal better than the broken write; the send failure
+// stays the root cause when no reject arrives. Finish is still attempted
+// after a failed write so the bridge sees end-of-stream rather than waiting
+// out its request deadline.
 const finishRequest = (
   session: BridgeSession,
   capability: Capability,
   request: BridgeRequest
-): Effect.Effect<BridgeClientError | undefined> =>
-  sendFrames(session, [{ capability, type: "auth" }, request]).pipe(
-    Effect.flatMap(() => session.finish),
-    Effect.as<BridgeClientError | undefined>(undefined),
-    Effect.catch((error) =>
-      Effect.succeed(
-        clientError("request", "Could not send the bridge request.", error)
-      )
-    )
-  );
+): Effect.Effect<BridgeClientError | undefined, BridgeClientError> =>
+  Effect.gen(function* () {
+    const authFrame = yield* Effect.fromResult(
+      encodeFrame({ capability, type: "auth" })
+    ).pipe(Effect.mapError(requestSendFailure));
+    const requestFrame = yield* Effect.fromResult(encodeFrame(request)).pipe(
+      Effect.mapError(requestSendFailure)
+    );
+
+    const writeFailure = yield* session.write(authFrame).pipe(
+      Effect.flatMap(() => session.write(requestFrame)),
+      Effect.as<unknown>(undefined),
+      Effect.catch((error) => Effect.succeed<unknown>(error))
+    );
+    const finishFailure = yield* session.finish.pipe(
+      Effect.as<unknown>(undefined),
+      Effect.catch((error) => Effect.succeed<unknown>(error))
+    );
+
+    const failure = writeFailure ?? finishFailure;
+    return failure === undefined ? undefined : requestSendFailure(failure);
+  });
 
 const nextClientEvent = <A>(
   reader: WireEventReader<A>,

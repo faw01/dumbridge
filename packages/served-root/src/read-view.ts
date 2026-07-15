@@ -639,13 +639,13 @@ export class RequestBudgetOverlayFs extends OverlayFs {
   override readlink(
     ...args: Parameters<OverlayFs["readlink"]>
   ): ReturnType<OverlayFs["readlink"]> {
-    return this.whileGuarded([args[0]], () => super.readlink(...args));
+    return this.readGuarded(args[0], () => super.readlink(...args));
   }
 
   override realpath(
     ...args: Parameters<OverlayFs["realpath"]>
   ): ReturnType<OverlayFs["realpath"]> {
-    return this.whileGuarded([args[0]], () => super.realpath(...args));
+    return this.readGuarded(args[0], () => super.realpath(...args));
   }
 
   override async utimes(

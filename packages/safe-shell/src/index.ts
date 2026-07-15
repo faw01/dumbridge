@@ -183,6 +183,32 @@ const executionError = (cause: unknown) => {
   });
 };
 
+// The note joins the response only when the total still fits the output
+// budget, so the bridge never sends more than a response session accepts; a
+// response already at the cap keeps its raw shell error instead. The path
+// shown is the agent's own normalized input.
+const withOutsideRootNote = (
+  shellResult: ShellResult,
+  outsideRootPath: string | undefined,
+  workingDirectory: string,
+  maxOutputBytes: number
+): ShellResult => {
+  if (outsideRootPath === undefined) {
+    return shellResult;
+  }
+  const separator =
+    shellResult.stderr === "" || shellResult.stderr.endsWith("\n") ? "" : "\n";
+  const note = `${separator}dumbridge: '${outsideRootPath}' is outside the served root; the served root is visible at ${workingDirectory}.\n`;
+  const fits =
+    encodedSize(shellResult.stdout) +
+      encodedSize(shellResult.stderr) +
+      encodedSize(note) <=
+    maxOutputBytes;
+  return fits
+    ? { ...shellResult, stderr: `${shellResult.stderr}${note}` }
+    : shellResult;
+};
+
 const makeExecute = (servedRoot: ServedRoot, limits: SafeShellLimits) =>
   Effect.fn("SafeShell.execute")((script: string) =>
     Effect.gen(function* () {
@@ -280,20 +306,12 @@ const makeExecute = (servedRoot: ServedRoot, limits: SafeShellLimits) =>
         });
       }
 
-      // Appended after the output limit check so the note itself can never
-      // trip the limit; the path shown is the agent's own normalized input.
-      if (view.outsideRootPath !== undefined) {
-        const separator =
-          shellResult.stderr === "" || shellResult.stderr.endsWith("\n")
-            ? ""
-            : "\n";
-        return {
-          ...shellResult,
-          stderr: `${shellResult.stderr}${separator}dumbridge: '${view.outsideRootPath}' is outside the served root; the served root is visible at ${view.workingDirectory}.\n`,
-        };
-      }
-
-      return shellResult;
+      return withOutsideRootNote(
+        shellResult,
+        view.outsideRootPath,
+        view.workingDirectory,
+        limits.maxOutputBytes
+      );
     })
   );
 

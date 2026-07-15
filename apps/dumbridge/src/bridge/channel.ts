@@ -14,15 +14,6 @@ import { Effect, Option } from "effect";
 export const sendFrame = (session: BridgeSession, frame: WireFrame) =>
   Effect.fromResult(encodeFrame(frame)).pipe(Effect.flatMap(session.write));
 
-export const sendFrames = (
-  session: BridgeSession,
-  frames: readonly WireFrame[]
-) =>
-  Effect.forEach(frames, (frame) => sendFrame(session, frame), {
-    concurrency: 1,
-    discard: true,
-  });
-
 export class WireEventReader<A> {
   readonly #decoder: WireSession<A>;
   readonly #endState = new Set<"ended">();
