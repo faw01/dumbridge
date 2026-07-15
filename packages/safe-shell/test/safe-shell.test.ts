@@ -613,16 +613,21 @@ describe("SafeShell", () => {
         const kibibyteShell = yield* makeShell({ maxFileReadBytes: 1024 });
         const outputShell = yield* makeShell({ maxOutputBytes: 32 });
         const scriptShell = yield* makeShell({ maxScriptBytes: 8 });
+        const overlayShell = yield* makeShell({ maxOverlayBytes: 4 });
+        const entriesShell = yield* makeShell({ maxOverlayEntries: 3 });
 
-        const [fileRead, kibibyte, output, script] = yield* Effect.all(
-          [
-            Effect.flip(fileReadShell.execute("cat large.txt")),
-            Effect.flip(kibibyteShell.execute("cat big.bin")),
-            Effect.flip(outputShell.execute("seq 1 100")),
-            Effect.flip(scriptShell.execute("echo too long")),
-          ],
-          { concurrency: "unbounded" }
-        );
+        const [fileRead, kibibyte, output, script, overlay, entries] =
+          yield* Effect.all(
+            [
+              Effect.flip(fileReadShell.execute("cat large.txt")),
+              Effect.flip(kibibyteShell.execute("cat big.bin")),
+              Effect.flip(outputShell.execute("seq 1 100")),
+              Effect.flip(scriptShell.execute("echo too long")),
+              Effect.flip(overlayShell.execute("printf 12345678 > out.txt")),
+              Effect.flip(entriesShell.execute("touch a b c d")),
+            ],
+            { concurrency: "unbounded" }
+          );
 
         expect(fileRead).toMatchObject({
           _tag: "ShellLimitExceededError",
@@ -639,6 +644,16 @@ describe("SafeShell", () => {
           _tag: "ShellLimitExceededError",
           message:
             "remote read shell script limit exceeded: one script may be at most 8 bytes; shorten the script",
+        });
+        expect(overlay).toMatchObject({
+          _tag: "ShellLimitExceededError",
+          message:
+            "remote read shell overlay limit exceeded: one run may write at most 4 bytes into its throwaway overlay",
+        });
+        expect(entries).toMatchObject({
+          _tag: "ShellLimitExceededError",
+          message:
+            "remote read shell overlay-entries limit exceeded: one run may create at most 3 overlay entries",
         });
       })
   );
