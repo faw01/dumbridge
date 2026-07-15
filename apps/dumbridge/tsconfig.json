@@ -1,4 +1,5 @@
 {
-  "extends": "../../tsconfig.json",
-  "include": ["scripts", "src", "test"]
+  "extends": "@dumbridge/typescript-config/base.json",
+  "include": ["scripts", "src", "test"],
+  "exclude": ["dist", "node_modules"]
 }

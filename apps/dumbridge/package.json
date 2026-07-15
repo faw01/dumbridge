@@ -45,6 +45,7 @@
     "@dumbridge/pull-transfer": "workspace:*",
     "@dumbridge/safe-shell": "workspace:*",
     "@dumbridge/served-root": "workspace:*",
+    "@dumbridge/typescript-config": "workspace:*",
     "@dumbridge/wire": "workspace:*",
     "@types/bun": "1.3.14"
   }
