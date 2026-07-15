@@ -21,8 +21,9 @@ import {
   type RejectCode,
 } from "@dumbridge/wire";
 import { Cause, Clock, Duration, Effect, Option } from "effect";
-import { WireEventReader } from "./channel";
+import { sendFrame, WireEventReader } from "./channel";
 import {
+  type BannerSender,
   type BridgeSessionError,
   handlePull,
   handleRun,
@@ -108,11 +109,11 @@ const ensureKeyNotExpired = (key: MintedKey) =>
   );
 
 interface SessionContext {
-  /** Yields the sanitized root display exactly once per bridge process. */
-  readonly banner: Effect.Effect<string | undefined>;
   readonly deadlines: BridgeServerDeadlines;
   readonly key: MintedKey;
   readonly root: ServedRoot;
+  /** Sends the sanitized root display once per bridge process. */
+  readonly sendBanner: BannerSender;
   readonly shell: SafeShell;
 }
 
@@ -143,7 +144,12 @@ const handleSession = (session: BridgeSession, context: SessionContext) =>
           ? withSessionDeadline(
               "run",
               context.deadlines.run,
-              handleRun(session, context.shell, request.script, context.banner)
+              handleRun(
+                session,
+                context.shell,
+                request.script,
+                context.sendBanner
+              )
             )
           : withSessionDeadline(
               "pull",
@@ -267,14 +273,26 @@ export const openBridge = Effect.fn("BridgeServer.open")(
         })
       );
 
-      // The first run against this bridge process carries the sanitized root
-      // display so the agent learns which root it is exploring.
+      // The first run response against this bridge process carries the
+      // sanitized root display so the agent learns which root it is
+      // exploring. A failed send restores the slot for a later run, so a
+      // session whose response never reached a client cannot spend it.
       let pendingBanner: string | undefined = root.displayName;
-      const banner = Effect.sync(() => {
-        const served = pendingBanner;
-        pendingBanner = undefined;
-        return served;
-      });
+      const sendBanner: BannerSender = (session) =>
+        Effect.suspend(() => {
+          const served = pendingBanner;
+          if (served === undefined) {
+            return Effect.void;
+          }
+          pendingBanner = undefined;
+          return sendFrame(session, { served, type: "banner" }).pipe(
+            Effect.tapError(() =>
+              Effect.sync(() => {
+                pendingBanner ??= served;
+              })
+            )
+          );
+        });
 
       return {
         expiresAt: key.expiresAt,
@@ -282,13 +300,13 @@ export const openBridge = Effect.fn("BridgeServer.open")(
         serve: serveConcurrently(
           listener,
           {
-            banner,
             deadlines: {
               ...defaultDeadlines,
               ...options.deadlines,
             },
             key,
             root,
+            sendBanner,
             shell,
           },
           normalizeConcurrentSessions(options.maxConcurrentSessions)

@@ -75,20 +75,21 @@ const executeShell = (shell: SafeShell, script: string) =>
     })
   );
 
+export type BannerSender = (
+  session: BridgeSession
+) => Effect.Effect<void, Effect.Error<ReturnType<typeof sendFrame>>>;
+
 export const handleRun = (
   session: BridgeSession,
   shell: SafeShell,
   script: string,
-  banner: Effect.Effect<string | undefined>
+  sendBanner: BannerSender
 ) =>
   Effect.gen(function* () {
     const result = yield* executeShell(shell, script);
-    // Consumed only after the shell produced a response, so the one banner
-    // is not spent on a session that terminates without answering.
-    const served = yield* banner;
-    if (served !== undefined) {
-      yield* sendFrame(session, { served, type: "banner" });
-    }
+    // Sent only after the shell produced a response, so the one banner is
+    // not spent on a session that terminates without answering.
+    yield* sendBanner(session);
     yield* sendOutput(session, "stdout", result.stdout);
     yield* sendOutput(session, "stderr", result.stderr);
     yield* sendFrame(session, {
