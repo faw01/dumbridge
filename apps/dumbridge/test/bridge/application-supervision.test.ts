@@ -793,6 +793,77 @@ describe("bridge application supervision", () => {
       })
   );
 
+  it.effect(
+    "reports a response that ends before completing as the bridge closing early",
+    () =>
+      Effect.gen(function* () {
+        const capability = mintCapability();
+        const link = success(
+          encodeBridgeKey({
+            capability,
+            expiresAt: farFutureExpiry,
+            locator: "truncated-client",
+            transport: "iroh",
+          })
+        );
+        const truncated = scriptedSession({
+          reads: [
+            encoded({
+              payload: new TextEncoder().encode("partial"),
+              type: "stdout",
+            }),
+          ],
+        });
+
+        const error = yield* runRemote({
+          link,
+          script: "cat note.txt",
+          transport: clientTransport(truncated.session),
+        }).pipe(Effect.flip);
+
+        expect(error).toMatchObject({
+          _tag: "BridgeClientError",
+          message:
+            "The bridge ended the response before it completed. The serve process may have stopped or refused the query; check dumbridge serve on the local machine.",
+          operation: "run-response",
+        });
+        expect(error.cause).toMatchObject({ _tag: "IncompleteSessionError" });
+        expect(truncated.state.closeCalls).toBe(1);
+      })
+  );
+
+  it.effect("still reports a malformed frame as an invalid response", () =>
+    Effect.gen(function* () {
+      const capability = mintCapability();
+      const link = success(
+        encodeBridgeKey({
+          capability,
+          expiresAt: farFutureExpiry,
+          locator: "malformed-client",
+          transport: "iroh",
+        })
+      );
+      const garbageFrame = Uint8Array.of(
+        ...[0, 0, 0, 8],
+        ...[0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff]
+      );
+      const malformed = scriptedSession({ reads: [garbageFrame] });
+
+      const error = yield* runRemote({
+        link,
+        script: "cat note.txt",
+        transport: clientTransport(malformed.session),
+      }).pipe(Effect.flip);
+
+      expect(error).toMatchObject({
+        _tag: "BridgeClientError",
+        message: "The bridge returned an invalid response.",
+        operation: "run-response",
+      });
+      expect(malformed.state.closeCalls).toBe(1);
+    })
+  );
+
   it.live("retries one connection failure before sending the request", () =>
     Effect.gen(function* () {
       const capability = mintCapability();
