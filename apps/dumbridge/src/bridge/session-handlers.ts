@@ -14,7 +14,7 @@ import {
   type RejectCode,
   type RunResponseEvent,
 } from "@dumbridge/wire";
-import { type Duration, Effect, Result, Schema, Stream } from "effect";
+import { Duration, Effect, Result, Schema, Stream } from "effect";
 import { sendFrame } from "./channel";
 
 const responseChunkBytes = 64 * 1024;
@@ -77,14 +77,27 @@ export type BannerSender = (
   session: BridgeSession
 ) => Effect.Effect<void, Effect.Error<ReturnType<typeof sendFrame>>>;
 
+const timeBudgetMessage = (budget: Duration.Input) =>
+  `remote read shell time budget of ${Duration.format(Duration.millis(Duration.toMillis(budget)))} exceeded; narrow the query to fewer files or a subdirectory`;
+
 export const handleRun = (
   session: BridgeSession,
   shell: SafeShell,
   script: string,
-  sendBanner: BannerSender
+  sendBanner: BannerSender,
+  timeBudget: Duration.Input
 ) =>
   Effect.gen(function* () {
-    const result = yield* executeShell(shell, script);
+    // The budget is enforced here, before any frame is sent, so an
+    // over-budget query is answered with a branded failure instead of a
+    // torn-down session the client can only report as an invalid response.
+    const result = yield* executeShell(shell, script).pipe(
+      Effect.timeoutOrElse({
+        duration: timeBudget,
+        orElse: () =>
+          Effect.succeed(failedShellResult(timeBudgetMessage(timeBudget))),
+      })
+    );
     yield* sendBanner(session);
     yield* sendOutput(session, "stdout", result.stdout);
     yield* sendOutput(session, "stderr", result.stderr);
