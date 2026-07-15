@@ -154,6 +154,28 @@ describe("dumbridge CLI bridge", () => {
       );
       expect(outside.stderr).not.toContain("serving");
 
+      // The broad-read repro from the cloud-agent evaluation: a recursive
+      // grep across more bytes than the cumulative read budget must name the
+      // ceiling and a recovery, not a bare limit name.
+      await Promise.all(
+        Array.from({ length: 5 }, (_, index) =>
+          writeFile(
+            join(servedRoot, `bulk-${index}.txt`),
+            "x".repeat(1024 * 1024)
+          )
+        )
+      );
+      const overLimit = await runCli(
+        ["run", 'grep -rl "Port Meridian" .'],
+        environment
+      );
+      expect(overLimit).toEqual({
+        exitCode: 1,
+        stderr:
+          "dumbridge: remote read shell file-read limit exceeded: one run may read at most 4 MiB in total across every file it opens; narrow the query to fewer files or a subdirectory\n",
+        stdout: "",
+      });
+
       const destination = join(cloudRoot, "pulled.txt");
       const pull = await runCli(
         ["pull", "uncommitted.txt", destination],
