@@ -1,7 +1,7 @@
-import { describe, expect, spyOn, test } from "bun:test";
 import { promises as hostFileSystem } from "node:fs";
 import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
+import { describe, expect, it, vi } from "@effect/vitest";
 import { Effect, Fiber, Stream } from "effect";
 import {
   materializePull,
@@ -10,271 +10,190 @@ import {
   type PullRead,
   preparePull,
 } from "../src/index";
-import { collectError, oneChunk, pathExists, withFixture } from "./support";
+import { oneChunk, pathExists, withFixture } from "./support";
 
 describe("pull transfer destination", () => {
-  test("verifies received bytes before exposing the destination", () =>
-    withFixture(async ({ root, servedRoot, workspace }) => {
-      await writeFile(join(root, "cat.jpeg"), new Uint8Array([1, 2, 3]));
-      const source = await Effect.runPromise(
-        preparePull({ remotePath: "cat.jpeg", servedRoot })
-      );
+  it.effect("verifies received bytes before exposing the destination", () =>
+    withFixture(({ root, servedRoot, workspace }) =>
+      Effect.gen(function* () {
+        yield* Effect.promise(() =>
+          writeFile(join(root, "cat.jpeg"), new Uint8Array([1, 2, 3]))
+        );
+        const source = yield* preparePull({
+          remotePath: "cat.jpeg",
+          servedRoot,
+        });
 
-      const error = await collectError(
-        materializePull({
-          destination: join(workspace, "cat.jpeg"),
-          manifest: source.manifest,
-          read: () => oneChunk(new Uint8Array([3, 2, 1])),
-        })
-      );
+        const error = yield* Effect.flip(
+          materializePull({
+            destination: join(workspace, "cat.jpeg"),
+            manifest: source.manifest,
+            read: () => oneChunk(new Uint8Array([3, 2, 1])),
+          })
+        );
 
-      expect(error).toMatchObject({
-        _tag: "PullIntegrityError",
-        path: "cat.jpeg",
-      });
-      expect(await readdir(workspace)).toEqual([]);
-    }));
+        expect(error).toMatchObject({
+          _tag: "PullIntegrityError",
+          path: "cat.jpeg",
+        });
+        expect(yield* Effect.promise(() => readdir(workspace))).toEqual([]);
+      })
+    )
+  );
 
-  test("rejects reader chunks above the receiver limit", () =>
-    withFixture(async ({ root, servedRoot, workspace }) => {
-      const bytes = new Uint8Array([0, 1, 2, 3, 4, 5, 6, 7]);
-      await writeFile(join(root, "large-frame.bin"), bytes);
-      const source = await Effect.runPromise(
-        preparePull({ remotePath: "large-frame.bin", servedRoot })
-      );
+  it.effect("rejects reader chunks above the receiver limit", () =>
+    withFixture(({ root, servedRoot, workspace }) =>
+      Effect.gen(function* () {
+        const bytes = new Uint8Array([0, 1, 2, 3, 4, 5, 6, 7]);
+        yield* Effect.promise(() =>
+          writeFile(join(root, "large-frame.bin"), bytes)
+        );
+        const source = yield* preparePull({
+          remotePath: "large-frame.bin",
+          servedRoot,
+        });
 
-      const error = await collectError(
-        materializePull({
-          destination: join(workspace, "large-frame.bin"),
-          limits: { chunkBytes: 4 },
-          manifest: source.manifest,
-          read: () => oneChunk(bytes),
-        })
-      );
+        const error = yield* Effect.flip(
+          materializePull({
+            destination: join(workspace, "large-frame.bin"),
+            limits: { chunkBytes: 4 },
+            manifest: source.manifest,
+            read: () => oneChunk(bytes),
+          })
+        );
 
-      expect(error).toMatchObject({
-        _tag: "PullLimitError",
-        limit: "chunk bytes",
-        maximum: 4,
-        observed: 8,
-      });
-      expect(await readdir(workspace)).toEqual([]);
-    }));
+        expect(error).toMatchObject({
+          _tag: "PullLimitError",
+          limit: "chunk bytes",
+          maximum: 4,
+          observed: 8,
+        });
+        expect(yield* Effect.promise(() => readdir(workspace))).toEqual([]);
+      })
+    )
+  );
 
-  test("removes new parent directories after a reader failure", () =>
-    withFixture(async ({ root, servedRoot, workspace }) => {
-      await writeFile(join(root, "broken.txt"), "broken");
-      const existingParent = join(workspace, "existing");
-      await mkdir(existingParent);
-      await writeFile(join(existingParent, "keep.txt"), "keep");
-      const source = await Effect.runPromise(
-        preparePull({ remotePath: "broken.txt", servedRoot })
-      );
+  it.effect("removes new parent directories after a reader failure", () =>
+    withFixture(({ root, servedRoot, workspace }) =>
+      Effect.gen(function* () {
+        const existingParent = join(workspace, "existing");
+        yield* Effect.promise(async () => {
+          await writeFile(join(root, "broken.txt"), "broken");
+          await mkdir(existingParent);
+          await writeFile(join(existingParent, "keep.txt"), "keep");
+        });
+        const source = yield* preparePull({
+          remotePath: "broken.txt",
+          servedRoot,
+        });
 
-      const error = await collectError(
-        materializePull({
-          destination: join(existingParent, "new", "deep", "broken.txt"),
-          manifest: source.manifest,
-          read: () => {
-            throw new Error("reader failed");
-          },
-        })
-      );
+        const error = yield* Effect.flip(
+          materializePull({
+            destination: join(existingParent, "new", "deep", "broken.txt"),
+            manifest: source.manifest,
+            read: () => {
+              throw new Error("reader failed");
+            },
+          })
+        );
 
-      expect(error).toMatchObject({
-        _tag: "PullIOError",
-        operation: "open pull stream",
-        path: "broken.txt",
-      });
-      expect(await readdir(workspace)).toEqual(["existing"]);
-      expect(await readdir(existingParent)).toEqual(["keep.txt"]);
-      expect(await readFile(join(existingParent, "keep.txt"), "utf8")).toBe(
-        "keep"
-      );
-    }));
+        expect(error).toMatchObject({
+          _tag: "PullIOError",
+          operation: "open pull stream",
+          path: "broken.txt",
+        });
+        expect(yield* Effect.promise(() => readdir(workspace))).toEqual([
+          "existing",
+        ]);
+        expect(yield* Effect.promise(() => readdir(existingParent))).toEqual([
+          "keep.txt",
+        ]);
+        expect(
+          yield* Effect.promise(() =>
+            readFile(join(existingParent, "keep.txt"), "utf8")
+          )
+        ).toBe("keep");
+      })
+    )
+  );
 
-  test("maps a reader failure and removes its staging directory", () =>
-    withFixture(async ({ root, servedRoot, workspace }) => {
-      await writeFile(join(root, "broken.txt"), "broken");
-      const source = await Effect.runPromise(
-        preparePull({ remotePath: "broken.txt", servedRoot })
-      );
+  it.effect("maps a reader failure and removes its staging directory", () =>
+    withFixture(({ root, servedRoot, workspace }) =>
+      Effect.gen(function* () {
+        yield* Effect.promise(() =>
+          writeFile(join(root, "broken.txt"), "broken")
+        );
+        const source = yield* preparePull({
+          remotePath: "broken.txt",
+          servedRoot,
+        });
 
-      const error = await collectError(
-        materializePull({
-          destination: join(workspace, "broken.txt"),
-          manifest: source.manifest,
-          read: () => {
-            throw new Error("reader failed");
-          },
-        })
-      );
+        const error = yield* Effect.flip(
+          materializePull({
+            destination: join(workspace, "broken.txt"),
+            manifest: source.manifest,
+            read: () => {
+              throw new Error("reader failed");
+            },
+          })
+        );
 
-      expect(error).toMatchObject({
-        _tag: "PullIOError",
-        operation: "open pull stream",
-        path: "broken.txt",
-      });
-      expect(await readdir(workspace)).toEqual([]);
-    }));
+        expect(error).toMatchObject({
+          _tag: "PullIOError",
+          operation: "open pull stream",
+          path: "broken.txt",
+        });
+        expect(yield* Effect.promise(() => readdir(workspace))).toEqual([]);
+      })
+    )
+  );
 
-  test("interrupts a stalled reader and removes its staging directory", () =>
-    withFixture(async ({ root, servedRoot, workspace }) => {
-      await writeFile(join(root, "stalled.txt"), "stalled");
-      const source = await Effect.runPromise(
-        preparePull({ remotePath: "stalled.txt", servedRoot })
-      );
-      let readerSignal: AbortSignal | undefined;
-      let readerStarted: (() => void) | undefined;
-      const started = new Promise<void>((resolveStarted) => {
-        readerStarted = resolveStarted;
-      });
-      const stalledRead = (_entry: PullFileEntry, signal: AbortSignal) => {
-        readerSignal = signal;
-        readerStarted?.();
-        return Stream.never;
-      };
-      const fiber = Effect.runFork(
-        materializePull({
+  it.live("interrupts a stalled reader and removes its staging directory", () =>
+    withFixture(({ root, servedRoot, workspace }) =>
+      Effect.gen(function* () {
+        yield* Effect.promise(() =>
+          writeFile(join(root, "stalled.txt"), "stalled")
+        );
+        const source = yield* preparePull({
+          remotePath: "stalled.txt",
+          servedRoot,
+        });
+        let readerSignal: AbortSignal | undefined;
+        const started = Promise.withResolvers<void>();
+        const stalledRead = (_entry: PullFileEntry, signal: AbortSignal) => {
+          readerSignal = signal;
+          started.resolve();
+          return Stream.never;
+        };
+        const fiber = yield* materializePull({
           destination: join(workspace, "stalled.txt"),
           manifest: source.manifest,
           read: stalledRead,
-        })
-      );
+        }).pipe(Effect.forkChild);
 
-      await started;
-      await Effect.runPromise(
-        Fiber.interrupt(fiber).pipe(Effect.timeout("1 second"))
-      );
+        yield* Effect.promise(() => started.promise);
+        yield* Fiber.interrupt(fiber).pipe(Effect.timeout("1 second"));
 
-      expect(readerSignal?.aborted).toBe(true);
-      expect(await readdir(workspace)).toEqual([]);
-    }));
+        expect(readerSignal?.aborted).toBe(true);
+        expect(yield* Effect.promise(() => readdir(workspace))).toEqual([]);
+      })
+    )
+  );
 
-  test("refuses an existing destination", () =>
-    withFixture(async ({ root, servedRoot, workspace }) => {
-      await writeFile(join(root, "file.txt"), "new");
-      const destination = join(workspace, "file.txt");
-      await writeFile(destination, "keep");
-      const source = await Effect.runPromise(
-        preparePull({ remotePath: "file.txt", servedRoot })
-      );
+  it.effect("refuses an existing destination", () =>
+    withFixture(({ root, servedRoot, workspace }) =>
+      Effect.gen(function* () {
+        const destination = join(workspace, "file.txt");
+        yield* Effect.promise(async () => {
+          await writeFile(join(root, "file.txt"), "new");
+          await writeFile(destination, "keep");
+        });
+        const source = yield* preparePull({
+          remotePath: "file.txt",
+          servedRoot,
+        });
 
-      const error = await collectError(
-        materializePull({
-          destination,
-          manifest: source.manifest,
-          read: source.read,
-        })
-      );
-
-      expect(error).toMatchObject({ _tag: "PullDestinationExistsError" });
-      expect(await readFile(destination, "utf8")).toBe("keep");
-    }));
-
-  test("never replaces a file created while bytes are staged", () =>
-    withFixture(async ({ root, servedRoot, workspace }) => {
-      await writeFile(join(root, "file.txt"), "incoming");
-      const source = await Effect.runPromise(
-        preparePull({ remotePath: "file.txt", servedRoot })
-      );
-      const destination = join(workspace, "file.txt");
-      let destinationCreated = false;
-      const racingRead: PullRead = (entry, signal) =>
-        source.read(entry, signal).pipe(
-          Stream.tap(() => {
-            if (destinationCreated) {
-              return Effect.void;
-            }
-            destinationCreated = true;
-            return Effect.promise(() => writeFile(destination, "keep"));
-          })
-        );
-
-      const error = await collectError(
-        materializePull({
-          destination,
-          manifest: source.manifest,
-          read: racingRead,
-        })
-      );
-
-      expect(error).toMatchObject({ _tag: "PullDestinationExistsError" });
-      expect(await readFile(destination, "utf8")).toBe("keep");
-      expect(await readdir(workspace)).toEqual(["file.txt"]);
-    }));
-
-  test("exposes a verified directory in one commit", () =>
-    withFixture(async ({ root, servedRoot, workspace }) => {
-      await mkdir(join(root, "folder"));
-      await Promise.all([
-        writeFile(join(root, "folder", "a.txt"), "alpha"),
-        writeFile(join(root, "folder", "b.txt"), "beta"),
-      ]);
-      const source = await Effect.runPromise(
-        preparePull({ remotePath: "folder", servedRoot })
-      );
-      const destination = join(workspace, "folder");
-      let releaseRead: (() => void) | undefined;
-      let readerStarted: (() => void) | undefined;
-      const mayRead = new Promise<void>((resolveRead) => {
-        releaseRead = resolveRead;
-      });
-      const started = new Promise<void>((resolveStarted) => {
-        readerStarted = resolveStarted;
-      });
-      const gatedRead: PullRead = (entry, signal) =>
-        Stream.unwrap(
-          Effect.promise(async () => {
-            readerStarted?.();
-            await mayRead;
-            return source.read(entry, signal);
-          })
-        );
-      const fiber = Effect.runFork(
-        materializePull({
-          destination,
-          manifest: source.manifest,
-          read: gatedRead,
-        })
-      );
-
-      await started;
-      try {
-        expect(await pathExists(destination)).toBe(false);
-      } finally {
-        releaseRead?.();
-      }
-      await Effect.runPromise(Fiber.join(fiber));
-
-      expect((await readdir(destination)).sort()).toEqual(["a.txt", "b.txt"]);
-      expect(await readFile(join(destination, "a.txt"), "utf8")).toBe("alpha");
-      expect(await readFile(join(destination, "b.txt"), "utf8")).toBe("beta");
-    }));
-
-  test("keeps a published pull successful when staging cleanup fails", () =>
-    withFixture(async ({ root, servedRoot, workspace }) => {
-      await writeFile(join(root, "published.txt"), "published");
-      const source = await Effect.runPromise(
-        preparePull({ remotePath: "published.txt", servedRoot })
-      );
-      const destination = join(workspace, "published.txt");
-      const remove = hostFileSystem.rm;
-      const removeSpy = spyOn(hostFileSystem, "rm");
-      removeSpy.mockImplementation(async (path, options) => {
-        if (
-          basename(String(path)).startsWith(".dumbridge-pull-") &&
-          (await pathExists(destination))
-        ) {
-          throw Object.assign(new Error("staging cleanup failed"), {
-            code: "EACCES",
-          });
-        }
-        return remove(path, options);
-      });
-
-      try {
-        const result = await Effect.runPromise(
+        const error = yield* Effect.flip(
           materializePull({
             destination,
             manifest: source.manifest,
@@ -282,99 +201,224 @@ describe("pull transfer destination", () => {
           })
         );
 
-        expect(result).toEqual({ bytes: 9, files: 1 });
-        expect(await readFile(destination, "utf8")).toBe("published");
-        const stages = (await readdir(workspace)).filter((name) =>
-          name.startsWith(".dumbridge-pull-")
+        expect(error).toMatchObject({ _tag: "PullDestinationExistsError" });
+        expect(yield* Effect.promise(() => readFile(destination, "utf8"))).toBe(
+          "keep"
         );
-        expect(stages).toHaveLength(1);
-        const [stage] = stages;
-        if (stage === undefined) {
-          throw new Error("the failed cleanup did not leave its stage");
-        }
-        expect(await readdir(join(workspace, stage))).toEqual([]);
-      } finally {
-        removeSpy.mockRestore();
-      }
-    }));
+      })
+    )
+  );
 
-  test("never replaces a directory created while bytes are staged", () =>
-    withFixture(async ({ root, servedRoot, workspace }) => {
-      await mkdir(join(root, "folder"));
-      await writeFile(join(root, "folder", "file.txt"), "new");
-      const source = await Effect.runPromise(
-        preparePull({ remotePath: "folder", servedRoot })
-      );
-      const destination = join(workspace, "folder");
-      let destinationCreated = false;
-      const racingRead: PullRead = (entry, signal) =>
-        Stream.unwrap(
-          Effect.promise(async () => {
-            if (!destinationCreated) {
+  it.effect("never replaces a file created while bytes are staged", () =>
+    withFixture(({ root, servedRoot, workspace }) =>
+      Effect.gen(function* () {
+        yield* Effect.promise(() =>
+          writeFile(join(root, "file.txt"), "incoming")
+        );
+        const source = yield* preparePull({
+          remotePath: "file.txt",
+          servedRoot,
+        });
+        const destination = join(workspace, "file.txt");
+        let destinationCreated = false;
+        const racingRead: PullRead = (entry, signal) =>
+          source.read(entry, signal).pipe(
+            Stream.tap(() => {
+              if (destinationCreated) {
+                return Effect.void;
+              }
               destinationCreated = true;
-              await mkdir(destination);
-            }
-            return source.read(entry, signal);
+              return Effect.promise(() => writeFile(destination, "keep"));
+            })
+          );
+
+        const error = yield* Effect.flip(
+          materializePull({
+            destination,
+            manifest: source.manifest,
+            read: racingRead,
           })
         );
 
-      const error = await collectError(
-        materializePull({
+        expect(error).toMatchObject({ _tag: "PullDestinationExistsError" });
+        expect(yield* Effect.promise(() => readFile(destination, "utf8"))).toBe(
+          "keep"
+        );
+        expect(yield* Effect.promise(() => readdir(workspace))).toEqual([
+          "file.txt",
+        ]);
+      })
+    )
+  );
+
+  it.effect("exposes a verified directory in one commit", () =>
+    withFixture(({ root, servedRoot, workspace }) =>
+      Effect.gen(function* () {
+        yield* Effect.promise(async () => {
+          await mkdir(join(root, "folder"));
+          await Promise.all([
+            writeFile(join(root, "folder", "a.txt"), "alpha"),
+            writeFile(join(root, "folder", "b.txt"), "beta"),
+          ]);
+        });
+        const source = yield* preparePull({
+          remotePath: "folder",
+          servedRoot,
+        });
+        const destination = join(workspace, "folder");
+        const mayRead = Promise.withResolvers<void>();
+        const started = Promise.withResolvers<void>();
+        const gatedRead: PullRead = (entry, signal) =>
+          Stream.unwrap(
+            Effect.promise(async () => {
+              started.resolve();
+              await mayRead.promise;
+              return source.read(entry, signal);
+            })
+          );
+        const fiber = yield* materializePull({
           destination,
           manifest: source.manifest,
-          read: racingRead,
+          read: gatedRead,
+        }).pipe(Effect.forkChild);
+
+        yield* Effect.promise(() => started.promise);
+        try {
+          expect(yield* Effect.promise(() => pathExists(destination))).toBe(
+            false
+          );
+        } finally {
+          mayRead.resolve();
+        }
+        yield* Fiber.join(fiber);
+
+        expect(
+          (yield* Effect.promise(() => readdir(destination))).sort()
+        ).toEqual(["a.txt", "b.txt"]);
+        expect(
+          yield* Effect.promise(() =>
+            readFile(join(destination, "a.txt"), "utf8")
+          )
+        ).toBe("alpha");
+        expect(
+          yield* Effect.promise(() =>
+            readFile(join(destination, "b.txt"), "utf8")
+          )
+        ).toBe("beta");
+      })
+    )
+  );
+
+  it.effect(
+    "keeps a published pull successful when staging cleanup fails",
+    () =>
+      withFixture(({ root, servedRoot, workspace }) =>
+        Effect.gen(function* () {
+          yield* Effect.promise(() =>
+            writeFile(join(root, "published.txt"), "published")
+          );
+          const source = yield* preparePull({
+            remotePath: "published.txt",
+            servedRoot,
+          });
+          const destination = join(workspace, "published.txt");
+          const remove = hostFileSystem.rm;
+          const removeSpy = vi.spyOn(hostFileSystem, "rm");
+          removeSpy.mockImplementation(async (path, options) => {
+            if (
+              basename(String(path)).startsWith(".dumbridge-pull-") &&
+              (await pathExists(destination))
+            ) {
+              throw Object.assign(new Error("staging cleanup failed"), {
+                code: "EACCES",
+              });
+            }
+            return remove(path, options);
+          });
+
+          const result = yield* materializePull({
+            destination,
+            manifest: source.manifest,
+            read: source.read,
+          }).pipe(
+            Effect.ensuring(
+              Effect.sync(() => {
+                removeSpy.mockRestore();
+              })
+            )
+          );
+
+          expect(result).toEqual({ bytes: 9, files: 1 });
+          expect(
+            yield* Effect.promise(() => readFile(destination, "utf8"))
+          ).toBe("published");
+          const stages = (yield* Effect.promise(() =>
+            readdir(workspace)
+          )).filter((name) => name.startsWith(".dumbridge-pull-"));
+          expect(stages).toHaveLength(1);
+          const [stage] = stages;
+          if (stage === undefined) {
+            throw new Error("the failed cleanup did not leave its stage");
+          }
+          expect(
+            yield* Effect.promise(() => readdir(join(workspace, stage)))
+          ).toEqual([]);
         })
-      );
+      )
+  );
 
-      expect(error).toMatchObject({ _tag: "PullDestinationExistsError" });
-      expect(await readdir(destination)).toEqual([]);
-      expect(await readdir(workspace)).toEqual(["folder"]);
-    }));
+  it.effect("never replaces a directory created while bytes are staged", () =>
+    withFixture(({ root, servedRoot, workspace }) =>
+      Effect.gen(function* () {
+        yield* Effect.promise(async () => {
+          await mkdir(join(root, "folder"));
+          await writeFile(join(root, "folder", "file.txt"), "new");
+        });
+        const source = yield* preparePull({
+          remotePath: "folder",
+          servedRoot,
+        });
+        const destination = join(workspace, "folder");
+        let destinationCreated = false;
+        const racingRead: PullRead = (entry, signal) =>
+          Stream.unwrap(
+            Effect.promise(async () => {
+              if (!destinationCreated) {
+                destinationCreated = true;
+                await mkdir(destination);
+              }
+              return source.read(entry, signal);
+            })
+          );
 
-  test("rejects a malicious manifest path before writing", () =>
-    withFixture(async ({ workspace }) => {
-      const manifest: PullManifest = {
-        digestAlgorithm: "sha256",
-        entries: [
-          {
-            digest:
-              "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-            kind: "file",
-            path: "../escape",
-            size: 0,
-          },
-        ],
-        kind: "directory",
-        name: "files",
-        totalBytes: 0,
-      };
+        const error = yield* Effect.flip(
+          materializePull({
+            destination,
+            manifest: source.manifest,
+            read: racingRead,
+          })
+        );
 
-      const error = await collectError(
-        materializePull({
-          destination: join(workspace, "files"),
-          manifest,
-          read: () => oneChunk(new Uint8Array()),
-        })
-      );
+        expect(error).toMatchObject({ _tag: "PullDestinationExistsError" });
+        expect(yield* Effect.promise(() => readdir(destination))).toEqual([]);
+        expect(yield* Effect.promise(() => readdir(workspace))).toEqual([
+          "folder",
+        ]);
+      })
+    )
+  );
 
-      expect(error).toMatchObject({ _tag: "PullPathError", path: "../escape" });
-      expect(await readdir(workspace)).toEqual([]);
-    }));
-
-  test("rejects Windows device aliases in received manifest components", () =>
-    withFixture(async ({ workspace }) => {
-      const aliases = ["CONIN$", "conout$.txt", "CON .txt", "AUX .log"];
-
-      for (const alias of aliases) {
+  it.effect("rejects a malicious manifest path before writing", () =>
+    withFixture(({ workspace }) =>
+      Effect.gen(function* () {
         const manifest: PullManifest = {
           digestAlgorithm: "sha256",
           entries: [
-            { kind: "directory", path: "safe" },
             {
               digest:
                 "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
               kind: "file",
-              path: `safe/${alias}`,
+              path: "../escape",
               size: 0,
             },
           ],
@@ -383,10 +427,9 @@ describe("pull transfer destination", () => {
           totalBytes: 0,
         };
 
-        // biome-ignore lint/performance/noAwaitInLoops: Each alias must be rejected independently.
-        const error = await collectError(
+        const error = yield* Effect.flip(
           materializePull({
-            destination: join(workspace, alias),
+            destination: join(workspace, "files"),
             manifest,
             read: () => oneChunk(new Uint8Array()),
           })
@@ -394,9 +437,56 @@ describe("pull transfer destination", () => {
 
         expect(error).toMatchObject({
           _tag: "PullPathError",
-          path: `safe/${alias}`,
+          path: "../escape",
         });
-      }
-      expect(await readdir(workspace)).toEqual([]);
-    }));
+        expect(yield* Effect.promise(() => readdir(workspace))).toEqual([]);
+      })
+    )
+  );
+
+  it.effect(
+    "rejects Windows device aliases in received manifest components",
+    () =>
+      withFixture(({ workspace }) =>
+        Effect.gen(function* () {
+          const aliases = ["CONIN$", "conout$.txt", "CON .txt", "AUX .log"];
+
+          // Sequential on purpose: each alias must be rejected independently.
+          yield* Effect.forEach(aliases, (alias) => {
+            const manifest: PullManifest = {
+              digestAlgorithm: "sha256",
+              entries: [
+                { kind: "directory", path: "safe" },
+                {
+                  digest:
+                    "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                  kind: "file",
+                  path: `safe/${alias}`,
+                  size: 0,
+                },
+              ],
+              kind: "directory",
+              name: "files",
+              totalBytes: 0,
+            };
+
+            return Effect.flip(
+              materializePull({
+                destination: join(workspace, alias),
+                manifest,
+                read: () => oneChunk(new Uint8Array()),
+              })
+            ).pipe(
+              Effect.map((error) => {
+                expect(error).toMatchObject({
+                  _tag: "PullPathError",
+                  path: `safe/${alias}`,
+                });
+              })
+            );
+          });
+          expect(yield* Effect.promise(() => readdir(workspace))).toEqual([]);
+        })
+      )
+  );
 });
