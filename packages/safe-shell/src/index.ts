@@ -283,9 +283,13 @@ const makeExecute = (servedRoot: ServedRoot, limits: SafeShellLimits) =>
       // Appended after the output limit check so the note itself can never
       // trip the limit; the path shown is the agent's own normalized input.
       if (view.outsideRootPath !== undefined) {
+        const separator =
+          shellResult.stderr === "" || shellResult.stderr.endsWith("\n")
+            ? ""
+            : "\n";
         return {
           ...shellResult,
-          stderr: `${shellResult.stderr}dumbridge: '${view.outsideRootPath}' is outside the served root; the served root is visible at ${view.workingDirectory}.\n`,
+          stderr: `${shellResult.stderr}${separator}dumbridge: '${view.outsideRootPath}' is outside the served root; the served root is visible at ${view.workingDirectory}.\n`,
         };
       }
 
