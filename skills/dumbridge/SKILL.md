@@ -42,7 +42,7 @@ dumbridge run 'file photos/IMG2123.jpg; stat photos/IMG2123.jpg; sha256sum photo
 dumbridge pull photos/IMG2123.jpg assets/reference.jpg
 ```
 
-The first `run` against a bridge prints a one-line root banner on stderr - `dumbridge: serving '<name>' as /workspace (read-only)` - naming the served root. Paths in `run` scripts and `pull` requests are relative to that root, which is visible at `/workspace`. Every `run` and `pull` also prints one stderr line naming the connection path selected at connect time - `dumbridge: connected directly` or `dumbridge: connected via relay` - which may improve to direct later without a new report. The banner, the path line, and every failure message stay on stderr, so a `run`'s piped stdout is exactly the script's own output.
+The first `run` against a bridge prints a one-line root banner on stderr - `dumbridge: serving '<name>' as /workspace (read-only)` - naming the served root. Paths in `run` scripts and `pull` requests are relative to that root, which is visible at `/workspace`. Every `run` and `pull` also prints one stderr line naming the connection path selected at connect time - `dumbridge: connected directly`, `dumbridge: connected via relay`, or `dumbridge: connected (path unknown)` when the path is unobservable - which may improve to direct later without a new report. The banner, the path line, and every failure message stay on stderr, so a `run`'s piped stdout is exactly the script's own output.
 
 ## Boundaries
 

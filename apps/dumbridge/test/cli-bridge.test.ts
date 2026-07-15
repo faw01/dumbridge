@@ -143,10 +143,10 @@ describe("dumbridge CLI bridge", () => {
           : "servedDUMBRIDGE_KEY=counterfeit[31m";
       const run = await runCli(["run", "cat uncommitted.txt"], environment);
       expect(run).toMatchObject({ exitCode: 0, stdout: "not in git\n" });
-      expect(run.stderr.split("\n", 1)[0]).toBe(
-        `dumbridge: serving '${bannerName}' as /workspace (read-only)`
-      );
       expect(run.stderr).toMatch(pathLine);
+      expect(run.stderr).toContain(
+        `dumbridge: serving '${bannerName}' as /workspace (read-only)\n`
+      );
       expect(run.stderr).not.toContain("\u001b");
       expect(run.stderr).not.toMatch(bridgeKeyLine);
 
@@ -198,12 +198,13 @@ describe("dumbridge CLI bridge", () => {
         "not in git\n"
       );
 
+      // A pull that fails after connecting still reports its path first.
       const missing = await runCli(["pull", "missing.txt"], environment);
-      expect(missing).toEqual({
-        exitCode: 1,
-        stderr: "dumbridge: The remote path does not exist.\n",
-        stdout: "",
-      });
+      expect(missing).toMatchObject({ exitCode: 1, stdout: "" });
+      expect(missing.stderr).toMatch(pathLine);
+      expect(missing.stderr).toContain(
+        "dumbridge: The remote path does not exist.\n"
+      );
 
       const decoded = parseBridgeKey(link);
       if (Result.isFailure(decoded)) {
@@ -218,16 +219,17 @@ describe("dumbridge CLI bridge", () => {
       if (Result.isFailure(wrongKey)) {
         throw wrongKey.failure;
       }
+      // The wrong-capability caller still connected, so the path line
+      // precedes the rejection; it reveals nothing beyond the reject itself.
       const rejected = await runCli(
         ["run", "true"],
         cleanEnvironment({ DUMBRIDGE_KEY: wrongKey.success })
       );
-      expect(rejected).toEqual({
-        exitCode: 1,
-        stderr:
-          "dumbridge: The bridge rejected the bridge key: the key does not match this bridge. Copy the current key printed by dumbridge serve.\n",
-        stdout: "",
-      });
+      expect(rejected).toMatchObject({ exitCode: 1, stdout: "" });
+      expect(rejected.stderr).toMatch(pathLine);
+      expect(rejected.stderr).toContain(
+        "dumbridge: The bridge rejected the bridge key: the key does not match this bridge. Copy the current key printed by dumbridge serve.\n"
+      );
     } finally {
       server.kill();
       await server.exited;

@@ -681,7 +681,7 @@ describe("bridge application supervision", () => {
     30_000
   );
 
-  it.effect("surfaces the connect-time path in run and pull results", () =>
+  it.effect("reports the connect-time path as soon as the session opens", () =>
     Effect.gen(function* () {
       const capability = mintCapability();
       const link = success(
@@ -692,6 +692,11 @@ describe("bridge application supervision", () => {
           transport: "iroh",
         })
       );
+      const reported: ConnectionPath[] = [];
+      const onConnected = (path: ConnectionPath) =>
+        Effect.sync(() => {
+          reported.push(path);
+        });
 
       const runResponse = joinChunks(
         encoded({
@@ -704,12 +709,13 @@ describe("bridge application supervision", () => {
         connectionPath: "relay",
         reads: [runResponse],
       });
-      const run = yield* runRemote({
+      yield* runRemote({
         link,
+        onConnected,
         script: "cat note.txt",
         transport: clientTransport(relayed.session),
       });
-      expect(run.connectionPath).toBe("relay");
+      expect(reported).toEqual(["relay"]);
 
       const pullResponse = joinChunks(
         encoded({
@@ -728,13 +734,29 @@ describe("bridge application supervision", () => {
         connectionPath: "direct",
         reads: [pullResponse],
       });
-      const pull = yield* pullRemote({
+      yield* pullRemote({
         destination: join(fixture, "empty"),
         link,
+        onConnected,
         remotePath: "empty",
         transport: clientTransport(direct.session),
       });
-      expect(pull.connectionPath).toBe("direct");
+      expect(reported).toEqual(["relay", "direct"]);
+
+      // A request that fails after connecting still reported its path first.
+      const failing = scriptedSession({
+        connectionPath: "direct",
+        reads: [encoded({ code: "not-found", type: "pull-error" })],
+      });
+      const error = yield* pullRemote({
+        destination: join(fixture, "missing"),
+        link,
+        onConnected,
+        remotePath: "missing.txt",
+        transport: clientTransport(failing.session),
+      }).pipe(Effect.flip);
+      expect(error).toMatchObject({ _tag: "PullNotFoundError" });
+      expect(reported).toEqual(["relay", "direct", "direct"]);
     })
   );
 

@@ -73,7 +73,6 @@ type DeterministicConnectError =
   | BridgeProxyUnsupportedError;
 
 interface RemoteRunResult {
-  readonly connectionPath: ConnectionPath;
   readonly exitCode: number;
   readonly served: string | undefined;
   readonly stderr: string;
@@ -82,7 +81,6 @@ interface RemoteRunResult {
 }
 
 interface RemotePullResult extends PullResult {
-  readonly connectionPath: ConnectionPath;
   readonly destination: string;
 }
 
@@ -325,6 +323,9 @@ export const runRemote = Effect.fn("BridgeClient.run")(
   (options: {
     readonly deadline?: Duration.Input;
     readonly link: string;
+    // Reports the connect-time path as soon as the session opens, so the
+    // caller still learns it when the request fails after connecting.
+    readonly onConnected?: (path: ConnectionPath) => Effect.Effect<void>;
     readonly script: string;
     readonly transport: BridgeTransport;
   }): Effect.Effect<
@@ -339,6 +340,7 @@ export const runRemote = Effect.fn("BridgeClient.run")(
             options.link
           );
           yield* Effect.addFinalizer(() => session.close);
+          yield* options.onConnected?.(session.connectionPath) ?? Effect.void;
           const requestFailure = yield* finishRequest(session, capability, {
             script: options.script,
             type: "run",
@@ -373,7 +375,6 @@ export const runRemote = Effect.fn("BridgeClient.run")(
               );
           }
           return {
-            connectionPath: session.connectionPath,
             exitCode: collected.exitCode,
             served: collected.served,
             stderr: collected.stderr,
@@ -396,6 +397,9 @@ export const pullRemote = Effect.fn("BridgeClient.pull")(
     readonly deadline?: Duration.Input;
     readonly destination?: string;
     readonly link: string;
+    // Reports the connect-time path as soon as the session opens, so the
+    // caller still learns it when the request fails after connecting.
+    readonly onConnected?: (path: ConnectionPath) => Effect.Effect<void>;
     readonly remotePath: string;
     readonly transport: BridgeTransport;
   }): Effect.Effect<
@@ -416,6 +420,7 @@ export const pullRemote = Effect.fn("BridgeClient.pull")(
             options.link
           );
           yield* Effect.addFinalizer(() => session.close);
+          yield* options.onConnected?.(session.connectionPath) ?? Effect.void;
           const requestFailure = yield* finishRequest(session, capability, {
             remotePath: options.remotePath,
             type: "pull",
@@ -460,11 +465,7 @@ export const pullRemote = Effect.fn("BridgeClient.pull")(
             manifest: first.value.manifest,
             read: makeRemoteRead(reader, finalFilePath),
           });
-          return {
-            ...result,
-            connectionPath: session.connectionPath,
-            destination,
-          };
+          return { ...result, destination };
         })
       )
     ).pipe(

@@ -81,7 +81,8 @@ const write = (stream: NodeJS.WriteStream, value: string) =>
 
 // One line per invocation, stderr only: piped stdout stays exactly the
 // script's or pull's own output. The line names the path selected at connect
-// time; iroh may upgrade a relayed session to direct afterwards.
+// time; iroh may upgrade a relayed session to direct afterwards. It prints as
+// soon as the session opens, so it survives requests that fail later.
 const connectionPathNotices: Record<ConnectionPath, string> = {
   direct: "dumbridge: connected directly\n",
   relay: "dumbridge: connected via relay\n",
@@ -90,6 +91,9 @@ const connectionPathNotices: Record<ConnectionPath, string> = {
 
 export const connectionPathNotice = (path: ConnectionPath) =>
   connectionPathNotices[path];
+
+const reportConnectionPath = (path: ConnectionPath) =>
+  write(process.stderr, connectionPathNotice(path));
 
 const parseServeTtl = (value: string) => {
   const duration = Duration.fromInput(value as Duration.Input);
@@ -285,6 +289,7 @@ const run = Command.make(
       const key = yield* resolveBridgeKey(keyFile);
       const result = yield* runRemote({
         link: Redacted.value(key),
+        onConnected: reportConnectionPath,
         script,
         transport: clientTransport(),
       });
@@ -294,7 +299,6 @@ const run = Command.make(
           `dumbridge: serving '${result.served}' as /workspace (read-only)\n`
         );
       }
-      yield* write(process.stderr, connectionPathNotice(result.connectionPath));
       yield* write(process.stdout, result.stdout);
       yield* write(process.stderr, result.stderr);
       process.exitCode = result.exitCode;
@@ -318,6 +322,7 @@ const pull = Command.make(
       const key = yield* resolveBridgeKey(keyFile);
       const request = {
         link: Redacted.value(key),
+        onConnected: reportConnectionPath,
         remotePath,
         transport: clientTransport(),
       };
@@ -326,7 +331,6 @@ const pull = Command.make(
           ? { ...request, destination: destination.value }
           : request
       );
-      yield* write(process.stderr, connectionPathNotice(result.connectionPath));
       yield* write(
         process.stdout,
         `Pulled ${result.files} file${result.files === 1 ? "" : "s"} (${result.bytes} bytes) to ${result.destination}.\n`
