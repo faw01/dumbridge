@@ -274,6 +274,19 @@ describe("dumbridge CLI key sources", () => {
     expect(result.stderr).toBe(expiredKeyMessage(1));
   });
 
+  test("pull reads the key from stdin when --key-file is '-'", async () => {
+    const link = mintKeyExpiringAt(1);
+
+    const result = await invokeCli({
+      args: ["pull", "--key-file", "-", "some.txt"],
+      stdin: `${link}\n`,
+    });
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toBe("");
+    expect(result.stderr).toBe(expiredKeyMessage(1));
+  });
+
   test("an explicit --key-file wins over DUMBRIDGE_KEY", async () => {
     const environmentKey = mintKeyExpiringAt(1000);
     const fileKey = mintKeyExpiringAt(2000);
