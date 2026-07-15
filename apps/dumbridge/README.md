@@ -20,9 +20,9 @@ npx --yes dumbridge run 'find . -name SKILL.md -print | sort'
 npx --yes dumbridge pull .agents/skills/wayfinder .agents/skills/wayfinder
 ```
 
-`skill` prints the bundled agent usage guide. `run` uses a bounded Just Bash filesystem, not the host shell, and its writes disappear after the request. `pull` accepts one exact relative path, refuses symlinks and existing destinations, and verifies content before publishing it.
+`skill` prints the bundled agent usage guide. `run` uses a bounded Just Bash filesystem, not the host shell, and its writes disappear after the request. `pull` accepts one exact relative path, refuses symlinks and existing destinations, and verifies content before publishing it. `run` and `pull` also accept the key through `--key-file <path>` (`-` reads stdin) instead of the environment.
 
-The bridge is one-way and the key is a bearer secret. Ctrl-C on `serve` revokes access.
+The bridge is one-way and the key is a bearer secret. Ctrl-C on `serve` revokes access. Every key expires on a deadline fixed at mint time (default 8 hours, `serve --ttl '90 minutes'`). `serve --detach <root>` runs the same server detached from the terminal, and `serve --stop` terminates it, which revokes the key.
 
 ## Prerelease limitation
 

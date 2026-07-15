@@ -2,7 +2,7 @@
 
 dumbridge gives a disposable cloud coding agent temporary, live, read-only access to one local directory.
 
-It is published on npm as [`dumbridge`](https://www.npmjs.com/package/dumbridge); the 0.1.0 `serve` / `run` / `pull` flow has been proven end to end from a real Cursor Cloud agent with `npx --yes dumbridge@0.1.0`. Bun 1.3.14 or newer must be on `PATH`; both `bunx` and `npx` work.
+It is published on npm as [`dumbridge`](https://www.npmjs.com/package/dumbridge); the `serve` / `run` / `pull` flow has been proven end to end from a real Cursor Cloud agent (on 0.1.0, `npx --yes dumbridge@0.1.0`), and 0.2.0 keeps that flow with the credential renamed to `DUMBRIDGE_KEY`. Bun 1.3.14 or newer must be on `PATH`; both `bunx` and `npx` work.
 
 ## Quick start
 
@@ -34,7 +34,7 @@ The bridge key is a bearer secret: anyone holding it while `serve` is running ca
 
 Failures speak the product's language and always exit non-zero: reads outside the served root explain that the share is jailed to it, an offline bridge reports the bridge process as unreachable, and invalid or expired keys are rejected by name. The first `run` against a bridge prints a one-line banner naming the served root (final path component only, sanitized) so the agent knows what it is exploring.
 
-Every key carries an expiry deadline fixed when `serve` mints it, enforced by the serve process itself: after the deadline, sessions are rejected even if the process keeps running. Stopping the bridge process still revokes access immediately. The deadline matters most for a detached bridge (`serve --detach`, tracked in [#22](https://github.com/faw01/dumbridge/issues/22)), where a long-lived server would otherwise mint a never-expiring credential; once the key expires, the detached process keeps running but grants nothing, and rerunning `serve` mints a fresh key.
+Every key carries an expiry deadline fixed when `serve` mints it, enforced by the serve process itself: after the deadline, sessions are rejected even if the process keeps running. Stopping the bridge process still revokes access immediately. The deadline matters most for a detached bridge (`serve --detach`), where a long-lived server would otherwise mint a never-expiring credential; once the key expires, the detached process keeps running but grants nothing, and rerunning `serve` mints a fresh key.
 
 ## Status
 
