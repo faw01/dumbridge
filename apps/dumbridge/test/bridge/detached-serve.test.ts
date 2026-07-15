@@ -6,8 +6,8 @@ import { Effect, Fiber } from "effect";
 import { TestClock } from "effect/testing";
 import {
   DetachedServeError,
-  detachServe,
   type DetachedSpawnRequest,
+  detachServe,
   type ServeProcessControl,
   stopDetachedServe,
 } from "../../src/bridge/detached-serve";

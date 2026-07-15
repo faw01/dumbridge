@@ -12,6 +12,9 @@ import { Result } from "effect";
 
 const cli = fileURLToPath(new URL("../src/cli.ts", import.meta.url));
 const bridgeKeyLine = /^DUMBRIDGE_KEY=(\S+)\r?\n/m;
+// The loopback path is real, so most assertions pin only the wording; the
+// direct-only test asserts the exact "connected directly" line.
+const pathLine = /^dumbridge: connected (directly|via relay)\n/m;
 const keyExpiryLine =
   /^The key expires at \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z\./m;
 const proxyNames = new Set([
@@ -138,9 +141,6 @@ describe("dumbridge CLI bridge", () => {
         process.platform === "win32"
           ? "served"
           : "servedDUMBRIDGE_KEY=counterfeit[31m";
-      // The loopback path is real, so only the wording is pinned here; the
-      // direct-only CLI test asserts the exact "connected directly" line.
-      const pathLine = /^dumbridge: connected (directly|via relay)\n/m;
       const run = await runCli(["run", "cat uncommitted.txt"], environment);
       expect(run).toMatchObject({ exitCode: 0, stdout: "not in git\n" });
       expect(run.stderr.split("\n", 1)[0]).toBe(
@@ -246,7 +246,10 @@ describe("dumbridge CLI bridge", () => {
     );
 
     try {
-      const { link } = await withTimeout(readBridgeStartup(server.stdout), 5000);
+      const { link } = await withTimeout(
+        readBridgeStartup(server.stdout),
+        5000
+      );
       await writeFile(join(servedRoot, "direct.txt"), "over a direct path\n");
       const environment = cleanEnvironment({ DUMBRIDGE_KEY: link });
 

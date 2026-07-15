@@ -115,7 +115,8 @@ describe("dumbridge serve flags", () => {
     ]);
     expect(bothPaths).toEqual({
       exitCode: 1,
-      stderr: "dumbridge: Use either --direct-only or --relay-only, not both.\n",
+      stderr:
+        "dumbridge: Use either --direct-only or --relay-only, not both.\n",
       stdout: "",
     });
     expect(stopWithPath).toEqual({

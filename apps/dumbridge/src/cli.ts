@@ -170,6 +170,53 @@ const serveStop = Effect.gen(function* () {
   );
 });
 
+interface ServeInvocation {
+  readonly detach: boolean;
+  readonly directOnly: boolean;
+  readonly relayOnly: boolean;
+  readonly root: Option.Option<string>;
+  readonly stop: boolean;
+  readonly ttl: Option.Option<string>;
+}
+
+const serveInvocationError = (flags: ServeInvocation): CliError | undefined => {
+  if (flags.detach && flags.stop) {
+    return new CliError({
+      message: "Use either --detach or --stop, not both.",
+    });
+  }
+  if (flags.directOnly && flags.relayOnly) {
+    return new CliError({
+      message: "Use either --direct-only or --relay-only, not both.",
+    });
+  }
+  if (!flags.stop) {
+    return;
+  }
+  if (Option.isSome(flags.root)) {
+    return new CliError({ message: "serve --stop does not take a root." });
+  }
+  if (Option.isSome(flags.ttl)) {
+    return new CliError({ message: "serve --stop does not take a --ttl." });
+  }
+  if (flags.directOnly || flags.relayOnly) {
+    return new CliError({
+      message: "serve --stop does not take --direct-only or --relay-only.",
+    });
+  }
+};
+
+const forcedReachability = (
+  flags: ServeInvocation
+): ServeReachability | undefined => {
+  if (flags.directOnly) {
+    return "direct-only";
+  }
+  if (flags.relayOnly) {
+    return "relay-only";
+  }
+};
+
 const serve = Command.make(
   "serve",
   {
@@ -197,36 +244,16 @@ const serve = Command.make(
       )
     ),
   },
-  ({ detach, directOnly, relayOnly, root, stop, ttl }) =>
+  (flags) =>
     Effect.gen(function* () {
-      if (detach && stop) {
-        return yield* new CliError({
-          message: "Use either --detach or --stop, not both.",
-        });
+      const invalid = serveInvocationError(flags);
+      if (invalid !== undefined) {
+        return yield* invalid;
       }
-      if (directOnly && relayOnly) {
-        return yield* new CliError({
-          message: "Use either --direct-only or --relay-only, not both.",
-        });
-      }
-      if (stop) {
-        if (Option.isSome(root)) {
-          return yield* new CliError({
-            message: "serve --stop does not take a root.",
-          });
-        }
-        if (Option.isSome(ttl)) {
-          return yield* new CliError({
-            message: "serve --stop does not take a --ttl.",
-          });
-        }
-        if (directOnly || relayOnly) {
-          return yield* new CliError({
-            message: "serve --stop does not take --direct-only or --relay-only.",
-          });
-        }
+      if (flags.stop) {
         return yield* serveStop;
       }
+      const { root, ttl } = flags;
       if (Option.isNone(root)) {
         return yield* new CliError({
           message: "serve requires a <root> directory to share.",
@@ -235,12 +262,8 @@ const serve = Command.make(
       const keyTtl = Option.isSome(ttl)
         ? yield* parseServeTtl(ttl.value)
         : undefined;
-      const reachability: ServeReachability | undefined = directOnly
-        ? "direct-only"
-        : relayOnly
-          ? "relay-only"
-          : undefined;
-      return yield* detach
+      const reachability = forcedReachability(flags);
+      return yield* flags.detach
         ? serveDetached(
             root.value,
             Option.isSome(ttl) ? ttl.value : undefined,
