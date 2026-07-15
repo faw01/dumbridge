@@ -158,6 +158,31 @@ describe("BridgeKey", () => {
     expect(redacted).not.toContain("iroh-secret-locator");
   });
 
+  test("scrubs every key token embedded in surrounding text", () => {
+    const capability = makeCapability(capabilityBytes);
+    if (Result.isFailure(capability)) {
+      throw capability.failure;
+    }
+    const link = encodeBridgeKey({
+      capability: capability.success,
+      expiresAt: testExpiresAt,
+      locator: "iroh-secret-locator",
+      transport: "iroh",
+    });
+    if (Result.isFailure(link)) {
+      throw link.failure;
+    }
+
+    const scrubbed = redactBridgeKey(
+      `connect failed for ${link.success} and again ${link.success}.`
+    );
+
+    expect(scrubbed).toBe(
+      "connect failed for dumbridge1_[REDACTED] and again dumbridge1_[REDACTED]."
+    );
+    expect(redactBridgeKey("no key here")).toBe("no key here");
+  });
+
   test("rejects malformed and oversized bridge keys with typed errors", () => {
     const malformed = parseBridgeKey("dumbridge1_***");
     const oversized = parseBridgeKey(`dumbridge1_${"a".repeat(16_384)}`);

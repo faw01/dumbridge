@@ -1,4 +1,7 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { encodeBridgeKey, mintCapability } from "@dumbridge/bridge-key";
 import { Effect } from "effect";
@@ -7,13 +10,18 @@ import { publicErrorMessage, resolveClientTransportOptions } from "../src/cli";
 
 const cliPath = fileURLToPath(new URL("../src/cli.ts", import.meta.url));
 
-const invokeWithEnvironment = async (
-  environment: Readonly<Record<string, string>>,
-  ...args: readonly string[]
-) => {
-  const process = Bun.spawn(["bun", "run", cliPath, ...args], {
-    env: { ...globalThis.process.env, ...environment },
+const invokeCli = async (options: {
+  readonly args: readonly string[];
+  readonly environment?: Readonly<Record<string, string>>;
+  readonly stdin?: string;
+}) => {
+  const process = Bun.spawn(["bun", "run", cliPath, ...options.args], {
+    env: { ...globalThis.process.env, ...options.environment },
     stderr: "pipe",
+    stdin:
+      options.stdin === undefined
+        ? "ignore"
+        : new TextEncoder().encode(options.stdin),
     stdout: "pipe",
   });
   const [exitCode, stdout, stderr] = await Promise.all([
@@ -25,8 +33,29 @@ const invokeWithEnvironment = async (
   return { exitCode, stderr, stdout };
 };
 
-const invoke = (...args: readonly string[]) =>
-  invokeWithEnvironment({}, ...args);
+const invokeWithEnvironment = (
+  environment: Readonly<Record<string, string>>,
+  ...args: readonly string[]
+) => invokeCli({ args, environment });
+
+const invoke = (...args: readonly string[]) => invokeCli({ args });
+
+// Expired keys let key-source tests prove a key was read and parsed without
+// dialing a bridge: the client reports the parsed deadline before connecting.
+const mintKeyExpiringAt = (expiresAt: number) =>
+  Effect.runSync(
+    Effect.fromResult(
+      encodeBridgeKey({
+        capability: mintCapability(),
+        expiresAt,
+        locator: "unused-client",
+        transport: "iroh",
+      })
+    )
+  );
+
+const expiredKeyMessage = (expiresAt: number) =>
+  `dumbridge: The bridge key expired at ${new Date(expiresAt).toISOString()}. Run dumbridge serve again to mint a fresh key.\n`;
 
 describe("dumbridge CLI", () => {
   test("shows help when no command is provided", async () => {
@@ -98,7 +127,9 @@ describe("dumbridge CLI", () => {
 
     expect(result.exitCode).toBe(1);
     expect(result.stdout).toBe("");
-    expect(result.stderr).toBe("dumbridge: DUMBRIDGE_KEY is not set.\n");
+    expect(result.stderr).toBe(
+      "dumbridge: No bridge key is set. Set DUMBRIDGE_KEY or pass --key-file <path> ('-' reads stdin).\n"
+    );
   });
 
   test("reports an invalid bridge key without echoing its value", async () => {
@@ -111,21 +142,12 @@ describe("dumbridge CLI", () => {
 
     expect(result.exitCode).toBe(1);
     expect(result.stdout).toBe("");
-    expect(result.stderr).toBe("dumbridge: DUMBRIDGE_KEY is invalid.\n");
+    expect(result.stderr).toBe("dumbridge: The bridge key is invalid.\n");
     expect(result.stderr).not.toContain(rejectedPayload);
   });
 
   test("reports an invalid pull path before attempting a connection", async () => {
-    const link = Effect.runSync(
-      Effect.fromResult(
-        encodeBridgeKey({
-          capability: mintCapability(),
-          expiresAt: Number.MAX_SAFE_INTEGER,
-          locator: "unused-client",
-          transport: "iroh",
-        })
-      )
-    );
+    const link = mintKeyExpiringAt(Number.MAX_SAFE_INTEGER);
     const result = await invokeWithEnvironment(
       { DUMBRIDGE_KEY: link },
       "pull",
@@ -138,16 +160,7 @@ describe("dumbridge CLI", () => {
   });
 
   test("reports an expired bridge key before attempting a connection", async () => {
-    const link = Effect.runSync(
-      Effect.fromResult(
-        encodeBridgeKey({
-          capability: mintCapability(),
-          expiresAt: 1,
-          locator: "unused-client",
-          transport: "iroh",
-        })
-      )
-    );
+    const link = mintKeyExpiringAt(1);
     const result = await invokeWithEnvironment(
       { DUMBRIDGE_KEY: link },
       "run",
@@ -156,9 +169,7 @@ describe("dumbridge CLI", () => {
 
     expect(result.exitCode).toBe(1);
     expect(result.stdout).toBe("");
-    expect(result.stderr).toBe(
-      "dumbridge: The bridge key expired at 1970-01-01T00:00:00.001Z. Run dumbridge serve again to mint a fresh key.\n"
-    );
+    expect(result.stderr).toBe(expiredKeyMessage(1));
   });
 
   test("rejects an invalid serve --ttl before opening a bridge", async () => {
@@ -203,5 +214,152 @@ describe("dumbridge CLI", () => {
       })
     ).toBe("The served root changed during the pull.");
     expect(publicErrorMessage({ message: "   " })).toBe("dumbridge failed.");
+  });
+
+  test("scrubs bridge key tokens from every public error message", () => {
+    expect(
+      publicErrorMessage({
+        message:
+          "connect failed for dumbridge1_bm90LWEtcmVhbC1icmlkZ2Uta2V5 mid-request",
+      })
+    ).toBe("connect failed for dumbridge1_[REDACTED] mid-request");
+  });
+});
+
+describe("dumbridge CLI key sources", () => {
+  let keyDirectory = "";
+  let keyFile = "";
+
+  beforeEach(async () => {
+    keyDirectory = await mkdtemp(join(tmpdir(), "dumbridge-key-"));
+    keyFile = join(keyDirectory, "bridge.key");
+  });
+
+  afterEach(async () => {
+    await rm(keyDirectory, { force: true, recursive: true });
+  });
+
+  test("run reads the key from --key-file and trims the trailing newline", async () => {
+    const link = mintKeyExpiringAt(1);
+    await writeFile(keyFile, `${link}\n`);
+
+    const result = await invoke("run", "--key-file", keyFile, "true");
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toBe("");
+    expect(result.stderr).toBe(expiredKeyMessage(1));
+  });
+
+  test("pull reads the key from --key-file", async () => {
+    const link = mintKeyExpiringAt(1);
+    await writeFile(keyFile, `${link}\n`);
+
+    const result = await invoke("pull", "--key-file", keyFile, "some.txt");
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toBe("");
+    expect(result.stderr).toBe(expiredKeyMessage(1));
+  });
+
+  test("run reads the key from stdin when --key-file is '-'", async () => {
+    const link = mintKeyExpiringAt(1);
+
+    const result = await invokeCli({
+      args: ["run", "--key-file", "-", "true"],
+      stdin: `${link}\n`,
+    });
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toBe("");
+    expect(result.stderr).toBe(expiredKeyMessage(1));
+  });
+
+  test("pull reads the key from stdin when --key-file is '-'", async () => {
+    const link = mintKeyExpiringAt(1);
+
+    const result = await invokeCli({
+      args: ["pull", "--key-file", "-", "some.txt"],
+      stdin: `${link}\n`,
+    });
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toBe("");
+    expect(result.stderr).toBe(expiredKeyMessage(1));
+  });
+
+  test("an explicit --key-file wins over DUMBRIDGE_KEY", async () => {
+    const environmentKey = mintKeyExpiringAt(1000);
+    const fileKey = mintKeyExpiringAt(2000);
+    await writeFile(keyFile, `${fileKey}\n`);
+
+    const result = await invokeCli({
+      args: ["run", "--key-file", keyFile, "true"],
+      environment: { DUMBRIDGE_KEY: environmentKey },
+    });
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toBe("");
+    expect(result.stderr).toBe(expiredKeyMessage(2000));
+  });
+
+  test("rejects an empty key file with a branded message", async () => {
+    await writeFile(keyFile, "\n");
+
+    const result = await invoke("run", "--key-file", keyFile, "true");
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toBe("");
+    expect(result.stderr).toBe("dumbridge: The key file is empty.\n");
+  });
+
+  test("rejects a multi-line key file without echoing its content", async () => {
+    await writeFile(keyFile, "not-a-key-line-one\nnot-a-key-line-two\n");
+
+    const result = await invoke("run", "--key-file", keyFile, "true");
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toBe("");
+    expect(result.stderr).toBe(
+      "dumbridge: The key file must contain one bridge key on a single line.\n"
+    );
+    expect(`${result.stdout}${result.stderr}`).not.toContain("not-a-key-line");
+  });
+
+  test("reports an unreadable key file without a cause dump", async () => {
+    const result = await invoke(
+      "run",
+      "--key-file",
+      join(keyDirectory, "missing.key"),
+      "true"
+    );
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toBe("");
+    expect(result.stderr).toBe("dumbridge: The key file could not be read.\n");
+  });
+
+  test("rejects empty stdin with a branded message", async () => {
+    const result = await invokeCli({
+      args: ["run", "--key-file", "-", "true"],
+      stdin: "",
+    });
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toBe("");
+    expect(result.stderr).toBe("dumbridge: Stdin provided no bridge key.\n");
+  });
+
+  test("documents the key resolution order in run and pull help", async () => {
+    const [run, pullHelp] = await Promise.all([
+      invoke("run", "--help"),
+      invoke("pull", "--help"),
+    ]);
+
+    for (const help of [run, pullHelp]) {
+      expect(help.exitCode).toBe(0);
+      expect(help.stdout).toContain("--key-file");
+      expect(help.stdout).toContain("DUMBRIDGE_KEY");
+      expect(help.stdout).toContain("stdin");
+    }
   });
 });

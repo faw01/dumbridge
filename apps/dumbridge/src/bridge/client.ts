@@ -121,7 +121,7 @@ const withClientDeadline = <A, E, R>(
 const decodeKey = (link: string) =>
   Effect.fromResult(parseBridgeKey(link)).pipe(
     Effect.mapError((error: BridgeKeyError) =>
-      clientError("bridge-key", "DUMBRIDGE_KEY is invalid.", error)
+      clientError("bridge-key", "The bridge key is invalid.", error)
     )
   );
 
@@ -133,11 +133,13 @@ const transientConnectFailure = (error: unknown) =>
   );
 
 // One user string per reject code; the compiler keeps the table exhaustive.
+// The wording names the credential, not one source: the key may have arrived
+// through --key-file, stdin, or DUMBRIDGE_KEY.
 const rejectMessages: Record<RejectCode, string> = {
   "expired-key":
-    "The bridge rejected DUMBRIDGE_KEY: the key has expired. Run dumbridge serve again to mint a fresh key.",
+    "The bridge rejected the bridge key: the key has expired. Run dumbridge serve again to mint a fresh key.",
   "invalid-key":
-    "The bridge rejected DUMBRIDGE_KEY: the key does not match this bridge. Copy the current key printed by dumbridge serve.",
+    "The bridge rejected the bridge key: the key does not match this bridge. Copy the current key printed by dumbridge serve.",
 };
 
 const rejectedError = (code: RejectCode) =>

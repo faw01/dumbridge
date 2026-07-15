@@ -981,7 +981,7 @@ describe("bridge application supervision", () => {
 
     expect(error).toMatchObject({
       _tag: "BridgeClientError",
-      message: "DUMBRIDGE_KEY is invalid.",
+      message: "The bridge key is invalid.",
       operation: "bridge-key",
     });
     expect(error.cause).toMatchObject({ _tag: "InvalidBridgeKeyError" });

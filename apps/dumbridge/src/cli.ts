@@ -2,6 +2,7 @@
 
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { redactBridgeKey } from "@dumbridge/bridge-key";
 import {
   type IrohTransportOptions,
   makeIrohTransport,
@@ -29,15 +30,17 @@ import {
   hostServeProcessControl,
   stopDetachedServe,
 } from "./detached-serve";
+import { resolveBridgeKey } from "./key-source";
 
 export class CliError extends Schema.TaggedErrorClass<CliError>()("CliError", {
   message: Schema.String,
 }) {}
 
-// The key embeds the bridge capability; Redacted keeps it out of any future
-// log or error interpolation, so it is unwrapped only at the request calls.
-const bridgeKey = Config.redacted("DUMBRIDGE_KEY").pipe(
-  Effect.mapError(() => new CliError({ message: "DUMBRIDGE_KEY is not set." }))
+const keyFileFlag = Flag.string("key-file").pipe(
+  Flag.optional,
+  Flag.withDescription(
+    "Read the bridge key from this file instead of DUMBRIDGE_KEY; pass '-' to read it from stdin."
+  )
 );
 
 const proxyEnvironmentNames = [
@@ -196,12 +199,12 @@ const serve = Command.make(
 
 const run = Command.make(
   "run",
-  { script: Argument.string("script") },
-  ({ script }) =>
+  { keyFile: keyFileFlag, script: Argument.string("script") },
+  ({ keyFile, script }) =>
     Effect.gen(function* () {
-      const link = Redacted.value(yield* bridgeKey);
+      const key = yield* resolveBridgeKey(keyFile);
       const result = yield* runRemote({
-        link,
+        link: Redacted.value(key),
         script,
         transport: clientTransport(),
       });
@@ -218,7 +221,7 @@ const run = Command.make(
     })
 ).pipe(
   Command.withDescription(
-    "Run in the cloud agent using DUMBRIDGE_KEY to query the local served root."
+    "Run in the cloud agent to query the local served root. The bridge key comes from --key-file when given ('-' reads stdin), otherwise from DUMBRIDGE_KEY."
   )
 );
 
@@ -226,14 +229,15 @@ const pull = Command.make(
   "pull",
   // biome-ignore assist/source/useSortedKeys: Effect CLI reads positional arguments in declaration order.
   {
+    keyFile: keyFileFlag,
     remotePath: Argument.string("remote-path"),
     destination: Argument.string("destination").pipe(Argument.optional),
   },
-  ({ destination, remotePath }) =>
+  ({ destination, keyFile, remotePath }) =>
     Effect.gen(function* () {
-      const link = Redacted.value(yield* bridgeKey);
+      const key = yield* resolveBridgeKey(keyFile);
       const request = {
-        link,
+        link: Redacted.value(key),
         remotePath,
         transport: clientTransport(),
       };
@@ -249,7 +253,7 @@ const pull = Command.make(
     })
 ).pipe(
   Command.withDescription(
-    "Run in the cloud agent using DUMBRIDGE_KEY to pull one local path."
+    "Run in the cloud agent to pull one local path. The bridge key comes from --key-file when given ('-' reads stdin), otherwise from DUMBRIDGE_KEY."
   )
 );
 
@@ -285,6 +289,9 @@ const pullErrorMessages = {
   ServedRootChangedError: "The served root changed during the pull.",
 } satisfies Record<PullErrorTag, string>;
 
+// Every failure the CLI prints flows through here, so the key scrubber
+// covers the whole error surface even if a future message interpolates a
+// raw key by mistake.
 export const publicErrorMessage = (error: unknown): string => {
   if (typeof error === "object" && error !== null && "_tag" in error) {
     const tag = String(error._tag);
@@ -300,7 +307,7 @@ export const publicErrorMessage = (error: unknown): string => {
   ) {
     const message = error.message.trim();
     if (message.length > 0) {
-      return message;
+      return redactBridgeKey(message);
     }
   }
   return "dumbridge failed.";
