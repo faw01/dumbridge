@@ -31,6 +31,8 @@ npx --yes dumbridge pull .agents/skills/wayfinder .agents/skills/wayfinder
 
 The bridge key is a bearer secret: anyone holding it while `serve` is running can read below the served root.
 
+Failures speak the product's language and always exit non-zero: reads outside the served root explain that the share is jailed to it, an offline bridge reports the bridge process as unreachable, and invalid or expired keys are rejected by name. The first `run` against a bridge prints a one-line banner naming the served root (final path component only, sanitized) so the agent knows what it is exploring.
+
 Every key carries an expiry deadline fixed when `serve` mints it, enforced by the serve process itself: after the deadline, sessions are rejected even if the process keeps running. Stopping the bridge process still revokes access immediately. The deadline matters most for a detached bridge (`serve --detach`, tracked in [#22](https://github.com/faw01/dumbridge/issues/22)), where a long-lived server would otherwise mint a never-expiring credential; once the key expires, the detached process keeps running but grants nothing, and rerunning `serve` mints a fresh key.
 
 ## Status

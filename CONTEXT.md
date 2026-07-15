@@ -40,6 +40,14 @@ _Avoid_: Download, sync
 The canonical, Windows-safe relative path that selects one file or directory below the served root; both bridge sides accept and reject the same remote paths.
 _Avoid_: Safe relative path, source path, virtual path
 
+**Sanitized root display**:
+The bounded, control-character-free final component of the served root's path; the only fragment of the host path any message may show.
+_Avoid_: Root name, host path, display path
+
+**Root banner**:
+The one-line notice the first run against a bridge prints, naming the served root by its sanitized root display.
+_Avoid_: Welcome message, MOTD, header
+
 **Skill guide**:
 The bundled agent usage instructions that `dumbridge skill` prints without contacting a bridge.
 _Avoid_: Docs command, manual

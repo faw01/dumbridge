@@ -38,3 +38,11 @@ dumbridge pull photos/IMG2123.jpg assets/reference.jpg
 - Expect writes inside `run` to disappear. dumbridge cannot change the user's local files.
 - Expect existing destinations and symlinks to be refused. Choose a new destination instead of deleting or overwriting one.
 - If the key is absent, expired, or the bridge is offline, ask the user to run `dumbridge serve <root>` locally and place the new key in the cloud environment. Keys expire after a TTL the user chose at serve time.
+
+## Recognizing failures
+
+- The first `run` prints `dumbridge: serving '<name>' as /workspace (read-only)` naming the served root; paths in `run` and `pull` are relative to it.
+- `is outside the served root`: the path left the one shared directory. Nothing above the served root exists here; go back to relative paths from `.`.
+- `The bridge process is unreachable`: `dumbridge serve` stopped or the machine went offline. Ask the user to start it again and provide the new key.
+- `The bridge rejected DUMBRIDGE_KEY` or `DUMBRIDGE_KEY is invalid`: the key is stale, expired, or mistyped. Ask the user for the key printed by the currently running `dumbridge serve`.
+- Every dumbridge failure exits non-zero, so `&&` chains and scripts can rely on the exit code.
