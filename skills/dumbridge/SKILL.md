@@ -42,7 +42,7 @@ dumbridge run 'file photos/IMG2123.jpg; stat photos/IMG2123.jpg; sha256sum photo
 dumbridge pull photos/IMG2123.jpg assets/reference.jpg
 ```
 
-The first `run` against a bridge prints a one-line root banner on stderr - `dumbridge: serving '<name>' as /workspace (read-only)` - naming the served root. Paths in `run` scripts and `pull` requests are relative to that root, which is visible at `/workspace`. The banner and every dumbridge message stay on stderr, so piped stdout is exactly the script's own output.
+The first `run` against a bridge prints a one-line root banner on stderr - `dumbridge: serving '<name>' as /workspace (read-only)` - naming the served root. Paths in `run` scripts and `pull` requests are relative to that root, which is visible at `/workspace`. The banner and every failure message stay on stderr, so a `run`'s piped stdout is exactly the script's own output.
 
 ## Boundaries
 
@@ -66,7 +66,7 @@ Ask the user to place the new key in the cloud environment as a secret file or e
 
 ## Recognizing failures
 
-Every dumbridge failure prints a branded `dumbridge:` message on stderr and exits non-zero; a successful `run` propagates the script's own exit code instead.
+Every dumbridge failure prints a branded `dumbridge:` message on stderr and exits non-zero; a `run` whose script executes exits with the script's own exit code instead.
 
 - `'<path>' is outside the served root; the served root is visible at /workspace.` - a note appended to the script's stderr when a read left the one shared directory. Nothing above the served root exists here; go back to relative paths from `.`.
 - `The bridge process is unreachable.` - `dumbridge serve` stopped or the machine went offline. Ask the user to start it again and provide the new key.
