@@ -14,6 +14,7 @@ import {
   type BridgeReadError,
   type BridgeSession,
   type BridgeTransport,
+  type ConnectionPath,
 } from "@dumbridge/bridge-transport";
 import {
   materializePull,
@@ -68,6 +69,7 @@ type DeterministicConnectError =
   | BridgeProxyUnsupportedError;
 
 interface RemoteRunResult {
+  readonly connectionPath: ConnectionPath;
   readonly exitCode: number;
   readonly served: string | undefined;
   readonly stderr: string;
@@ -76,6 +78,7 @@ interface RemoteRunResult {
 }
 
 interface RemotePullResult extends PullResult {
+  readonly connectionPath: ConnectionPath;
   readonly destination: string;
 }
 
@@ -366,6 +369,7 @@ export const runRemote = Effect.fn("BridgeClient.run")(
               );
           }
           return {
+            connectionPath: session.connectionPath,
             exitCode: collected.exitCode,
             served: collected.served,
             stderr: collected.stderr,
@@ -452,7 +456,11 @@ export const pullRemote = Effect.fn("BridgeClient.pull")(
             manifest: first.value.manifest,
             read: makeRemoteRead(reader, finalFilePath),
           });
-          return { ...result, destination };
+          return {
+            ...result,
+            connectionPath: session.connectionPath,
+            destination,
+          };
         })
       )
     ).pipe(

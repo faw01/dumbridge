@@ -19,6 +19,7 @@ import {
   BridgeReadError,
   type BridgeSession,
   type BridgeTransport,
+  type ConnectionPath,
 } from "@dumbridge/bridge-transport";
 import {
   encodeFrame,
@@ -85,6 +86,7 @@ const joinChunks = (...chunks: readonly Uint8Array[]) => {
 };
 
 const scriptedSession = (options: {
+  readonly connectionPath?: ConnectionPath;
   readonly onWrite?: (index: number, bytes: Uint8Array) => Effect.Effect<void>;
   readonly readDelay?: Duration.Input;
   readonly reads?: readonly Uint8Array[];
@@ -100,6 +102,7 @@ const scriptedSession = (options: {
     close: Effect.sync(() => {
       state.closeCalls += 1;
     }),
+    connectionPath: options.connectionPath ?? "unknown",
     finish: Effect.sync(() => {
       state.finishCalls += 1;
     }),
@@ -675,6 +678,63 @@ describe("bridge application supervision", () => {
         expect(serverSession.state.closeCalls).toBe(1);
       }),
     30_000
+  );
+
+  it.effect("surfaces the connect-time path in run and pull results", () =>
+    Effect.gen(function* () {
+      const capability = mintCapability();
+      const link = success(
+        encodeBridgeKey({
+          capability,
+          expiresAt: farFutureExpiry,
+          locator: "path-reporting-client",
+          transport: "iroh",
+        })
+      );
+
+      const runResponse = joinChunks(
+        encoded({
+          payload: new TextEncoder().encode("live\n"),
+          type: "stdout",
+        }),
+        encoded({ code: 0, truncated: false, type: "exit" })
+      );
+      const relayed = scriptedSession({
+        connectionPath: "relay",
+        reads: [runResponse],
+      });
+      const run = yield* runRemote({
+        link,
+        script: "cat note.txt",
+        transport: clientTransport(relayed.session),
+      });
+      expect(run.connectionPath).toBe("relay");
+
+      const pullResponse = joinChunks(
+        encoded({
+          manifest: {
+            digestAlgorithm: "sha256",
+            entries: [],
+            kind: "directory",
+            name: "empty",
+            totalBytes: 0,
+          },
+          type: "manifest",
+        }),
+        encoded({ type: "complete" })
+      );
+      const direct = scriptedSession({
+        connectionPath: "direct",
+        reads: [pullResponse],
+      });
+      const pull = yield* pullRemote({
+        destination: join(fixture, "empty"),
+        link,
+        remotePath: "empty",
+        transport: clientTransport(direct.session),
+      });
+      expect(pull.connectionPath).toBe("direct");
+    })
   );
 
   it.effect("rejects an invalid remote path before opening a session", () =>
