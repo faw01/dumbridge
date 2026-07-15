@@ -407,76 +407,96 @@ describe("bridge application supervision", () => {
     })
   );
 
-  it.effect("honors configured run deadlines beyond thirty seconds", () =>
-    Effect.gen(function* () {
-      const executionStarted = Promise.withResolvers<void>();
-      let executionWasAborted = false;
-      const execute = vi.spyOn(Bash.prototype, "exec");
-      execute.mockImplementation((_script, options) => {
-        executionStarted.resolve();
-        return new Promise<never>((_resolve, reject) => {
-          const signal = options?.signal;
-          const abort = () => {
-            executionWasAborted = true;
-            reject(signal?.reason ?? new Error("execution aborted"));
-          };
-          if (signal?.aborted) {
-            abort();
-            return;
-          }
-          signal?.addEventListener("abort", abort, { once: true });
+  it.effect(
+    "answers a run exceeding its time budget with a branded failure",
+    () =>
+      Effect.gen(function* () {
+        const executionStarted = Promise.withResolvers<void>();
+        let executionWasAborted = false;
+        const execute = vi.spyOn(Bash.prototype, "exec");
+        execute.mockImplementation((_script, options) => {
+          executionStarted.resolve();
+          return new Promise<never>((_resolve, reject) => {
+            const signal = options?.signal;
+            const abort = () => {
+              executionWasAborted = true;
+              reject(signal?.reason ?? new Error("execution aborted"));
+            };
+            if (signal?.aborted) {
+              abort();
+              return;
+            }
+            signal?.addEventListener("abort", abort, { once: true });
+          });
         });
-      });
 
-      const end = yield* Effect.scoped(
-        Effect.gen(function* () {
-          const accepts: BridgeListener["accept"][] = [];
-          const listener = listenerFrom(accepts);
-          const server = yield* openBridge({
-            deadlines: { run: "40 seconds" },
-            maxConcurrentSessions: 1,
-            root: fixture,
-            transport: listenerTransport(listener),
-          });
-          const request = requestFor(server.link, {
-            script: "cat note.txt",
-            type: "run",
-          });
-          const stalled = scriptedSession({ reads: [request] });
-          accepts.push(
-            Effect.succeed(stalled.session),
-            Effect.fail(
-              new BridgeListenerClosedError({ message: "listener closed" })
-            )
-          );
-          const fiber = yield* server.serve.pipe(Effect.flip, Effect.forkChild);
+        const end = yield* Effect.scoped(
+          Effect.gen(function* () {
+            const accepts: BridgeListener["accept"][] = [];
+            const listener = listenerFrom(accepts);
+            const server = yield* openBridge({
+              deadlines: { run: "40 seconds" },
+              maxConcurrentSessions: 1,
+              root: fixture,
+              transport: listenerTransport(listener),
+            });
+            const request = requestFor(server.link, {
+              script: "cat note.txt",
+              type: "run",
+            });
+            const stalled = scriptedSession({ reads: [request] });
+            accepts.push(
+              Effect.succeed(stalled.session),
+              Effect.fail(
+                new BridgeListenerClosedError({ message: "listener closed" })
+              )
+            );
+            const fiber = yield* server.serve.pipe(
+              Effect.flip,
+              Effect.forkChild
+            );
 
-          yield* Effect.promise(() => executionStarted.promise);
-          yield* TestClock.adjust("31 seconds");
-          expect(stalled.state.writes).toHaveLength(0);
-          expect(stalled.state.finishCalls).toBe(0);
-          expect(stalled.state.closeCalls).toBe(0);
-          expect(executionWasAborted).toBe(false);
+            yield* Effect.promise(() => executionStarted.promise);
+            yield* TestClock.adjust("31 seconds");
+            expect(stalled.state.writes).toHaveLength(0);
+            expect(stalled.state.finishCalls).toBe(0);
+            expect(stalled.state.closeCalls).toBe(0);
+            expect(executionWasAborted).toBe(false);
 
-          yield* TestClock.adjust("9 seconds");
-          const result = yield* Fiber.join(fiber);
-          expect(stalled.state.writes).toHaveLength(0);
-          expect(stalled.state.finishCalls).toBe(0);
-          expect(stalled.state.closeCalls).toBe(1);
-          expect(executionWasAborted).toBe(true);
-          return result;
-        })
-      ).pipe(
-        Effect.provide(TestClock.layer({ warningDelay: "10 seconds" })),
-        Effect.ensuring(
-          Effect.sync(() => {
-            execute.mockRestore();
+            yield* TestClock.adjust("9 seconds");
+            const result = yield* Fiber.join(fiber);
+            expect(executionWasAborted).toBe(true);
+            const events = decodeRunEvents(stalled.state.writes);
+            const stderrText = new TextDecoder().decode(
+              joinChunks(
+                ...events.flatMap((event) =>
+                  event.type === "stderr" ? [event.payload] : []
+                )
+              )
+            );
+            expect(stderrText).toBe(
+              "dumbridge: remote read shell time budget of 40s exceeded; narrow the query to fewer files or a subdirectory\n"
+            );
+            expect(events.at(-1)).toMatchObject({
+              code: 1,
+              truncated: true,
+              type: "exit",
+            });
+            expect(stalled.state.finishCalls).toBe(1);
+            expect(stalled.state.closeCalls).toBe(1);
+            return result;
           })
-        )
-      );
+        ).pipe(
+          Effect.provide(TestClock.layer({ warningDelay: "10 seconds" })),
+          Effect.ensuring(
+            Effect.sync(() => {
+              execute.mockRestore();
+            })
+          )
+        );
 
-      expect(end).toBeInstanceOf(BridgeListenerClosedError);
-    })
+        expect(end).toBeInstanceOf(BridgeListenerClosedError);
+      })
   );
 
   it.effect(
@@ -771,6 +791,77 @@ describe("bridge application supervision", () => {
         expect(slow.state.readCalls).toBeGreaterThan(1);
         expect(slow.state.closeCalls).toBe(1);
       })
+  );
+
+  it.effect(
+    "reports a response that ends before completing as the bridge closing early",
+    () =>
+      Effect.gen(function* () {
+        const capability = mintCapability();
+        const link = success(
+          encodeBridgeKey({
+            capability,
+            expiresAt: farFutureExpiry,
+            locator: "truncated-client",
+            transport: "iroh",
+          })
+        );
+        const truncated = scriptedSession({
+          reads: [
+            encoded({
+              payload: new TextEncoder().encode("partial"),
+              type: "stdout",
+            }),
+          ],
+        });
+
+        const error = yield* runRemote({
+          link,
+          script: "cat note.txt",
+          transport: clientTransport(truncated.session),
+        }).pipe(Effect.flip);
+
+        expect(error).toMatchObject({
+          _tag: "BridgeClientError",
+          message:
+            "The bridge ended the response before it completed. The serve process may have stopped or refused the query; check dumbridge serve on the local machine.",
+          operation: "run-response",
+        });
+        expect(error.cause).toMatchObject({ _tag: "IncompleteSessionError" });
+        expect(truncated.state.closeCalls).toBe(1);
+      })
+  );
+
+  it.effect("still reports a malformed frame as an invalid response", () =>
+    Effect.gen(function* () {
+      const capability = mintCapability();
+      const link = success(
+        encodeBridgeKey({
+          capability,
+          expiresAt: farFutureExpiry,
+          locator: "malformed-client",
+          transport: "iroh",
+        })
+      );
+      const garbageFrame = Uint8Array.of(
+        ...[0, 0, 0, 8],
+        ...[0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff]
+      );
+      const malformed = scriptedSession({ reads: [garbageFrame] });
+
+      const error = yield* runRemote({
+        link,
+        script: "cat note.txt",
+        transport: clientTransport(malformed.session),
+      }).pipe(Effect.flip);
+
+      expect(error).toMatchObject({
+        _tag: "BridgeClientError",
+        message: "The bridge returned an invalid response.",
+        operation: "run-response",
+      });
+      expect(malformed.state.closeCalls).toBe(1);
+    })
   );
 
   it.live("retries one connection failure before sending the request", () =>

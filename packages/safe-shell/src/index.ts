@@ -159,10 +159,32 @@ const classifyLimit = (
   }
 };
 
-const limitMessage = (limit: ShellLimit) =>
-  `remote read shell ${limit} limit exceeded`;
+const formatBytes = (bytes: number) => {
+  const mebibyte = 1024 * 1024;
+  if (bytes >= mebibyte && bytes % mebibyte === 0) {
+    return `${bytes / mebibyte} MiB`;
+  }
+  if (bytes >= 1024 && bytes % 1024 === 0) {
+    return `${bytes / 1024} KiB`;
+  }
+  return `${bytes} bytes`;
+};
 
-const executionError = (cause: unknown) => {
+// Each message states the configured ceiling, whether it is per-file or
+// cumulative, and how to recover, because the agent on the other side of the
+// bridge sees only this one line.
+const limitMessage = (limit: ShellLimit, limits: SafeShellLimits) => {
+  const detail: Record<ShellLimit, string> = {
+    "file-read": `one run may read at most ${formatBytes(limits.maxFileReadBytes)} in total across every file it opens; narrow the query to fewer files or a subdirectory`,
+    output: `one run may return at most ${formatBytes(limits.maxOutputBytes)} of combined stdout and stderr; narrow the query or filter its output`,
+    overlay: `one run may write at most ${formatBytes(limits.maxOverlayBytes)} into its throwaway overlay`,
+    "overlay-entries": `one run may create at most ${limits.maxOverlayEntries} overlay entries`,
+    script: `one script may be at most ${formatBytes(limits.maxScriptBytes)}; shorten the script`,
+  };
+  return `remote read shell ${limit} limit exceeded: ${detail[limit]}`;
+};
+
+const executionError = (cause: unknown, limits: SafeShellLimits) => {
   if (
     cause instanceof ServedRootChangedError ||
     cause instanceof ServedRootSourceChangedError
@@ -172,7 +194,7 @@ const executionError = (cause: unknown) => {
   if (cause instanceof ServedRootLimitSignal) {
     return new ShellLimitExceededError({
       limit: cause.limit,
-      message: limitMessage(cause.limit),
+      message: limitMessage(cause.limit, limits),
     });
   }
   return new ShellExecutionError({
@@ -208,13 +230,13 @@ const makeExecute = (servedRoot: ServedRoot, limits: SafeShellLimits) =>
       if (encodedSize(script) > limits.maxScriptBytes) {
         return yield* new ShellLimitExceededError({
           limit: "script",
-          message: limitMessage("script"),
+          message: limitMessage("script", limits),
         });
       }
 
       yield* servedRoot.verify();
       const view = yield* Effect.try({
-        catch: executionError,
+        catch: (cause) => executionError(cause, limits),
         try: () =>
           servedRoot.openReadView({
             maxFileReadBytes: limits.maxFileReadBytes,
@@ -224,7 +246,7 @@ const makeExecute = (servedRoot: ServedRoot, limits: SafeShellLimits) =>
       });
       yield* servedRoot.verify();
       const bash = yield* Effect.try({
-        catch: executionError,
+        catch: (cause) => executionError(cause, limits),
         try: () =>
           new Bash({
             commands: [...safeCommands],
@@ -262,10 +284,10 @@ const makeExecute = (servedRoot: ServedRoot, limits: SafeShellLimits) =>
           if (view.limitExceeded !== undefined) {
             return new ShellLimitExceededError({
               limit: view.limitExceeded,
-              message: limitMessage(view.limitExceeded),
+              message: limitMessage(view.limitExceeded, limits),
             });
           }
-          return executionError(cause);
+          return executionError(cause, limits);
         },
         try: async (signal) => {
           view.begin(signal);
@@ -295,7 +317,7 @@ const makeExecute = (servedRoot: ServedRoot, limits: SafeShellLimits) =>
       if (exceeded !== undefined) {
         return yield* new ShellLimitExceededError({
           limit: exceeded,
-          message: limitMessage(exceeded),
+          message: limitMessage(exceeded, limits),
         });
       }
 

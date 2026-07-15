@@ -92,6 +92,17 @@ const withSessionDeadline = <A, E, R>(
     })
   );
 
+// handleRun enforces the run budget itself so an over-budget query is
+// answered with a branded failure; the session backstop gets only the grace
+// needed to deliver that answer, mirroring the bounded reject send. The
+// budget on the query is unchanged.
+const runResponseGrace: Duration.Input = "10 seconds";
+
+const runSessionBackstop = (budget: Duration.Input): Duration.Input =>
+  Duration.millis(
+    Duration.toMillis(budget) + Duration.toMillis(runResponseGrace)
+  );
+
 type RequestHandlerError =
   | Effect.Error<ReturnType<typeof handlePull>>
   | Effect.Error<ReturnType<typeof handleRun>>
@@ -135,12 +146,13 @@ const handleSession = (session: BridgeSession, context: SessionContext) =>
         request.type === "run"
           ? withSessionDeadline(
               "run",
-              context.deadlines.run,
+              runSessionBackstop(context.deadlines.run),
               handleRun(
                 session,
                 context.shell,
                 request.script,
-                context.sendBanner
+                context.sendBanner,
+                context.deadlines.run
               )
             )
           : withSessionDeadline(

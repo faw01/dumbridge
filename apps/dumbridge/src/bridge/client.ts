@@ -6,10 +6,12 @@ import {
   parseBridgeKey,
 } from "@dumbridge/bridge-key";
 import {
+  type BridgeDeadlineExceededError,
   BridgeLocator,
   type BridgeLocatorInvalidError,
   type BridgeProxyConfigurationError,
   type BridgeProxyUnsupportedError,
+  type BridgeReadError,
   type BridgeSession,
   type BridgeTransport,
 } from "@dumbridge/bridge-transport";
@@ -27,6 +29,7 @@ import {
   makeRunResponseSession,
   type RejectCode,
   type RunResponseEvent,
+  type WireDecodeError,
 } from "@dumbridge/wire";
 import { Clock, type Duration, Effect, Option, Schema } from "effect";
 import { joinBytes, WireEventReader } from "./channel";
@@ -192,6 +195,34 @@ const finishRequest = (
     return failure === undefined ? undefined : requestSendFailure(failure);
   });
 
+type ResponseReadError =
+  | WireDecodeError
+  | BridgeDeadlineExceededError
+  | BridgeReadError;
+
+const invalidResponseMessage = "The bridge returned an invalid response.";
+const responseEndedEarlyMessage =
+  "The bridge ended the response before it completed. The serve process may have stopped or refused the query; check dumbridge serve on the local machine.";
+const connectionFailedMessage =
+  "The bridge connection failed while reading the response. Check that dumbridge serve is still running on the local machine.";
+
+// One user string per response read failure; the compiler keeps the table
+// exhaustive. A stream the bridge ended early and a lost connection are
+// reported as such instead of masquerading as a malformed response.
+const responseReadMessages: Record<ResponseReadError["_tag"], string> = {
+  AuthenticationError: invalidResponseMessage,
+  BridgeDeadlineExceededError: connectionFailedMessage,
+  BridgeReadError: connectionFailedMessage,
+  FrameTooLargeError: invalidResponseMessage,
+  IllegalFrameError: invalidResponseMessage,
+  IncompleteFrameError: responseEndedEarlyMessage,
+  IncompleteSessionError: responseEndedEarlyMessage,
+  MalformedFrameError: invalidResponseMessage,
+  UnknownFrameTypeError: invalidResponseMessage,
+  UnsupportedProtocolError: invalidResponseMessage,
+  WireLimitExceededError: invalidResponseMessage,
+};
+
 const nextClientEvent = <A>(
   reader: WireEventReader<A>,
   operation: "run-response"
@@ -200,11 +231,7 @@ const nextClientEvent = <A>(
     .next()
     .pipe(
       Effect.mapError((error) =>
-        clientError(
-          operation,
-          "The bridge returned an invalid response.",
-          error
-        )
+        clientError(operation, responseReadMessages[error._tag], error)
       )
     );
 
