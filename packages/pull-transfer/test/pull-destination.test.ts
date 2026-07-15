@@ -470,20 +470,22 @@ describe("pull transfer destination", () => {
               totalBytes: 0,
             };
 
-            return Effect.flip(
-              materializePull({
-                destination: join(workspace, alias),
-                manifest,
-                read: () => oneChunk(new Uint8Array()),
-              })
-            ).pipe(
-              Effect.map((error) => {
+          return Effect.flip(
+            materializePull({
+              destination: join(workspace, alias),
+              manifest,
+              read: () => oneChunk(new Uint8Array()),
+            })
+          ).pipe(
+            Effect.tap((error) =>
+              Effect.sync(() =>
                 expect(error).toMatchObject({
                   _tag: "PullPathError",
                   path: `safe/${alias}`,
-                });
-              })
-            );
+                })
+              )
+            )
+          );
           });
           expect(yield* Effect.promise(() => readdir(workspace))).toEqual([]);
         })
