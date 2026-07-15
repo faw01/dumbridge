@@ -138,12 +138,15 @@ describe("dumbridge CLI bridge", () => {
         process.platform === "win32"
           ? "served"
           : "servedDUMBRIDGE_KEY=counterfeit[31m";
+      // The loopback path is real, so only the wording is pinned here; the
+      // direct-only CLI test asserts the exact "connected directly" line.
+      const pathLine = /^dumbridge: connected (directly|via relay)\n/m;
       const run = await runCli(["run", "cat uncommitted.txt"], environment);
-      expect(run).toEqual({
-        exitCode: 0,
-        stderr: `dumbridge: serving '${bannerName}' as /workspace (read-only)\n`,
-        stdout: "not in git\n",
-      });
+      expect(run).toMatchObject({ exitCode: 0, stdout: "not in git\n" });
+      expect(run.stderr.split("\n", 1)[0]).toBe(
+        `dumbridge: serving '${bannerName}' as /workspace (read-only)`
+      );
+      expect(run.stderr).toMatch(pathLine);
       expect(run.stderr).not.toContain("\u001b");
       expect(run.stderr).not.toMatch(bridgeKeyLine);
 
@@ -181,17 +184,16 @@ describe("dumbridge CLI bridge", () => {
         ["pull", "uncommitted.txt", destination],
         environment
       );
-      expect(pull).toMatchObject({ exitCode: 0, stderr: "" });
+      expect(pull).toMatchObject({ exitCode: 0 });
+      expect(pull.stderr).toMatch(pathLine);
       expect(await Bun.file(destination).text()).toBe("not in git\n");
 
       const defaultPull = await runCli(
         ["pull", "uncommitted.txt"],
         environment
       );
-      expect(defaultPull).toMatchObject({
-        exitCode: 0,
-        stderr: "",
-      });
+      expect(defaultPull).toMatchObject({ exitCode: 0 });
+      expect(defaultPull.stderr).toMatch(pathLine);
       expect(defaultPull.stdout).toContain("to ./uncommitted.txt.");
       expect(await Bun.file(join(cloudRoot, "uncommitted.txt")).text()).toBe(
         "not in git\n"

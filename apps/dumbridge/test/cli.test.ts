@@ -7,7 +7,11 @@ import { encodeBridgeKey, mintCapability } from "@dumbridge/bridge-key";
 import { PullLimitError } from "@dumbridge/pull-transfer";
 import { Effect } from "effect";
 import packageJson from "../package.json" with { type: "json" };
-import { publicErrorMessage, resolveClientTransportOptions } from "../src/cli";
+import {
+  connectionPathNotice,
+  publicErrorMessage,
+  resolveClientTransportOptions,
+} from "../src/cli";
 
 const cliPath = fileURLToPath(new URL("../src/cli.ts", import.meta.url));
 
@@ -191,6 +195,18 @@ describe("dumbridge CLI", () => {
     expect(resolveClientTransportOptions({})).toEqual({
       proxy: { _tag: "Disabled" },
     });
+  });
+
+  test("names each connection path in one branded stderr line", () => {
+    expect(connectionPathNotice("direct")).toBe(
+      "dumbridge: connected directly\n"
+    );
+    expect(connectionPathNotice("relay")).toBe(
+      "dumbridge: connected via relay\n"
+    );
+    expect(connectionPathNotice("unknown")).toBe(
+      "dumbridge: connected (path unknown)\n"
+    );
   });
 
   test("maps pull IO failures and empty errors to stable public text", () => {

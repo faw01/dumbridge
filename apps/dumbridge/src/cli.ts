@@ -3,6 +3,7 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { redactBridgeKey } from "@dumbridge/bridge-key";
+import type { ConnectionPath } from "@dumbridge/bridge-transport";
 import {
   type IrohTransportOptions,
   makeIrohTransport,
@@ -76,6 +77,18 @@ const write = (stream: NodeJS.WriteStream, value: string) =>
   Effect.sync(() => {
     stream.write(value);
   });
+
+// One line per invocation, stderr only: piped stdout stays exactly the
+// script's or pull's own output. The line names the path selected at connect
+// time; iroh may upgrade a relayed session to direct afterwards.
+const connectionPathNotices: Record<ConnectionPath, string> = {
+  direct: "dumbridge: connected directly\n",
+  relay: "dumbridge: connected via relay\n",
+  unknown: "dumbridge: connected (path unknown)\n",
+};
+
+export const connectionPathNotice = (path: ConnectionPath) =>
+  connectionPathNotices[path];
 
 const parseServeTtl = (value: string) => {
   const duration = Duration.fromInput(value as Duration.Input);
@@ -217,6 +230,7 @@ const run = Command.make(
           `dumbridge: serving '${result.served}' as /workspace (read-only)\n`
         );
       }
+      yield* write(process.stderr, connectionPathNotice(result.connectionPath));
       yield* write(process.stdout, result.stdout);
       yield* write(process.stderr, result.stderr);
       process.exitCode = result.exitCode;
@@ -248,6 +262,7 @@ const pull = Command.make(
           ? { ...request, destination: destination.value }
           : request
       );
+      yield* write(process.stderr, connectionPathNotice(result.connectionPath));
       yield* write(
         process.stdout,
         `Pulled ${result.files} file${result.files === 1 ? "" : "s"} (${result.bytes} bytes) to ${result.destination}.\n`

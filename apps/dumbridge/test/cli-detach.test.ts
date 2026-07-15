@@ -12,6 +12,7 @@ import { Effect, Result } from "effect";
 
 const cli = fileURLToPath(new URL("../src/cli.ts", import.meta.url));
 const bridgeKeyLine = /^DUMBRIDGE_KEY=(\S+)\r?\n/m;
+const pathLine = /^dumbridge: connected (directly|via relay)\n/m;
 const proxyNames = new Set([
   "ALL_PROXY",
   "HTTPS_PROXY",
@@ -186,11 +187,11 @@ describe.skipIf(process.platform === "win32")(
       const run = await runCli(["run", "cat uncommitted.txt"], {
         DUMBRIDGE_KEY: key,
       });
-      expect(run).toEqual({
-        exitCode: 0,
-        stderr: "dumbridge: serving 'served' as /workspace (read-only)\n",
-        stdout: "not in git\n",
-      });
+      expect(run).toMatchObject({ exitCode: 0, stdout: "not in git\n" });
+      expect(run.stderr.split("\n", 1)[0]).toBe(
+        "dumbridge: serving 'served' as /workspace (read-only)"
+      );
+      expect(run.stderr).toMatch(pathLine);
 
       const duplicate = await runCli(["serve", "--detach", servedRoot]);
       expect(duplicate.exitCode).toBe(1);
@@ -235,11 +236,11 @@ describe.skipIf(process.platform === "win32")(
 
       expect(isAlive(record.pid)).toBe(true);
       const run = await runCli(["run", "cat note.txt"], { DUMBRIDGE_KEY: key });
-      expect(run).toEqual({
-        exitCode: 0,
-        stderr: "dumbridge: serving 'served' as /workspace (read-only)\n",
-        stdout: "alive\n",
-      });
+      expect(run).toMatchObject({ exitCode: 0, stdout: "alive\n" });
+      expect(run.stderr.split("\n", 1)[0]).toBe(
+        "dumbridge: serving 'served' as /workspace (read-only)"
+      );
+      expect(run.stderr).toMatch(pathLine);
 
       const stop = await runCli(["serve", "--stop"]);
       expect(stop.exitCode).toBe(0);
