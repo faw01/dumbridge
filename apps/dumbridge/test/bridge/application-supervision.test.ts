@@ -282,7 +282,7 @@ describe("bridge application supervision", () => {
       })
   );
 
-  it.live("recovers from transient accepts and a slow-drip request", () =>
+  it.effect("recovers from transient accepts and a slow-drip request", () =>
     Effect.gen(function* () {
       const accepts: BridgeListener["accept"][] = [];
       const listener = listenerFrom(accepts);
@@ -319,7 +319,16 @@ describe("bridge application supervision", () => {
         )
       );
 
-      const end = yield* Effect.scoped(server.serve.pipe(Effect.flip));
+      // One sweep covers the accept backoffs (10 + 20 millis) and the
+      // 20-milli request deadline that cuts off the slow drip.
+      const end = yield* Effect.gen(function* () {
+        const fiber = yield* Effect.scoped(server.serve.pipe(Effect.flip)).pipe(
+          Effect.forkChild
+        );
+        yield* Effect.yieldNow;
+        yield* TestClock.adjust("100 millis");
+        return yield* Fiber.join(fiber);
+      }).pipe(Effect.provide(TestClock.layer({ warningDelay: "10 seconds" })));
 
       expect(end).toBeInstanceOf(BridgeListenerClosedError);
       expect(slow.state.closeCalls).toBe(1);
@@ -720,44 +729,53 @@ describe("bridge application supervision", () => {
       })
   );
 
-  it.live("bounds a client response even when every read makes progress", () =>
-    Effect.gen(function* () {
-      const capability = mintCapability();
-      const link = success(
-        encodeBridgeKey({
-          capability,
-          expiresAt: farFutureExpiry,
-          locator: "test-client",
-          transport: "iroh",
-        })
-      );
-      const response = joinChunks(
-        encoded({
-          payload: new TextEncoder().encode("live\n"),
-          type: "stdout",
-        }),
-        encoded({ code: 0, truncated: false, type: "exit" })
-      );
-      const slow = scriptedSession({
-        readDelay: "5 millis",
-        reads: Array.from(response, (byte) => Uint8Array.of(byte)),
-      });
+  it.effect(
+    "bounds a client response even when every read makes progress",
+    () =>
+      Effect.gen(function* () {
+        const capability = mintCapability();
+        const link = success(
+          encodeBridgeKey({
+            capability,
+            expiresAt: farFutureExpiry,
+            locator: "test-client",
+            transport: "iroh",
+          })
+        );
+        const response = joinChunks(
+          encoded({
+            payload: new TextEncoder().encode("live\n"),
+            type: "stdout",
+          }),
+          encoded({ code: 0, truncated: false, type: "exit" })
+        );
+        const slow = scriptedSession({
+          readDelay: "5 millis",
+          reads: Array.from(response, (byte) => Uint8Array.of(byte)),
+        });
 
-      const error = yield* runRemote({
-        deadline: "25 millis",
-        link,
-        script: "cat note.txt",
-        transport: clientTransport(slow.session),
-      }).pipe(Effect.flip);
+        const error = yield* Effect.gen(function* () {
+          const fiber = yield* runRemote({
+            deadline: "25 millis",
+            link,
+            script: "cat note.txt",
+            transport: clientTransport(slow.session),
+          }).pipe(Effect.flip, Effect.forkChild);
+          yield* Effect.yieldNow;
+          yield* TestClock.adjust("25 millis");
+          return yield* Fiber.join(fiber);
+        }).pipe(
+          Effect.provide(TestClock.layer({ warningDelay: "10 seconds" }))
+        );
 
-      expect(error).toMatchObject({
-        _tag: "BridgeClientError",
-        message: "The bridge run response deadline was exceeded.",
-        operation: "run-response",
-      });
-      expect(slow.state.readCalls).toBeGreaterThan(1);
-      expect(slow.state.closeCalls).toBe(1);
-    })
+        expect(error).toMatchObject({
+          _tag: "BridgeClientError",
+          message: "The bridge run response deadline was exceeded.",
+          operation: "run-response",
+        });
+        expect(slow.state.readCalls).toBeGreaterThan(1);
+        expect(slow.state.closeCalls).toBe(1);
+      })
   );
 
   it.live("retries one connection failure before sending the request", () =>

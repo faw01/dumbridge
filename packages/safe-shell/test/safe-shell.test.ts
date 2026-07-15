@@ -492,12 +492,32 @@ describe("SafeShell", () => {
         maxFileReadBytes: Number.MAX_SAFE_INTEGER,
         maxLoopIterations: Number.MAX_SAFE_INTEGER,
       });
-      const fiber = yield* shell
-        .execute("while true; do cat tick.txt > /dev/null; done")
-        .pipe(Effect.forkChild);
-      yield* Effect.sleep("5 millis");
+      // Interrupt only after the loop observably read the file once, so the
+      // test never passes by interrupting a script that had not started.
+      const firstRead = Promise.withResolvers<void>();
+      const originalOpen = hostFileSystem.open;
+      const open = vi.spyOn(hostFileSystem, "open");
+      open.mockImplementation((...args) => {
+        if (basename(String(args[0])) === "tick.txt") {
+          firstRead.resolve();
+        }
+        return originalOpen(...args);
+      });
 
-      yield* Fiber.interrupt(fiber).pipe(Effect.timeout("1 second"));
+      yield* Effect.gen(function* () {
+        const fiber = yield* shell
+          .execute("while true; do cat tick.txt > /dev/null; done")
+          .pipe(Effect.forkChild);
+        yield* Effect.promise(() => firstRead.promise);
+
+        yield* Fiber.interrupt(fiber).pipe(Effect.timeout("1 second"));
+      }).pipe(
+        Effect.ensuring(
+          Effect.sync(() => {
+            open.mockRestore();
+          })
+        )
+      );
       const next = yield* shell.execute("echo still-usable");
 
       expect(next).toMatchObject({ exitCode: 0, stdout: "still-usable\n" });

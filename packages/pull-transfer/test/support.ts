@@ -18,17 +18,19 @@ export const withFixture = <A, E>(
     const temporaryRoot = yield* Effect.promise(() =>
       mkdtemp(join(tmpdir(), "dumbridge-pull-test-"))
     );
-    const root = join(temporaryRoot, "served");
-    const workspace = join(temporaryRoot, "workspace");
-    yield* Effect.promise(() =>
-      Promise.all([
-        mkdir(root, { recursive: true }),
-        mkdir(workspace, { recursive: true }),
-      ])
-    );
-    const servedRoot = yield* ServedRoot.make(root);
 
-    return yield* use({ root, servedRoot, workspace }).pipe(
+    return yield* Effect.gen(function* () {
+      const root = join(temporaryRoot, "served");
+      const workspace = join(temporaryRoot, "workspace");
+      yield* Effect.promise(() =>
+        Promise.all([
+          mkdir(root, { recursive: true }),
+          mkdir(workspace, { recursive: true }),
+        ])
+      );
+      const servedRoot = yield* ServedRoot.make(root);
+      return yield* use({ root, servedRoot, workspace });
+    }).pipe(
       Effect.ensuring(
         Effect.promise(() =>
           rm(temporaryRoot, { force: true, recursive: true })
