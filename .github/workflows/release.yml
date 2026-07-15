@@ -15,6 +15,7 @@ permissions:
 # Never cancel an in-flight publish; queue instead.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   release:
