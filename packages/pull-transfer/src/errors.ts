@@ -64,6 +64,7 @@ export class PullIntegrityError extends Schema.TaggedErrorClass<PullIntegrityErr
 export class PullIOError extends Schema.TaggedErrorClass<PullIOError>()(
   "PullIOError",
   {
+    cause: Schema.optionalKey(Schema.Defect()),
     operation: Schema.String,
     path: Schema.String,
   }

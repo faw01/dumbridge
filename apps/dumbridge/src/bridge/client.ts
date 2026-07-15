@@ -19,6 +19,7 @@ import {
   materializePull,
   type PullError,
   type PullFileEntry,
+  PullIOError,
   type PullResult,
   resolvePullDestination,
 } from "@dumbridge/pull-transfer";
@@ -221,6 +222,31 @@ const responseReadMessages: Record<ResponseReadError["_tag"], string> = {
   UnknownFrameTypeError: invalidResponseMessage,
   UnsupportedProtocolError: invalidResponseMessage,
   WireLimitExceededError: invalidResponseMessage,
+};
+
+// Pull reads flatten wire and transport failures into a PullIOError so they
+// can travel through materializePull's PullError channel; the attached cause
+// carries the original failure back out, where the same message table
+// reports it with run-response fidelity.
+const pullReadClientError = (error: unknown): BridgeClientError | undefined => {
+  if (!(error instanceof PullIOError) || error.cause === undefined) {
+    return;
+  }
+  const cause: unknown = error.cause;
+  if (
+    typeof cause !== "object" ||
+    cause === null ||
+    !("_tag" in cause) ||
+    typeof cause._tag !== "string" ||
+    !Object.hasOwn(responseReadMessages, cause._tag)
+  ) {
+    return;
+  }
+  return clientError(
+    "pull-response",
+    responseReadMessages[cause._tag as ResponseReadError["_tag"]],
+    cause
+  );
 };
 
 const nextClientEvent = <A>(
@@ -429,11 +455,13 @@ export const pullRemote = Effect.fn("BridgeClient.pull")(
           return { ...result, destination };
         })
       )
-    ).pipe((effect) =>
-      withClientDeadline(
-        "pull-response",
-        options.deadline ?? defaultPullDeadline,
-        effect
-      )
+    ).pipe(
+      Effect.mapError((error) => pullReadClientError(error) ?? error),
+      (effect) =>
+        withClientDeadline(
+          "pull-response",
+          options.deadline ?? defaultPullDeadline,
+          effect
+        )
     )
 );
