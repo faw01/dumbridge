@@ -8,8 +8,9 @@ export class BridgeKeySourceError extends Schema.TaggedErrorClass<BridgeKeySourc
   }
 ) {}
 
-const sourceError = (message: string) =>
-  new BridgeKeySourceError({ message });
+const sourceError = (message: string) => new BridgeKeySourceError({ message });
+
+const lineBreakPattern = /[\r\n]/;
 
 // Validation failures never quote the file or stdin content: the content is
 // presumed to be a real bearer key that landed in the wrong shape.
@@ -22,7 +23,7 @@ const validateKeyText = (
   if (trimmed.length === 0) {
     return Effect.fail(sourceError(emptyMessage));
   }
-  if (/[\r\n]/.test(trimmed)) {
+  if (lineBreakPattern.test(trimmed)) {
     return Effect.fail(sourceError(multiLineMessage));
   }
   return Effect.succeed(Redacted.make(trimmed));
