@@ -51,7 +51,6 @@ import { openBridge } from "../../src/bridge/server";
 
 let fixture = "";
 
-// Real-clock client tests need keys that stay valid for the whole test run.
 const farFutureExpiry = Number.MAX_SAFE_INTEGER;
 
 beforeEach(async () => {
@@ -319,8 +318,6 @@ describe("bridge application supervision", () => {
         )
       );
 
-      // One sweep covers the accept backoffs (10 + 20 millis) and the
-      // 20-milli request deadline that cuts off the slow drip.
       const end = yield* Effect.gen(function* () {
         const fiber = yield* Effect.scoped(server.serve.pipe(Effect.flip)).pipe(
           Effect.forkChild
@@ -525,8 +522,6 @@ describe("bridge application supervision", () => {
           )
         );
 
-        // The pull streams real bytes before stalling, so the deadline only
-        // advances once the third write is pending on the virtual clock.
         const end = yield* Effect.gen(function* () {
           const fiber = yield* Effect.scoped(
             server.serve.pipe(Effect.flip)
@@ -846,7 +841,6 @@ describe("bridge application supervision", () => {
         }),
       ] as const;
 
-      // Sequential on purpose: each failure kind is asserted independently.
       yield* Effect.forEach(deterministicFailures, (failure) => {
         let connectCalls = 0;
         const transport: BridgeTransport = {

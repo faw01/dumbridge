@@ -149,8 +149,6 @@ describe("detachServe", () => {
     () =>
       Effect.gen(function* () {
         const { calls, control } = makeControl({});
-        // The link lives inside the fixture but canonically resolves to the
-        // state directory's parent, so only canonical comparison catches it.
         const linkedRoot = join(stateDirectory, "linked-root");
         yield* Effect.promise(() =>
           symlink(join(stateDirectory, ".."), linkedRoot)
@@ -239,7 +237,6 @@ describe("detachServe", () => {
     Effect.gen(function* () {
       const winner = { pid: 300, root: "/served", startedAtEpochMs: 2000 };
       const calls = { spawns: [] as string[], terminated: [] as number[] };
-      // The other invocation wins the record while this child is starting up.
       const control: ServeProcessControl = {
         bootTimeMs: Effect.sync(() => 0),
         isAlive: () => Effect.sync(() => true),
@@ -375,8 +372,6 @@ describe("stopDetachedServe", () => {
       yield* writeRecord({ pid: 77, root: "/served", startedAtEpochMs: 2000 });
       const alive = new Set([77]);
       const calls = { terminated: [] as number[] };
-      // A concurrent detach replaces the record while this stop is waiting for
-      // the old process to exit; the newer record must survive.
       const replacement = { pid: 400, root: "/served", startedAtEpochMs: 3000 };
       const control: ServeProcessControl = {
         bootTimeMs: Effect.sync(() => 1000),

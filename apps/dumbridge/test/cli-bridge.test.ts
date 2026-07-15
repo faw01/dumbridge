@@ -134,9 +134,6 @@ describe("dumbridge CLI bridge", () => {
       await writeFile(join(servedRoot, "uncommitted.txt"), "not in git\n");
       const environment = cleanEnvironment({ DUMBRIDGE_KEY: link });
 
-      // The banner shows the sanitized root display: the hostile directory
-      // name keeps its text but loses every control character, so it cannot
-      // fake a DUMBRIDGE_KEY line or inject an escape sequence.
       const bannerName =
         process.platform === "win32"
           ? "served"

@@ -36,12 +36,8 @@ const maximumAcceptBackoffMillis = 1000;
 const defaultConcurrentSessions = 4;
 const maximumConcurrentSessions = 8;
 
-// Bounds the credential to one "human at the machine" working day; the served
-// root stays private even when a long-lived bridge process outlives the key.
 const defaultKeyTtl: Duration.Input = "8 hours";
 
-// The serve process is the expiry authority: it enforces the deadline it
-// recorded at mint time and never trusts a deadline presented by a client.
 interface MintedKey {
   readonly capability: Capability;
   readonly expiresAt: number;
@@ -112,14 +108,10 @@ interface SessionContext {
   readonly deadlines: BridgeServerDeadlines;
   readonly key: MintedKey;
   readonly root: ServedRoot;
-  /** Sends the sanitized root display once per bridge process. */
   readonly sendBanner: BannerSender;
   readonly shell: SafeShell;
 }
 
-// Only pre-response failures may carry a reject code, so a reject frame can
-// never trail a partially written response. Both codes are disclosed solely
-// to callers the bridge has already tried to authenticate.
 const rejectCodeFor = (error: unknown): RejectCode | undefined => {
   if (error instanceof AuthenticationError) {
     return "invalid-key";
@@ -167,8 +159,6 @@ const handleSession = (session: BridgeSession, context: SessionContext) =>
     })
   );
 
-// Failure payloads may carry request or path details; the serve log keeps only
-// the error tags so it can never leak the key or served root content.
 const describeSessionFailure = (cause: Cause.Cause<unknown>): string =>
   cause.reasons
     .map((reason) => {
@@ -273,10 +263,6 @@ export const openBridge = Effect.fn("BridgeServer.open")(
         })
       );
 
-      // The first run response against this bridge process carries the
-      // sanitized root display so the agent learns which root it is
-      // exploring. A failed send restores the slot for a later run, so a
-      // session whose response never reached a client cannot spend it.
       let pendingBanner: string | undefined = root.displayName;
       const sendBanner: BannerSender = (session) =>
         Effect.suspend(() => {

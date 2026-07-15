@@ -17,8 +17,6 @@ const startupDeadlineMs = 30_000;
 const terminationDeadline: Duration.Input = "10 seconds";
 const terminationPollInterval: Duration.Input = "50 millis";
 const bridgeKeyLine = /^DUMBRIDGE_KEY=(\S+)\r?\n/m;
-// The child prints its own key expiry; the detach parent forwards it so the
-// user sees the same notice they would in the foreground.
 const keyExpiryLine = /^The key expires at (\S+)\./m;
 const cliStderrPrefix = /^dumbridge: /;
 const maximumStartupStderrLength = 512;
@@ -132,9 +130,6 @@ const readRecord = (
     },
   });
 
-// The exclusive create makes the record the single-winner lock for
-// concurrent --detach invocations: the loser sees the record appear and must
-// terminate its own child so no unmanaged serve survives the race.
 class RecordTakenError {
   readonly _tag = "RecordTakenError";
 }
@@ -174,9 +169,6 @@ const removeRecord = (stateDirectory: string) =>
 const sameRecord = (left: DetachedServeRecord, right: DetachedServeRecord) =>
   left.pid === right.pid && left.startedAtEpochMs === right.startedAtEpochMs;
 
-// Removal is conditional on the record still being the one this operation
-// read: a concurrent --detach may have replaced it while this process was
-// waiting, and deleting the newer record would orphan the serve it describes.
 const removeRecordIfUnchanged = (stateDirectory: string, seen: StoredRecord) =>
   Effect.gen(function* () {
     const current = yield* readRecord(stateDirectory);
@@ -211,10 +203,6 @@ const recordIsLive = (
     return yield* control.isAlive(record.pid);
   });
 
-// Symlinks are resolved from the deepest existing ancestor so a served root
-// given as a link, or a state directory that does not exist yet, still
-// compares by its canonical location, matching how ServedRoot canonicalizes
-// the root it serves.
 const canonicalizeExisting = async (path: string) => {
   let prefix = resolve(path);
   let suffix = "";
@@ -234,9 +222,6 @@ const canonicalizeExisting = async (path: string) => {
   }
 };
 
-// The local side never writes below the served root, so a record that would
-// land inside the shared tree (for example serving the home directory over
-// the default state directory) is refused instead of written.
 const stateDirectoryInsideRoot = (root: string, stateDirectory: string) =>
   Effect.promise(async () => {
     const [canonicalRoot, canonicalState] = await Promise.all([
@@ -244,8 +229,6 @@ const stateDirectoryInsideRoot = (root: string, stateDirectory: string) =>
       canonicalizeExisting(stateDirectory),
     ]);
     const separation = relative(canonicalRoot, canonicalState);
-    // Only an exact ".." path segment escapes the root; a sibling whose name
-    // merely begins with dots (such as "..dumbridge") stays inside it.
     const escapesRoot =
       separation === ".." ||
       separation.startsWith(`..${sep}`) ||
@@ -292,8 +275,6 @@ export const detachServe = Effect.fn("DetachedServe.detach")(
         root: resolve(options.root),
         startedAtEpochMs: Date.now(),
       }).pipe(
-        // An unrecorded detached serve could not be stopped later, so it must
-        // not outlive a failed or lost record write.
         Effect.tapError(() =>
           options.control.terminate(startup.pid).pipe(Effect.ignore)
         )
@@ -353,7 +334,6 @@ export const stopDetachedServe = Effect.fn("DetachedServe.stop")(
 );
 
 const startupError = (stderr: string) => {
-  // The child is this same CLI, so its stderr already carries the prefix.
   const detail = stderr.trim().replace(cliStderrPrefix, "");
   return detachedServeError(
     "startup-failed",
@@ -363,10 +343,6 @@ const startupError = (stderr: string) => {
   );
 };
 
-// Spawns this CLI's own serve entry as a detached child, resolves once the
-// child prints its bridge key, and then releases the stdio pipes so the child
-// keeps running after this process exits. The key is handed to the caller in
-// memory only.
 const spawnDetachedServe = (request: DetachedSpawnRequest) =>
   Effect.tryPromise({
     catch: (cause) =>
@@ -448,9 +424,6 @@ export const hostServeProcessControl: ServeProcessControl = {
         process.kill(pid, 0);
         return true;
       } catch {
-        // ESRCH means the process is gone. EPERM means the pid exists but is
-        // not signalable by this user, so it cannot be a serve this user
-        // spawned; treating it as dead lets the stale record be cleaned up.
         return false;
       }
     }),

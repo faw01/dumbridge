@@ -451,7 +451,6 @@ describe("pull transfer destination", () => {
         Effect.gen(function* () {
           const aliases = ["CONIN$", "conout$.txt", "CON .txt", "AUX .log"];
 
-          // Sequential on purpose: each alias must be rejected independently.
           yield* Effect.forEach(aliases, (alias) => {
             const manifest: PullManifest = {
               digestAlgorithm: "sha256",

@@ -70,13 +70,10 @@ const safeCommands = [
 
 export interface SafeShellLimits {
   readonly maxCommandCount: number;
-  /** Cumulative bytes read per request; also bounds each individual host file. */
   readonly maxFileReadBytes: number;
   readonly maxLoopIterations: number;
   readonly maxOutputBytes: number;
-  /** Cumulative bytes written into the request's throwaway overlay. */
   readonly maxOverlayBytes: number;
-  /** Unique file, directory, and tombstone paths created in the overlay. */
   readonly maxOverlayEntries: number;
   readonly maxScriptBytes: number;
 }
@@ -183,10 +180,6 @@ const executionError = (cause: unknown) => {
   });
 };
 
-// The note joins the response only when the total still fits the output
-// budget, so the bridge never sends more than a response session accepts; a
-// response already at the cap keeps its raw shell error instead. The path
-// shown is the agent's own normalized input.
 const withOutsideRootNote = (
   shellResult: ShellResult,
   outsideRootPath: string | undefined,

@@ -134,7 +134,6 @@ const bindEndpoint = <E>(
               return;
             }
             clearDeadline();
-            // Retain ownership until Effect's queued continuation can receive it.
             resolve(endpoint);
             queueMicrotask(() => {
               boundEndpoint = undefined;
@@ -165,14 +164,6 @@ export const acquireEndpoint = <E>(
     { interruptible: true }
   );
 
-/**
- * Controls the routes configured and encoded in the initial locator.
- * `direct-only` disables relays. `relay-only` seeds only a relay route, though
- * Iroh may migrate an established connection to a discovered direct path.
- * `direct-or-relay` waits up to the listener deadline for a home relay, then
- * degrades to a proven direct route when relay readiness fails. It is the
- * default.
- */
 export type IrohReachability = "direct-only" | "relay-only" | "direct-or-relay";
 
 export const normalizeIrohAddress = (

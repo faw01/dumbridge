@@ -561,8 +561,6 @@ describe("pull transfer source", () => {
           await truncate(sourcePath, 1024 * 1024 * 1024);
         });
 
-        // The scan is real I/O, so the test waits on abort-check events from
-        // the instrumented signal rather than polling a real-time deadline.
         const originalThrowIfAborted = AbortSignal.prototype.throwIfAborted;
         const enoughChecks = Promise.withResolvers<void>();
         const abortObserved = Promise.withResolvers<void>();

@@ -40,8 +40,6 @@ const invokeWithEnvironment = (
 
 const invoke = (...args: readonly string[]) => invokeCli({ args });
 
-// Expired keys let key-source tests prove a key was read and parsed without
-// dialing a bridge: the client reports the parsed deadline before connecting.
 const mintKeyExpiringAt = (expiresAt: number) =>
   Effect.runSync(
     Effect.fromResult(

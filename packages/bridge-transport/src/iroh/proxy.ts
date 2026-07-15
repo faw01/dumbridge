@@ -16,7 +16,6 @@ interface ProxyAwareEndpointBuilder {
 export type ProxyEnvironment = Readonly<Record<string, string | undefined>>;
 
 const proxyEnvironmentKeys = [
-  // Preserve Iroh's native precedence before the generic HTTP(S) fallbacks.
   "HTTP_PROXY",
   "http_proxy",
   "HTTPS_PROXY",

@@ -58,8 +58,6 @@ class BridgeClientError extends Schema.TaggedErrorClass<BridgeClientError>()(
   }
 ) {}
 
-// Deterministic connect failures keep their transport identity so retryConnect
-// retries only transient connection errors.
 type DeterministicConnectError =
   | BridgeLocatorInvalidError
   | BridgeProxyConfigurationError
@@ -67,7 +65,6 @@ type DeterministicConnectError =
 
 interface RemoteRunResult {
   readonly exitCode: number;
-  /** Sanitized root display carried by the first run against a bridge. */
   readonly served: string | undefined;
   readonly stderr: string;
   readonly stdout: string;
@@ -132,9 +129,6 @@ const transientConnectFailure = (error: unknown) =>
     error
   );
 
-// One user string per reject code; the compiler keeps the table exhaustive.
-// The wording names the credential, not one source: the key may have arrived
-// through --key-file, stdin, or DUMBRIDGE_KEY.
 const rejectMessages: Record<RejectCode, string> = {
   "expired-key":
     "The bridge rejected the bridge key: the key has expired. Run dumbridge serve again to mint a fresh key.",
@@ -148,8 +142,6 @@ const rejectedError = (code: RejectCode) =>
 const openSession = (transport: BridgeTransport, link: string) =>
   Effect.gen(function* () {
     const decoded = yield* decodeKey(link);
-    // Courtesy check for a clear message before dialing; the bridge process
-    // remains the expiry authority and re-checks its own mint-time deadline.
     const now = yield* Clock.currentTimeMillis;
     yield* Effect.fromResult(checkBridgeKeyExpiry(decoded.expiresAt, now));
     const session = yield* transport

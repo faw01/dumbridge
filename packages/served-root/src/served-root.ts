@@ -236,8 +236,6 @@ export class ServedRoot {
     })
   );
 
-  // The pull planner is a promise engine; it must verify the root identity
-  // without re-entering an Effect runtime from inside a running fiber.
   readonly verifySync = (): void => {
     this.#assertCurrent();
   };
