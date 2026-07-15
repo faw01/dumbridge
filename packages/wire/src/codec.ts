@@ -1,4 +1,4 @@
-import { encodeCapability } from "@dumbridge/bridge-key";
+import { type Capability, encodeCapability } from "@dumbridge/bridge-key";
 import { parseRemotePath } from "@dumbridge/remote-path";
 import { Result, Schema } from "effect";
 import {
@@ -28,6 +28,7 @@ import {
   WireHeaderJson,
   WireHeaderSchema,
 } from "./protocol";
+import type { PullManifest } from "./pull-manifest";
 
 export const writeUint32 = (
   target: Uint8Array,
@@ -90,63 +91,115 @@ const encodeRawFrame = (
   return Result.succeed(encoded);
 };
 
-const frameToRaw = (
-  frame: WireFrame
-): Result.Result<RawFrame, WireEncodeError> => {
-  const empty = new Uint8Array();
+// Zero-length payloads carry no bytes, so every payload-free frame may share
+// one immutable instance.
+const emptyPayload = new Uint8Array();
+
+type RawFrameResult = Result.Result<RawFrame, WireEncodeError>;
+
+const authToRaw = (capability: Capability): RawFrameResult => {
+  const encoded = encodeCapability(capability);
+  if (Result.isFailure(encoded)) {
+    return Result.fail(malformed("schema", "Authentication frame is invalid."));
+  }
+  return Result.succeed({
+    header: { capability: encoded.success, protocol, type: "auth" },
+    payload: emptyPayload,
+  });
+};
+
+const pullToRaw = (remotePath: string): RawFrameResult => {
+  if (Result.isFailure(parseRemotePath(remotePath))) {
+    return Result.fail(
+      illegal("path", "Pull path must be canonical and relative.")
+    );
+  }
+  return Result.succeed({
+    header: { protocol, remotePath, type: "pull" },
+    payload: emptyPayload,
+  });
+};
+
+const outputToRaw = (
+  type: "stdout" | "stderr",
+  payload: Uint8Array
+): RawFrameResult => {
+  if (payload.byteLength === 0) {
+    const stream = type === "stdout" ? "Standard output" : "Standard error";
+    return Result.fail(
+      illegal("payload", `${stream} payload must not be empty.`)
+    );
+  }
+  return Result.succeed({ header: { protocol, type }, payload });
+};
+
+const manifestToRaw = (manifest: PullManifest): RawFrameResult => {
+  const validated = validateManifest(manifest, defaultSessionLimits);
+  if (Result.isFailure(validated)) {
+    return Result.fail(validated.failure);
+  }
+  return Result.succeed({
+    header: {
+      manifest: validated.success.manifest,
+      protocol,
+      type: "manifest",
+    },
+    payload: emptyPayload,
+  });
+};
+
+const fileStartToRaw = (path: string, size: number): RawFrameResult => {
+  if (Result.isFailure(parseRemotePath(path))) {
+    return Result.fail(
+      illegal("path", "File path must be canonical and relative.")
+    );
+  }
+  if (size > defaultSessionLimits.maxFileBytes) {
+    return Result.fail(
+      limitExceeded("file-bytes", defaultSessionLimits.maxFileBytes, size)
+    );
+  }
+  return Result.succeed({
+    header: { path, protocol, size, type: "file-start" },
+    payload: emptyPayload,
+  });
+};
+
+const fileChunkToRaw = (
+  offset: number,
+  payload: Uint8Array
+): RawFrameResult => {
+  if (payload.byteLength === 0) {
+    return Result.fail(
+      illegal("payload", "File chunk payload must not be empty.")
+    );
+  }
+  return Result.succeed({
+    header: { offset, protocol, type: "file-chunk" },
+    payload,
+  });
+};
+
+const frameToRaw = (frame: WireFrame): RawFrameResult => {
   switch (frame.type) {
-    case "auth": {
-      const capability = encodeCapability(frame.capability);
-      if (Result.isFailure(capability)) {
-        return Result.fail(
-          malformed("schema", "Authentication frame is invalid.")
-        );
-      }
-      return Result.succeed({
-        header: { capability: capability.success, protocol, type: "auth" },
-        payload: empty,
-      });
-    }
+    case "auth":
+      return authToRaw(frame.capability);
     case "run":
       return Result.succeed({
         header: { protocol, script: frame.script, type: "run" },
-        payload: empty,
+        payload: emptyPayload,
       });
     case "pull":
-      if (Result.isFailure(parseRemotePath(frame.remotePath))) {
-        return Result.fail(
-          illegal("path", "Pull path must be canonical and relative.")
-        );
-      }
-      return Result.succeed({
-        header: { protocol, remotePath: frame.remotePath, type: "pull" },
-        payload: empty,
-      });
+      return pullToRaw(frame.remotePath);
     case "banner":
       return Result.succeed({
         header: { protocol, served: frame.served, type: "banner" },
-        payload: empty,
+        payload: emptyPayload,
       });
     case "stdout":
-      if (frame.payload.byteLength === 0) {
-        return Result.fail(
-          illegal("payload", "Standard output payload must not be empty.")
-        );
-      }
-      return Result.succeed({
-        header: { protocol, type: "stdout" },
-        payload: frame.payload,
-      });
+      return outputToRaw("stdout", frame.payload);
     case "stderr":
-      if (frame.payload.byteLength === 0) {
-        return Result.fail(
-          illegal("payload", "Standard error payload must not be empty.")
-        );
-      }
-      return Result.succeed({
-        header: { protocol, type: "stderr" },
-        payload: frame.payload,
-      });
+      return outputToRaw("stderr", frame.payload);
     case "exit":
       return Result.succeed({
         header: {
@@ -155,75 +208,33 @@ const frameToRaw = (
           truncated: frame.truncated,
           type: "exit",
         },
-        payload: empty,
+        payload: emptyPayload,
       });
-    case "manifest": {
-      const manifest = validateManifest(frame.manifest, defaultSessionLimits);
-      if (Result.isFailure(manifest)) {
-        return Result.fail(manifest.failure);
-      }
-      return Result.succeed({
-        header: {
-          manifest: manifest.success.manifest,
-          protocol,
-          type: "manifest",
-        },
-        payload: empty,
-      });
-    }
+    case "manifest":
+      return manifestToRaw(frame.manifest);
     case "file-start":
-      if (Result.isFailure(parseRemotePath(frame.path))) {
-        return Result.fail(
-          illegal("path", "File path must be canonical and relative.")
-        );
-      }
-      if (frame.size > defaultSessionLimits.maxFileBytes) {
-        return Result.fail(
-          limitExceeded(
-            "file-bytes",
-            defaultSessionLimits.maxFileBytes,
-            frame.size
-          )
-        );
-      }
-      return Result.succeed({
-        header: {
-          path: frame.path,
-          protocol,
-          size: frame.size,
-          type: "file-start",
-        },
-        payload: empty,
-      });
+      return fileStartToRaw(frame.path, frame.size);
     case "file-chunk":
-      if (frame.payload.byteLength === 0) {
-        return Result.fail(
-          illegal("payload", "File chunk payload must not be empty.")
-        );
-      }
-      return Result.succeed({
-        header: { offset: frame.offset, protocol, type: "file-chunk" },
-        payload: frame.payload,
-      });
+      return fileChunkToRaw(frame.offset, frame.payload);
     case "file-end":
       return Result.succeed({
         header: { digest: frame.digest, protocol, type: "file-end" },
-        payload: empty,
+        payload: emptyPayload,
       });
     case "pull-error":
       return Result.succeed({
         header: { code: frame.code, protocol, type: "pull-error" },
-        payload: empty,
+        payload: emptyPayload,
       });
     case "reject":
       return Result.succeed({
         header: { code: frame.code, protocol, type: "reject" },
-        payload: empty,
+        payload: emptyPayload,
       });
     case "complete":
       return Result.succeed({
         header: { protocol, type: "complete" },
-        payload: empty,
+        payload: emptyPayload,
       });
     default:
       return Result.fail(
