@@ -105,35 +105,58 @@ class IncrementalFrameReader {
         continue;
       }
 
-      this.frameCount += 1;
-      if (this.frameCount > limits.maxFramesPerSession) {
-        return this.fail(
-          limitExceeded(
-            "frames-per-session",
-            limits.maxFramesPerSession,
-            this.frameCount
-          )
-        );
-      }
-      const decoded = decode(this.state.bytes);
-      if (Result.isFailure(decoded)) {
-        return this.fail(decoded.failure);
-      }
-      const consumed = consume(decoded.success);
+      const consumed = this.finishFrame(
+        this.state.bytes,
+        limits,
+        decode,
+        consume
+      );
       if (Result.isFailure(consumed)) {
-        return this.fail(consumed.failure);
+        return Result.fail(consumed.failure);
       }
       if (consumed.success.emit) {
         events.push(consumed.success.value);
       }
-      this.state = {
-        _tag: "prefix",
-        bytes: new Uint8Array(lengthPrefixBytes),
-        offset: 0,
-      };
     }
 
     return Result.succeed(events);
+  }
+
+  // One completed frame body: charge it against the session frame budget,
+  // decode it, hand it to the protocol state machine, then rearm for the
+  // next length prefix.
+  private finishFrame<A>(
+    body: Uint8Array,
+    limits: WireSessionLimits,
+    decode: FrameDecoder,
+    consume: (
+      frame: RawFrame
+    ) => Result.Result<SessionEvent<A>, WireDecodeError>
+  ): Result.Result<SessionEvent<A>, WireDecodeError> {
+    this.frameCount += 1;
+    if (this.frameCount > limits.maxFramesPerSession) {
+      return this.fail(
+        limitExceeded(
+          "frames-per-session",
+          limits.maxFramesPerSession,
+          this.frameCount
+        )
+      );
+    }
+    const decoded = decode(body);
+    if (Result.isFailure(decoded)) {
+      return this.fail(decoded.failure);
+    }
+    const consumed = consume(decoded.success);
+    if (Result.isFailure(consumed)) {
+      return this.fail(consumed.failure);
+    }
+    this.state = {
+      _tag: "prefix",
+      bytes: new Uint8Array(lengthPrefixBytes),
+      offset: 0,
+    };
+    return consumed;
   }
 
   private startFrame(): Result.Result<void, WireDecodeError> {
