@@ -10,6 +10,7 @@ import {
   BridgeReadError,
   type BridgeSession,
   BridgeWriteError,
+  type ConnectionPath,
 } from "../index";
 import {
   closeConnection,
@@ -19,6 +20,20 @@ import {
 } from "./endpoint";
 
 const chunkSize = 64 * 1024;
+
+// Path reporting is observability only: a native snapshot failure must never
+// take down an otherwise healthy session, so it degrades to "unknown".
+const selectedConnectionPath = (connection: Connection): ConnectionPath => {
+  try {
+    const selected = connection.paths().find((path) => path.isSelected);
+    if (selected === undefined) {
+      return "unknown";
+    }
+    return selected.isRelay ? "relay" : "direct";
+  } catch {
+    return "unknown";
+  }
+};
 
 export const makeSession = (
   connection: Connection,
@@ -79,6 +94,7 @@ export const makeSession = (
 
     return {
       close,
+      connectionPath: selectedConnectionPath(connection),
       finish: writeLock.withPermits(1)(
         withDeadline(
           "finish",

@@ -3,6 +3,7 @@ import { Effect } from "effect";
 import {
   BridgeConnectError,
   type BridgeDeadlines,
+  BridgeDirectConnectError,
   BridgeListenError,
   BridgeLocator,
   BridgeLocatorInvalidError,
@@ -158,6 +159,7 @@ const connect = (
       options.reachability
     );
 
+    const relayUrl = normalizedAddress.relayUrl();
     const builder = yield* Effect.try({
       catch: () =>
         new BridgeConnectError({
@@ -166,7 +168,6 @@ const connect = (
       try: () => {
         const configured = Endpoint.builder();
         configured.applyMinimal();
-        const relayUrl = normalizedAddress.relayUrl();
         configured.relayMode(
           relayUrl === null
             ? RelayMode.disabled()
@@ -197,6 +198,18 @@ const connect = (
         try: () => endpoint.connect(normalizedAddress, alpn),
       }),
       closeEndpoint(endpoint)
+    ).pipe(
+      // With RelayMode.disabled there is no fallback: a dial that cannot
+      // holepunch fails or times out instead of degrading to a relay, and
+      // both shapes surface as the branded failure so callers do not retry.
+      Effect.mapError((error) =>
+        relayUrl === null
+          ? new BridgeDirectConnectError({
+              message:
+                "Could not establish a direct connection to the bridge, and the bridge locator allows no relay fallback.",
+            })
+          : error
+      )
     );
     const activeConnection = yield* acquireConnection(connection);
     const stream = yield* withDeadline(

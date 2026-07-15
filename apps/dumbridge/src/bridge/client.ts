@@ -7,6 +7,7 @@ import {
 } from "@dumbridge/bridge-key";
 import {
   type BridgeDeadlineExceededError,
+  type BridgeDirectConnectError,
   BridgeLocator,
   type BridgeLocatorInvalidError,
   type BridgeProxyConfigurationError,
@@ -14,6 +15,7 @@ import {
   type BridgeReadError,
   type BridgeSession,
   type BridgeTransport,
+  type ConnectionPath,
 } from "@dumbridge/bridge-transport";
 import {
   materializePull,
@@ -62,7 +64,10 @@ class BridgeClientError extends Schema.TaggedErrorClass<BridgeClientError>()(
   }
 ) {}
 
+// A direct-only dial counts as non-retriable: it already spent its whole
+// connect deadline holepunching, so a second attempt only doubles the wait.
 type DeterministicConnectError =
+  | BridgeDirectConnectError
   | BridgeLocatorInvalidError
   | BridgeProxyConfigurationError
   | BridgeProxyUnsupportedError;
@@ -318,6 +323,9 @@ export const runRemote = Effect.fn("BridgeClient.run")(
   (options: {
     readonly deadline?: Duration.Input;
     readonly link: string;
+    // Reports the connect-time path as soon as the session opens, so the
+    // caller still learns it when the request fails after connecting.
+    readonly onConnected?: (path: ConnectionPath) => Effect.Effect<void>;
     readonly script: string;
     readonly transport: BridgeTransport;
   }): Effect.Effect<
@@ -332,6 +340,7 @@ export const runRemote = Effect.fn("BridgeClient.run")(
             options.link
           );
           yield* Effect.addFinalizer(() => session.close);
+          yield* options.onConnected?.(session.connectionPath) ?? Effect.void;
           const requestFailure = yield* finishRequest(session, capability, {
             script: options.script,
             type: "run",
@@ -388,6 +397,9 @@ export const pullRemote = Effect.fn("BridgeClient.pull")(
     readonly deadline?: Duration.Input;
     readonly destination?: string;
     readonly link: string;
+    // Reports the connect-time path as soon as the session opens, so the
+    // caller still learns it when the request fails after connecting.
+    readonly onConnected?: (path: ConnectionPath) => Effect.Effect<void>;
     readonly remotePath: string;
     readonly transport: BridgeTransport;
   }): Effect.Effect<
@@ -408,6 +420,7 @@ export const pullRemote = Effect.fn("BridgeClient.pull")(
             options.link
           );
           yield* Effect.addFinalizer(() => session.close);
+          yield* options.onConnected?.(session.connectionPath) ?? Effect.void;
           const requestFailure = yield* finishRequest(session, capability, {
             remotePath: options.remotePath,
             type: "pull",

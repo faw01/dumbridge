@@ -6,6 +6,7 @@ import { Effect, Fiber } from "effect";
 import { TestClock } from "effect/testing";
 import {
   DetachedServeError,
+  type DetachedSpawnRequest,
   detachServe,
   type ServeProcessControl,
   stopDetachedServe,
@@ -49,14 +50,19 @@ const makeControl = (overrides: {
   readonly terminateKills?: boolean;
 }) => {
   const alive = new Set(overrides.alivePids ?? []);
-  const calls = { spawns: [] as string[], terminated: [] as number[] };
+  const calls = {
+    requests: [] as DetachedSpawnRequest[],
+    spawns: [] as string[],
+    terminated: [] as number[],
+  };
   const firstTermination = Promise.withResolvers<void>();
   const control: ServeProcessControl = {
     bootTimeMs: Effect.sync(() => overrides.bootTimeMs ?? 0),
     isAlive: (pid) => Effect.sync(() => alive.has(pid)),
-    spawnDetachedServe: ({ root }) =>
+    spawnDetachedServe: (request) =>
       Effect.sync(() => {
-        calls.spawns.push(root);
+        calls.requests.push(request);
+        calls.spawns.push(request.root);
         const pid = overrides.spawnedPid ?? 4242;
         alive.add(pid);
         return { key: overrides.spawnedKey ?? "dumbridge1_test", pid };
@@ -98,12 +104,31 @@ describe("detachServe", () => {
 
       expect(startup).toEqual({ key: "dumbridge1_secret", pid: 5150 });
       expect(calls.spawns).toEqual(["some-root"]);
+      expect(calls.requests).toEqual([{ root: "some-root" }]);
       const text = yield* readRecordText;
       expect(text).not.toContain("dumbridge1_secret");
       const record = JSON.parse(text);
       expect(record.pid).toBe(5150);
       expect(record.root).toBe(resolve("some-root"));
       expect(record.startedAtEpochMs).toBeGreaterThan(0);
+    })
+  );
+
+  it.effect("forwards the path-forcing reachability to the spawned serve", () =>
+    Effect.gen(function* () {
+      const { calls, control } = makeControl({});
+
+      yield* detachServe({
+        control,
+        reachability: "relay-only",
+        root: "some-root",
+        stateDirectory,
+        ttl: "1 hour",
+      });
+
+      expect(calls.requests).toEqual([
+        { reachability: "relay-only", root: "some-root", ttl: "1 hour" },
+      ]);
     })
   );
 

@@ -12,6 +12,9 @@ import { Result } from "effect";
 
 const cli = fileURLToPath(new URL("../src/cli.ts", import.meta.url));
 const bridgeKeyLine = /^DUMBRIDGE_KEY=(\S+)\r?\n/m;
+// The loopback path is real, so most assertions pin only the wording; the
+// direct-only test asserts the exact "connected directly" line.
+const pathLine = /^dumbridge: connected (directly|via relay)\n/m;
 const keyExpiryLine =
   /^The key expires at \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z\./m;
 const proxyNames = new Set([
@@ -139,11 +142,11 @@ describe("dumbridge CLI bridge", () => {
           ? "served"
           : "servedDUMBRIDGE_KEY=counterfeit[31m";
       const run = await runCli(["run", "cat uncommitted.txt"], environment);
-      expect(run).toEqual({
-        exitCode: 0,
-        stderr: `dumbridge: serving '${bannerName}' as /workspace (read-only)\n`,
-        stdout: "not in git\n",
-      });
+      expect(run).toMatchObject({ exitCode: 0, stdout: "not in git\n" });
+      expect(run.stderr).toMatch(pathLine);
+      expect(run.stderr).toContain(
+        `dumbridge: serving '${bannerName}' as /workspace (read-only)\n`
+      );
       expect(run.stderr).not.toContain("\u001b");
       expect(run.stderr).not.toMatch(bridgeKeyLine);
 
@@ -169,40 +172,39 @@ describe("dumbridge CLI bridge", () => {
         ["run", 'grep -rl "Port Meridian" .'],
         environment
       );
-      expect(overLimit).toEqual({
-        exitCode: 1,
-        stderr:
-          "dumbridge: remote read shell file-read limit exceeded: one run may read at most 4 MiB in total across every file it opens; narrow the query to fewer files or a subdirectory\n",
-        stdout: "",
-      });
+      expect(overLimit).toMatchObject({ exitCode: 1, stdout: "" });
+      expect(overLimit.stderr).toMatch(pathLine);
+      expect(overLimit.stderr).toContain(
+        "dumbridge: remote read shell file-read limit exceeded: one run may read at most 4 MiB in total across every file it opens; narrow the query to fewer files or a subdirectory\n"
+      );
 
       const destination = join(cloudRoot, "pulled.txt");
       const pull = await runCli(
         ["pull", "uncommitted.txt", destination],
         environment
       );
-      expect(pull).toMatchObject({ exitCode: 0, stderr: "" });
+      expect(pull).toMatchObject({ exitCode: 0 });
+      expect(pull.stderr).toMatch(pathLine);
       expect(await Bun.file(destination).text()).toBe("not in git\n");
 
       const defaultPull = await runCli(
         ["pull", "uncommitted.txt"],
         environment
       );
-      expect(defaultPull).toMatchObject({
-        exitCode: 0,
-        stderr: "",
-      });
+      expect(defaultPull).toMatchObject({ exitCode: 0 });
+      expect(defaultPull.stderr).toMatch(pathLine);
       expect(defaultPull.stdout).toContain("to ./uncommitted.txt.");
       expect(await Bun.file(join(cloudRoot, "uncommitted.txt")).text()).toBe(
         "not in git\n"
       );
 
+      // A pull that fails after connecting still reports its path first.
       const missing = await runCli(["pull", "missing.txt"], environment);
-      expect(missing).toEqual({
-        exitCode: 1,
-        stderr: "dumbridge: The remote path does not exist.\n",
-        stdout: "",
-      });
+      expect(missing).toMatchObject({ exitCode: 1, stdout: "" });
+      expect(missing.stderr).toMatch(pathLine);
+      expect(missing.stderr).toContain(
+        "dumbridge: The remote path does not exist.\n"
+      );
 
       const decoded = parseBridgeKey(link);
       if (Result.isFailure(decoded)) {
@@ -217,16 +219,55 @@ describe("dumbridge CLI bridge", () => {
       if (Result.isFailure(wrongKey)) {
         throw wrongKey.failure;
       }
+      // The wrong-capability caller still connected, so the path line
+      // precedes the rejection; it reveals nothing beyond the reject itself.
       const rejected = await runCli(
         ["run", "true"],
         cleanEnvironment({ DUMBRIDGE_KEY: wrongKey.success })
       );
-      expect(rejected).toEqual({
-        exitCode: 1,
-        stderr:
-          "dumbridge: The bridge rejected the bridge key: the key does not match this bridge. Copy the current key printed by dumbridge serve.\n",
-        stdout: "",
+      expect(rejected).toMatchObject({ exitCode: 1, stdout: "" });
+      expect(rejected.stderr).toMatch(pathLine);
+      expect(rejected.stderr).toContain(
+        "dumbridge: The bridge rejected the bridge key: the key does not match this bridge. Copy the current key printed by dumbridge serve.\n"
+      );
+    } finally {
+      server.kill();
+      await server.exited;
+    }
+  }, 40_000);
+
+  test("serve --direct-only reports a direct connection on run and pull", async () => {
+    const server = Bun.spawn(
+      [process.execPath, cli, "serve", "--direct-only", servedRoot],
+      {
+        env: cleanEnvironment(),
+        stderr: "pipe",
+        stdout: "pipe",
+      }
+    );
+
+    try {
+      const { link } = await withTimeout(
+        readBridgeStartup(server.stdout),
+        5000
+      );
+      await writeFile(join(servedRoot, "direct.txt"), "over a direct path\n");
+      const environment = cleanEnvironment({ DUMBRIDGE_KEY: link });
+
+      const run = await runCli(["run", "cat direct.txt"], environment);
+      expect(run).toMatchObject({
+        exitCode: 0,
+        stdout: "over a direct path\n",
       });
+      expect(run.stderr).toContain("dumbridge: connected directly\n");
+      expect(run.stderr).not.toContain("via relay");
+
+      const pull = await runCli(
+        ["pull", "direct.txt", join(cloudRoot, "direct.txt")],
+        environment
+      );
+      expect(pull).toMatchObject({ exitCode: 0 });
+      expect(pull.stderr).toContain("dumbridge: connected directly\n");
     } finally {
       server.kill();
       await server.exited;

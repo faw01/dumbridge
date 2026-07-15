@@ -42,7 +42,7 @@ dumbridge run 'file photos/IMG2123.jpg; stat photos/IMG2123.jpg; sha256sum photo
 dumbridge pull photos/IMG2123.jpg assets/reference.jpg
 ```
 
-The first `run` against a bridge prints a one-line root banner on stderr - `dumbridge: serving '<name>' as /workspace (read-only)` - naming the served root. Paths in `run` scripts and `pull` requests are relative to that root, which is visible at `/workspace`. The banner and every failure message stay on stderr, so a `run`'s piped stdout is exactly the script's own output.
+The first `run` against a bridge prints a one-line root banner on stderr - `dumbridge: serving '<name>' as /workspace (read-only)` - naming the served root. Paths in `run` scripts and `pull` requests are relative to that root, which is visible at `/workspace`. Every `run` and `pull` also prints one stderr line naming the connection path selected at connect time - `dumbridge: connected directly`, `dumbridge: connected via relay`, or `dumbridge: connected (path unknown)` when the path is unobservable - which may improve to direct later without a new report. The banner, the path line, and every failure message stay on stderr, so a `run`'s piped stdout is exactly the script's own output.
 
 ## Boundaries
 
@@ -61,6 +61,7 @@ The bridge runs on the user's machine; it cannot be started from the workspace. 
 - `dumbridge serve <root>` shares one directory read-only in the foreground until Ctrl-C and prints a fresh `DUMBRIDGE_KEY`.
 - `--ttl '90 minutes'` sets how long the key stays valid (default 8 hours). The bridge process enforces the deadline even if it keeps running past it.
 - `dumbridge serve --detach <root>` runs the same bridge without holding a terminal; `dumbridge serve --stop` ends it, which revokes the key immediately.
+- `--direct-only` mints a key with no relay fallback: sessions connect peer-to-peer or fail fast. `--relay-only` makes the initial dial go through the relay, best effort only - an established session may still upgrade to a direct path. The two flags are mutually exclusive; without either, connections prefer direct and fall back to the relay.
 
 Ask the user to place the new key in the cloud environment as a secret file or environment variable; never ask them to paste it into the conversation.
 
@@ -74,6 +75,7 @@ Every dumbridge failure prints a branded `dumbridge:` message on stderr and exit
 - `The remote pull exceeded a safety limit: ...` - the selected path is too large for one `pull`; the message states the entry, per-file, and total ceilings. Pull a smaller file or subdirectory instead of retrying.
 - `The bridge ended the response before it completed.` - the serve process stopped or refused the query mid-response. Retry once, then ask the user to check `dumbridge serve`.
 - `The bridge process is unreachable.` - `dumbridge serve` stopped or the machine went offline. Ask the user to start it again and provide the new key.
+- `Could not establish a direct connection to the bridge, and the bridge locator allows no relay fallback.` - the key was minted with `serve --direct-only` and holepunching failed from this network. Ask the user to serve without `--direct-only`, or check that `dumbridge serve` is still running.
 - `The bridge key expired at <timestamp>.` or `The bridge rejected the bridge key: the key has expired.` - the TTL ran out. Ask the user to rerun `dumbridge serve` and share the fresh key.
 - `The bridge key is invalid.` or `The bridge rejected the bridge key: the key does not match this bridge.` - the key is malformed, stale, or from another bridge. Ask the user for the key printed by the currently running `dumbridge serve`.
 - `No bridge key is set.` - neither `--key-file` nor `DUMBRIDGE_KEY` supplied one. Check the secret file path or the environment.

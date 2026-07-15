@@ -12,6 +12,7 @@ import { Effect, Result } from "effect";
 
 const cli = fileURLToPath(new URL("../src/cli.ts", import.meta.url));
 const bridgeKeyLine = /^DUMBRIDGE_KEY=(\S+)\r?\n/m;
+const pathLine = /^dumbridge: connected (directly|via relay)\n/m;
 const proxyNames = new Set([
   "ALL_PROXY",
   "HTTPS_PROXY",
@@ -108,6 +109,22 @@ describe("dumbridge serve flags", () => {
       stderr: "dumbridge: Use either --detach or --stop, not both.\n",
       stdout: "",
     });
+    const [bothPaths, stopWithPath] = await Promise.all([
+      runCli(["serve", "--direct-only", "--relay-only", servedRoot]),
+      runCli(["serve", "--stop", "--relay-only"]),
+    ]);
+    expect(bothPaths).toEqual({
+      exitCode: 1,
+      stderr:
+        "dumbridge: Use either --direct-only or --relay-only, not both.\n",
+      stdout: "",
+    });
+    expect(stopWithPath).toEqual({
+      exitCode: 1,
+      stderr:
+        "dumbridge: serve --stop does not take --direct-only or --relay-only.\n",
+      stdout: "",
+    });
     expect(stopWithRoot).toEqual({
       exitCode: 1,
       stderr: "dumbridge: serve --stop does not take a root.\n",
@@ -186,11 +203,11 @@ describe.skipIf(process.platform === "win32")(
       const run = await runCli(["run", "cat uncommitted.txt"], {
         DUMBRIDGE_KEY: key,
       });
-      expect(run).toEqual({
-        exitCode: 0,
-        stderr: "dumbridge: serving 'served' as /workspace (read-only)\n",
-        stdout: "not in git\n",
-      });
+      expect(run).toMatchObject({ exitCode: 0, stdout: "not in git\n" });
+      expect(run.stderr).toContain(
+        "dumbridge: serving 'served' as /workspace (read-only)\n"
+      );
+      expect(run.stderr).toMatch(pathLine);
 
       const duplicate = await runCli(["serve", "--detach", servedRoot]);
       expect(duplicate.exitCode).toBe(1);
@@ -235,11 +252,11 @@ describe.skipIf(process.platform === "win32")(
 
       expect(isAlive(record.pid)).toBe(true);
       const run = await runCli(["run", "cat note.txt"], { DUMBRIDGE_KEY: key });
-      expect(run).toEqual({
-        exitCode: 0,
-        stderr: "dumbridge: serving 'served' as /workspace (read-only)\n",
-        stdout: "alive\n",
-      });
+      expect(run).toMatchObject({ exitCode: 0, stdout: "alive\n" });
+      expect(run.stderr).toContain(
+        "dumbridge: serving 'served' as /workspace (read-only)\n"
+      );
+      expect(run.stderr).toMatch(pathLine);
 
       const stop = await runCli(["serve", "--stop"]);
       expect(stop.exitCode).toBe(0);

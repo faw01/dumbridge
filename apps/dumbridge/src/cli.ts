@@ -3,6 +3,7 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { redactBridgeKey } from "@dumbridge/bridge-key";
+import type { ConnectionPath } from "@dumbridge/bridge-transport";
 import {
   type IrohTransportOptions,
   makeIrohTransport,
@@ -32,6 +33,7 @@ import { pullRemote, runRemote } from "./bridge/client";
 import {
   detachServe,
   hostServeProcessControl,
+  type ServeReachability,
   stopDetachedServe,
 } from "./bridge/detached-serve";
 import { openBridge } from "./bridge/server";
@@ -77,6 +79,22 @@ const write = (stream: NodeJS.WriteStream, value: string) =>
     stream.write(value);
   });
 
+// One line per invocation, stderr only: piped stdout stays exactly the
+// script's or pull's own output. The line names the path selected at connect
+// time; iroh may upgrade a relayed session to direct afterwards. It prints as
+// soon as the session opens, so it survives requests that fail later.
+const connectionPathNotices: Record<ConnectionPath, string> = {
+  direct: "dumbridge: connected directly\n",
+  relay: "dumbridge: connected via relay\n",
+  unknown: "dumbridge: connected (path unknown)\n",
+};
+
+export const connectionPathNotice = (path: ConnectionPath) =>
+  connectionPathNotices[path];
+
+const reportConnectionPath = (path: ConnectionPath) =>
+  write(process.stderr, connectionPathNotice(path));
+
 const parseServeTtl = (value: string) => {
   const duration = Duration.fromInput(value as Duration.Input);
   return Option.isSome(duration) &&
@@ -98,12 +116,18 @@ const stateDirectory = Config.string("DUMBRIDGE_STATE_DIR").pipe(
 const keyExpiryNotice = (expiresAtIso: string) =>
   `The key expires at ${expiresAtIso}. Run serve again for a fresh key.\n`;
 
-const serveForeground = (root: string, ttl: Duration.Duration | undefined) =>
+const serveForeground = (
+  root: string,
+  ttl: Duration.Duration | undefined,
+  reachability: ServeReachability | undefined
+) =>
   Effect.scoped(
     Effect.gen(function* () {
       const server = yield* openBridge({
         root,
-        transport: makeIrohTransport(),
+        transport: makeIrohTransport(
+          reachability === undefined ? {} : { reachability }
+        ),
         ...(ttl === undefined ? {} : { ttl }),
       });
       yield* write(
@@ -114,12 +138,17 @@ const serveForeground = (root: string, ttl: Duration.Duration | undefined) =>
     })
   );
 
-const serveDetached = (root: string, rawTtl: string | undefined) =>
+const serveDetached = (
+  root: string,
+  rawTtl: string | undefined,
+  reachability: ServeReachability | undefined
+) =>
   Effect.gen(function* () {
     const startup = yield* detachServe({
       control: hostServeProcessControl,
       root,
       stateDirectory: yield* stateDirectory,
+      ...(reachability === undefined ? {} : { reachability }),
       ...(rawTtl === undefined ? {} : { ttl: rawTtl }),
     });
     yield* write(
@@ -145,11 +174,68 @@ const serveStop = Effect.gen(function* () {
   );
 });
 
+interface ServeInvocation {
+  readonly detach: boolean;
+  readonly directOnly: boolean;
+  readonly relayOnly: boolean;
+  readonly root: Option.Option<string>;
+  readonly stop: boolean;
+  readonly ttl: Option.Option<string>;
+}
+
+const serveInvocationError = (flags: ServeInvocation): CliError | undefined => {
+  if (flags.detach && flags.stop) {
+    return new CliError({
+      message: "Use either --detach or --stop, not both.",
+    });
+  }
+  if (flags.directOnly && flags.relayOnly) {
+    return new CliError({
+      message: "Use either --direct-only or --relay-only, not both.",
+    });
+  }
+  if (!flags.stop) {
+    return;
+  }
+  if (Option.isSome(flags.root)) {
+    return new CliError({ message: "serve --stop does not take a root." });
+  }
+  if (Option.isSome(flags.ttl)) {
+    return new CliError({ message: "serve --stop does not take a --ttl." });
+  }
+  if (flags.directOnly || flags.relayOnly) {
+    return new CliError({
+      message: "serve --stop does not take --direct-only or --relay-only.",
+    });
+  }
+};
+
+const forcedReachability = (
+  flags: ServeInvocation
+): ServeReachability | undefined => {
+  if (flags.directOnly) {
+    return "direct-only";
+  }
+  if (flags.relayOnly) {
+    return "relay-only";
+  }
+};
+
 const serve = Command.make(
   "serve",
   {
     detach: Flag.boolean("detach").pipe(
       Flag.withDescription("Start the server detached from this terminal.")
+    ),
+    directOnly: Flag.boolean("direct-only").pipe(
+      Flag.withDescription(
+        "Mint a key with no relay fallback: sessions connect peer-to-peer or fail fast."
+      )
+    ),
+    relayOnly: Flag.boolean("relay-only").pipe(
+      Flag.withDescription(
+        "Mint a key whose initial dial goes through the relay. Best effort only: an established session may still upgrade to a direct path."
+      )
     ),
     root: Argument.string("root").pipe(Argument.optional),
     stop: Flag.boolean("stop").pipe(
@@ -162,26 +248,16 @@ const serve = Command.make(
       )
     ),
   },
-  ({ detach, root, stop, ttl }) =>
+  (flags) =>
     Effect.gen(function* () {
-      if (detach && stop) {
-        return yield* new CliError({
-          message: "Use either --detach or --stop, not both.",
-        });
+      const invalid = serveInvocationError(flags);
+      if (invalid !== undefined) {
+        return yield* invalid;
       }
-      if (stop) {
-        if (Option.isSome(root)) {
-          return yield* new CliError({
-            message: "serve --stop does not take a root.",
-          });
-        }
-        if (Option.isSome(ttl)) {
-          return yield* new CliError({
-            message: "serve --stop does not take a --ttl.",
-          });
-        }
+      if (flags.stop) {
         return yield* serveStop;
       }
+      const { root, ttl } = flags;
       if (Option.isNone(root)) {
         return yield* new CliError({
           message: "serve requires a <root> directory to share.",
@@ -190,9 +266,14 @@ const serve = Command.make(
       const keyTtl = Option.isSome(ttl)
         ? yield* parseServeTtl(ttl.value)
         : undefined;
-      return yield* detach
-        ? serveDetached(root.value, Option.isSome(ttl) ? ttl.value : undefined)
-        : serveForeground(root.value, keyTtl);
+      const reachability = forcedReachability(flags);
+      return yield* flags.detach
+        ? serveDetached(
+            root.value,
+            Option.isSome(ttl) ? ttl.value : undefined,
+            reachability
+          )
+        : serveForeground(root.value, keyTtl, reachability);
     })
 ).pipe(
   Command.withDescription(
@@ -208,6 +289,7 @@ const run = Command.make(
       const key = yield* resolveBridgeKey(keyFile);
       const result = yield* runRemote({
         link: Redacted.value(key),
+        onConnected: reportConnectionPath,
         script,
         transport: clientTransport(),
       });
@@ -223,7 +305,7 @@ const run = Command.make(
     })
 ).pipe(
   Command.withDescription(
-    "Run in the cloud agent to query the local served root. The bridge key comes from --key-file when given ('-' reads stdin), otherwise from DUMBRIDGE_KEY."
+    "Run in the cloud agent to query the local served root. The bridge key comes from --key-file when given ('-' reads stdin), otherwise from DUMBRIDGE_KEY. One stderr line names the connection path selected at connect time (directly or via relay); a relayed session may still upgrade to direct afterwards."
   )
 );
 
@@ -240,6 +322,7 @@ const pull = Command.make(
       const key = yield* resolveBridgeKey(keyFile);
       const request = {
         link: Redacted.value(key),
+        onConnected: reportConnectionPath,
         remotePath,
         transport: clientTransport(),
       };
@@ -255,7 +338,7 @@ const pull = Command.make(
     })
 ).pipe(
   Command.withDescription(
-    "Run in the cloud agent to pull one local path. The bridge key comes from --key-file when given ('-' reads stdin), otherwise from DUMBRIDGE_KEY."
+    "Run in the cloud agent to pull one local path. The bridge key comes from --key-file when given ('-' reads stdin), otherwise from DUMBRIDGE_KEY. One stderr line names the connection path selected at connect time (directly or via relay); a relayed session may still upgrade to direct afterwards."
   )
 );
 

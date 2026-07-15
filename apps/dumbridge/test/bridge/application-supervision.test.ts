@@ -10,6 +10,7 @@ import {
   BridgeAcceptError,
   BridgeConnectError,
   BridgeDeadlineExceededError,
+  BridgeDirectConnectError,
   BridgeFinishError,
   type BridgeListener,
   BridgeListenerClosedError,
@@ -19,6 +20,7 @@ import {
   BridgeReadError,
   type BridgeSession,
   type BridgeTransport,
+  type ConnectionPath,
 } from "@dumbridge/bridge-transport";
 import {
   encodeFrame,
@@ -85,6 +87,7 @@ const joinChunks = (...chunks: readonly Uint8Array[]) => {
 };
 
 const scriptedSession = (options: {
+  readonly connectionPath?: ConnectionPath;
   readonly onWrite?: (index: number, bytes: Uint8Array) => Effect.Effect<void>;
   readonly readDelay?: Duration.Input;
   readonly reads?: readonly Uint8Array[];
@@ -100,6 +103,7 @@ const scriptedSession = (options: {
     close: Effect.sync(() => {
       state.closeCalls += 1;
     }),
+    connectionPath: options.connectionPath ?? "unknown",
     finish: Effect.sync(() => {
       state.finishCalls += 1;
     }),
@@ -677,6 +681,85 @@ describe("bridge application supervision", () => {
     30_000
   );
 
+  it.effect("reports the connect-time path as soon as the session opens", () =>
+    Effect.gen(function* () {
+      const capability = mintCapability();
+      const link = success(
+        encodeBridgeKey({
+          capability,
+          expiresAt: farFutureExpiry,
+          locator: "path-reporting-client",
+          transport: "iroh",
+        })
+      );
+      const reported: ConnectionPath[] = [];
+      const onConnected = (path: ConnectionPath) =>
+        Effect.sync(() => {
+          reported.push(path);
+        });
+
+      const runResponse = joinChunks(
+        encoded({
+          payload: new TextEncoder().encode("live\n"),
+          type: "stdout",
+        }),
+        encoded({ code: 0, truncated: false, type: "exit" })
+      );
+      const relayed = scriptedSession({
+        connectionPath: "relay",
+        reads: [runResponse],
+      });
+      yield* runRemote({
+        link,
+        onConnected,
+        script: "cat note.txt",
+        transport: clientTransport(relayed.session),
+      });
+      expect(reported).toEqual(["relay"]);
+
+      const pullResponse = joinChunks(
+        encoded({
+          manifest: {
+            digestAlgorithm: "sha256",
+            entries: [],
+            kind: "directory",
+            name: "empty",
+            totalBytes: 0,
+          },
+          type: "manifest",
+        }),
+        encoded({ type: "complete" })
+      );
+      const direct = scriptedSession({
+        connectionPath: "direct",
+        reads: [pullResponse],
+      });
+      yield* pullRemote({
+        destination: join(fixture, "empty"),
+        link,
+        onConnected,
+        remotePath: "empty",
+        transport: clientTransport(direct.session),
+      });
+      expect(reported).toEqual(["relay", "direct"]);
+
+      // A request that fails after connecting still reported its path first.
+      const failing = scriptedSession({
+        connectionPath: "direct",
+        reads: [encoded({ code: "not-found", type: "pull-error" })],
+      });
+      const error = yield* pullRemote({
+        destination: join(fixture, "missing"),
+        link,
+        onConnected,
+        remotePath: "missing.txt",
+        transport: clientTransport(failing.session),
+      }).pipe(Effect.flip);
+      expect(error).toMatchObject({ _tag: "PullNotFoundError" });
+      expect(reported).toEqual(["relay", "direct", "direct"]);
+    })
+  );
+
   it.effect("rejects an invalid remote path before opening a session", () =>
     Effect.gen(function* () {
       let connectCalls = 0;
@@ -1052,6 +1135,12 @@ describe("bridge application supervision", () => {
         new BridgeProxyConfigurationError({
           message: "The bridge proxy configuration is invalid.",
           requested: "environment",
+        }),
+        // A failed direct-only dial already spent its full connect deadline;
+        // failing fast beats a second slow attempt.
+        new BridgeDirectConnectError({
+          message:
+            "Could not establish a direct connection to the bridge, and the bridge locator allows no relay fallback.",
         }),
       ] as const;
 

@@ -7,7 +7,11 @@ import { encodeBridgeKey, mintCapability } from "@dumbridge/bridge-key";
 import { PullLimitError } from "@dumbridge/pull-transfer";
 import { Effect } from "effect";
 import packageJson from "../package.json" with { type: "json" };
-import { publicErrorMessage, resolveClientTransportOptions } from "../src/cli";
+import {
+  connectionPathNotice,
+  publicErrorMessage,
+  resolveClientTransportOptions,
+} from "../src/cli";
 
 const cliPath = fileURLToPath(new URL("../src/cli.ts", import.meta.url));
 
@@ -98,10 +102,15 @@ describe("dumbridge CLI", () => {
     expect(serve.stdout).toContain("--ttl");
     expect(serve.stdout).toContain("--detach");
     expect(serve.stdout).toContain("--stop");
+    expect(serve.stdout).toContain("--direct-only");
+    expect(serve.stdout).toContain("--relay-only");
+    expect(serve.stdout).toContain("may still upgrade");
     expect(run.stdout).toContain("dumbridge run [flags] <script>");
+    expect(run.stdout).toContain("connection path");
     expect(pullHelp.stdout).toContain(
       "dumbridge pull [flags] <remote-path> [<destination>]"
     );
+    expect(pullHelp.stdout).toContain("connection path");
     expect(root.stdout).toContain("serve locally");
     expect(root.stdout).toContain("DUMBRIDGE_KEY");
     expect(serve.stdout).toContain("DUMBRIDGE_KEY");
@@ -191,6 +200,18 @@ describe("dumbridge CLI", () => {
     expect(resolveClientTransportOptions({})).toEqual({
       proxy: { _tag: "Disabled" },
     });
+  });
+
+  test("names each connection path in one branded stderr line", () => {
+    expect(connectionPathNotice("direct")).toBe(
+      "dumbridge: connected directly\n"
+    );
+    expect(connectionPathNotice("relay")).toBe(
+      "dumbridge: connected via relay\n"
+    );
+    expect(connectionPathNotice("unknown")).toBe(
+      "dumbridge: connected (path unknown)\n"
+    );
   });
 
   test("maps pull IO failures and empty errors to stable public text", () => {

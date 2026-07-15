@@ -63,7 +63,10 @@ export interface DetachedServeStartup {
   readonly pid: number;
 }
 
+export type ServeReachability = "direct-only" | "relay-only";
+
 export interface DetachedSpawnRequest {
+  readonly reachability?: ServeReachability;
   readonly root: string;
   readonly ttl?: string;
 }
@@ -239,6 +242,7 @@ const stateDirectoryInsideRoot = (root: string, stateDirectory: string) =>
 export const detachServe = Effect.fn("DetachedServe.detach")(
   (options: {
     readonly control: ServeProcessControl;
+    readonly reachability?: ServeReachability;
     readonly root: string;
     readonly stateDirectory: string;
     readonly ttl?: string;
@@ -268,6 +272,9 @@ export const detachServe = Effect.fn("DetachedServe.detach")(
 
       const startup = yield* options.control.spawnDetachedServe({
         root: options.root,
+        ...(options.reachability === undefined
+          ? {}
+          : { reachability: options.reachability }),
         ...(options.ttl === undefined ? {} : { ttl: options.ttl }),
       });
       yield* writeRecord(options.stateDirectory, {
@@ -355,6 +362,9 @@ const spawnDetachedServe = (request: DetachedSpawnRequest) =>
           return;
         }
         const serveArguments = [cliPath, "serve", request.root];
+        if (request.reachability !== undefined) {
+          serveArguments.push(`--${request.reachability}`);
+        }
         if (request.ttl !== undefined) {
           serveArguments.push("--ttl", request.ttl);
         }

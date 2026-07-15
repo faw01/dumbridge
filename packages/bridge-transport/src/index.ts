@@ -32,6 +32,15 @@ export class BridgeDeadlineExceededError extends Schema.TaggedErrorClass<BridgeD
   }
 ) {}
 
+// A dial against a locator with no relay cannot fall back; the failure is
+// branded so callers can fail fast instead of retrying a hopeless holepunch.
+export class BridgeDirectConnectError extends Schema.TaggedErrorClass<BridgeDirectConnectError>()(
+  "BridgeDirectConnectError",
+  {
+    message: Schema.String,
+  }
+) {}
+
 export class BridgeFinishError extends Schema.TaggedErrorClass<BridgeFinishError>()(
   "BridgeFinishError",
   {
@@ -113,8 +122,13 @@ export interface BridgeDeadlines {
   readonly listen: Duration.Input;
 }
 
+// The path selected when the session was established. Iroh may later upgrade
+// a relayed connection to a direct one; the snapshot is not re-observed.
+export type ConnectionPath = "direct" | "relay" | "unknown";
+
 export interface BridgeSession {
   readonly close: Effect.Effect<void>;
+  readonly connectionPath: ConnectionPath;
   readonly finish: Effect.Effect<
     void,
     BridgeFinishError | BridgeDeadlineExceededError
@@ -144,6 +158,7 @@ export interface BridgeTransport {
     BridgeSession,
     | BridgeConnectError
     | BridgeDeadlineExceededError
+    | BridgeDirectConnectError
     | BridgeLocatorInvalidError
     | BridgeProxyConfigurationError
     | BridgeProxyUnsupportedError,
