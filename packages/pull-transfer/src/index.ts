@@ -7,6 +7,7 @@ export {
   type PullError,
   type PullErrorTag,
   PullIOError,
+  PullLimitError,
   PullNotFoundError,
   PullPathError,
   PullRemoteLimitError,
