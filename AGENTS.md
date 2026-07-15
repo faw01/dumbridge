@@ -8,6 +8,8 @@ Tests use `@effect/vitest` `it.effect`; time-dependent tests use `TestClock`, no
 
 Commits use one-line conventional commits with a required scope, for example `feat(bridge): stream pull responses`. Do not add commit bodies, footers, or co-authors.
 
+Releases are automated. `dumbridge` in `apps/dumbridge` is the only published package; everything under `packages/*` is private and stays private. On every push to `main`, `.github/workflows/release.yml` runs verify and then changesets/action: queued changesets open or update a `chore(release): version packages` PR, and merging it publishes to npm through trusted publishing (GitHub OIDC, no `NPM_TOKEN`, provenance attached). The workflow filename is pinned in the npm-side trusted-publisher config, so renaming `release.yml` requires updating npmjs.com. Owner-authenticated `npm publish` from `apps/dumbridge` remains the manual fallback.
+
 CI gates pull requests with `fallow audit` over changed files; `.fallowrc.json` is the policy. Dead-code analysis stays in default mode because exports-for-tests is repo policy; production mode flags six test-consumed exports. Never run `fallow fix --production` — it would strip those exports and break the suite; preview any fix with `fallow fix --dry-run`. Semantic-mode duplication stays out of CI (noisy against Effect Schema boilerplate); run `fallow dupes --mode semantic` manually per release.
 
 ## Agent skills

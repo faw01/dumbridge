@@ -1,0 +1,61 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+
+# id-token lets npm authenticate this workflow via OIDC trusted publishing;
+# contents and pull-requests let changesets/action push the version branch,
+# tags, and GitHub releases and open the version PR.
+permissions:
+  contents: write
+  pull-requests: write
+  id-token: write
+
+# Never cancel an in-flight publish; queue instead.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+
+jobs:
+  release:
+    name: Version or publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+      # No registry-url: setup-node would write an .npmrc auth stub that can
+      # shadow OIDC; npm publishes to registry.npmjs.org by default.
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+      # Trusted publishing requires npm >= 11.5.1; Node may bundle older.
+      - run: npm install -g npm@latest
+      - run: bun install --frozen-lockfile
+      - run: bun run verify
+      # npm validates the trusted publisher only at publish time, so surface
+      # the expected npm-side configuration next to any auth failure.
+      - name: Trusted publisher preflight
+        run: |
+          echo "Publishing authenticates via npm trusted publishing (GitHub OIDC); this repo has no NPM_TOKEN."
+          echo "If the publish below fails with ENEEDAUTH or E404, the npm-side trusted-publisher config is missing."
+          echo "Configure it on npmjs.com: package 'dumbridge' -> Settings -> Trusted Publisher -> GitHub Actions:"
+          echo "  Organization or user: faw01"
+          echo "  Repository: dumbridge"
+          echo "  Workflow filename: release.yml"
+          echo "  Environment name: (leave empty)"
+          echo "  Allowed actions: npm publish"
+      - name: Version PR or publish
+        uses: changesets/action@v1
+        with:
+          version: bun run ci:version
+          publish: bun run ci:publish
+          commit: "chore(release): version packages"
+          title: "chore(release): version packages"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NPM_CONFIG_PROVENANCE: true
