@@ -93,6 +93,60 @@ const parentsAreDeclared = (
   return true;
 };
 
+// An entry must be a canonical remote path, strictly after its predecessor,
+// and below directories the manifest has already declared.
+const entryPlacementViolation = (
+  entry: PullManifestEntry,
+  previousPath: string | undefined,
+  directories: ReadonlySet<string>
+): PullManifestViolation | undefined => {
+  if (Result.isFailure(parseRemotePath(entry.path))) {
+    return { kind: "entry-path", path: entry.path };
+  }
+  if (previousPath !== undefined && previousPath >= entry.path) {
+    return { kind: "order", path: entry.path };
+  }
+  if (!parentsAreDeclared(entry.path, directories)) {
+    return { kind: "parents", path: entry.path };
+  }
+};
+
+// Byte budget accounting: no file may pass the per-file ceiling, and the
+// running total may neither overflow safe integers nor pass the transfer
+// ceiling.
+const addFileBytes = (
+  totalBytes: number,
+  entry: PullFileEntry,
+  limits: PullManifestLimits
+): Result.Result<number, PullManifestViolation> => {
+  if (!Number.isSafeInteger(entry.size) || entry.size > limits.maxFileBytes) {
+    return Result.fail({
+      kind: "limit",
+      limit: "file-bytes",
+      maximum: limits.maxFileBytes,
+      observed: entry.size,
+    });
+  }
+  const total = totalBytes + entry.size;
+  if (!Number.isSafeInteger(total)) {
+    return Result.fail({
+      kind: "limit",
+      limit: "transfer-bytes",
+      maximum: limits.maxTransferBytes,
+      observed: Number.MAX_SAFE_INTEGER,
+    });
+  }
+  if (total > limits.maxTransferBytes) {
+    return Result.fail({
+      kind: "limit",
+      limit: "transfer-bytes",
+      maximum: limits.maxTransferBytes,
+      observed: total,
+    });
+  }
+  return Result.succeed(total);
+};
+
 const validateEntries = (
   entries: PullManifest["entries"],
   limits: PullManifestLimits
@@ -102,45 +156,20 @@ const validateEntries = (
   let previousPath: string | undefined;
   let totalBytes = 0;
   for (const entry of entries) {
-    if (Result.isFailure(parseRemotePath(entry.path))) {
-      return Result.fail({ kind: "entry-path", path: entry.path });
-    }
-    if (previousPath !== undefined && previousPath >= entry.path) {
-      return Result.fail({ kind: "order", path: entry.path });
+    const violation = entryPlacementViolation(entry, previousPath, directories);
+    if (violation !== undefined) {
+      return Result.fail(violation);
     }
     previousPath = entry.path;
-    if (!parentsAreDeclared(entry.path, directories)) {
-      return Result.fail({ kind: "parents", path: entry.path });
-    }
     if (entry.kind === "directory") {
       directories.add(entry.path);
       continue;
     }
-    if (!Number.isSafeInteger(entry.size) || entry.size > limits.maxFileBytes) {
-      return Result.fail({
-        kind: "limit",
-        limit: "file-bytes",
-        maximum: limits.maxFileBytes,
-        observed: entry.size,
-      });
+    const total = addFileBytes(totalBytes, entry, limits);
+    if (Result.isFailure(total)) {
+      return Result.fail(total.failure);
     }
-    totalBytes += entry.size;
-    if (!Number.isSafeInteger(totalBytes)) {
-      return Result.fail({
-        kind: "limit",
-        limit: "transfer-bytes",
-        maximum: limits.maxTransferBytes,
-        observed: Number.MAX_SAFE_INTEGER,
-      });
-    }
-    if (totalBytes > limits.maxTransferBytes) {
-      return Result.fail({
-        kind: "limit",
-        limit: "transfer-bytes",
-        maximum: limits.maxTransferBytes,
-        observed: totalBytes,
-      });
-    }
+    totalBytes = total.success;
     files.push(entry);
   }
   return Result.succeed({ files, totalBytes });

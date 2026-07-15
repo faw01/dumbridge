@@ -1,5 +1,5 @@
 import { Buffer } from "node:buffer";
-import { promises as hostFileSystem } from "node:fs";
+import { promises as hostFileSystem, type Stats } from "node:fs";
 import { join } from "node:path";
 import { type IFileSystem, OverlayFs } from "just-bash";
 import {
@@ -16,6 +16,56 @@ import {
 } from "./host-paths";
 
 const maxConcurrentHostReads = 32;
+
+type HostFileHandle = Awaited<ReturnType<typeof hostFileSystem.open>>;
+
+interface HostLeafIdentity {
+  readonly device: number;
+  readonly inode: number;
+  readonly size: number;
+}
+
+const safeHostReadCodes = [
+  "EACCES",
+  "EFTYPE",
+  "EISDIR",
+  "ELOOP",
+  "ENOENT",
+  "ENOTDIR",
+  "EPERM",
+  "ESTALE",
+];
+
+// A symlink anywhere, a non-directory ancestor, or a non-file leaf ends the
+// read before any bytes are served.
+const assertHostComponentKind = (stats: Stats, isLeaf: boolean) => {
+  if (stats.isSymbolicLink()) {
+    throw Object.assign(new Error("symbolic links are disabled"), {
+      code: "ENOENT",
+    });
+  }
+  if (!(isLeaf || stats.isDirectory())) {
+    throw Object.assign(new Error("path component is not a directory"), {
+      code: "ENOTDIR",
+    });
+  }
+  if (isLeaf && !stats.isFile()) {
+    throw Object.assign(new Error("unsupported file type"), {
+      code: stats.isDirectory() ? "EISDIR" : "EFTYPE",
+    });
+  }
+};
+
+// Unknown errno values collapse to EIO so a host read failure can never leak
+// detail beyond the allowlisted codes into shell-visible messages.
+const safeHostReadError = (error: unknown, normalizedPath: string) => {
+  const { code } = error as NodeJS.ErrnoException;
+  const safeCode = code && safeHostReadCodes.includes(code) ? code : "EIO";
+  return Object.assign(
+    new Error(`${safeCode}: unable to read '${normalizedPath}'`),
+    { code: safeCode }
+  );
+};
 
 export interface ServedRootReadLimits {
   readonly maxFileReadBytes: number;
@@ -267,119 +317,130 @@ export class RequestBudgetOverlayFs extends OverlayFs {
     return { normalized, path: join(this.hostRoot, ...segments), segments };
   }
 
-  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: security checks stay adjacent to the bounded read they protect
+  // Components are validated in order, without following symlinks, so a
+  // symlinked or replaced ancestor is rejected before the leaf is opened.
+  private async lstatLeafIdentity(
+    location: NonNullable<ReturnType<RequestBudgetOverlayFs["hostLocation"]>>
+  ): Promise<HostLeafIdentity> {
+    if (location.segments.length === 0) {
+      throw Object.assign(new Error("served root is a directory"), {
+        code: "EISDIR",
+      });
+    }
+    let leafIdentity: HostLeafIdentity | undefined;
+    let current = this.hostRoot;
+    for (const [index, segment] of location.segments.entries()) {
+      current = join(current, segment);
+      // biome-ignore lint/performance/noAwaitInLoops: components must be validated in order and cancellation is checked per component
+      const stats = await this.whileRequestOpen(() =>
+        hostFileSystem.lstat(current)
+      );
+      const isLeaf = index === location.segments.length - 1;
+      assertHostComponentKind(stats, isLeaf);
+      if (isLeaf) {
+        leafIdentity = {
+          device: stats.dev,
+          inode: stats.ino,
+          size: stats.size,
+        };
+      }
+    }
+    if (leafIdentity === undefined) {
+      throw Object.assign(new Error("file disappeared"), { code: "ENOENT" });
+    }
+    return leafIdentity;
+  }
+
+  // The opened handle must still be the regular file the component walk
+  // validated, or a swap between lstat and open would serve different bytes.
+  private async verifyOpenedLeaf(
+    handle: HostFileHandle,
+    leaf: HostLeafIdentity
+  ): Promise<number> {
+    const stats = await this.whileRequestOpen(() => handle.stat());
+    if (!stats.isFile()) {
+      throw Object.assign(new Error("unsupported file type"), {
+        code: "EFTYPE",
+      });
+    }
+    if (stats.dev !== leaf.device || stats.ino !== leaf.inode) {
+      throw Object.assign(new Error("file identity changed"), {
+        code: "ESTALE",
+      });
+    }
+    return stats.size;
+  }
+
+  // Charge or refund the difference between the estimated and observed sizes
+  // so the read budget tracks what the request actually consumed.
+  private retrueReadReservation(reserved: number, actual: number): number {
+    if (actual > reserved) {
+      this.reserve("file-read", actual - reserved);
+    } else if (actual < reserved) {
+      this.releaseRead(reserved - actual);
+    }
+    return actual;
+  }
+
+  // Read the verified size in bounded chunks, then probe one byte past the
+  // end: growth past the reservation is a limit failure, shrinkage is a
+  // source change, and neither may serve mixed bytes.
+  private async readVerifiedContent(
+    handle: HostFileHandle,
+    size: number,
+    normalizedPath: string
+  ): Promise<Uint8Array> {
+    const content = Buffer.allocUnsafe(size);
+    let offset = 0;
+    while (offset < content.byteLength) {
+      const length = Math.min(64 * 1024, content.byteLength - offset);
+      // biome-ignore lint/performance/noAwaitInLoops: bounded chunks provide cooperative cancellation
+      const result = await this.whileRequestOpen(() =>
+        handle.read(content, offset, length, offset)
+      );
+      if (result.bytesRead === 0) {
+        break;
+      }
+      offset += result.bytesRead;
+    }
+
+    if (offset === content.byteLength) {
+      const probe = Buffer.allocUnsafe(1);
+      const result = await this.whileRequestOpen(() =>
+        handle.read(probe, 0, 1, offset)
+      );
+      if (result.bytesRead > 0) {
+        this.limitExceeded ??= "file-read";
+        throw new ServedRootLimitSignal(this.limitExceeded);
+      }
+    }
+
+    if (offset < size) {
+      throw new ServedRootSourceChangedError({
+        path: normalizedPath,
+      });
+    }
+    return content;
+  }
+
   private async readHostFile(
     location: NonNullable<ReturnType<RequestBudgetOverlayFs["hostLocation"]>>
   ): Promise<Uint8Array> {
-    let handle: Awaited<ReturnType<typeof hostFileSystem.open>> | undefined;
+    let handle: HostFileHandle | undefined;
     let hasHostReadSlot = false;
-    let leafIdentity:
-      | {
-          readonly device: number;
-          readonly inode: number;
-          readonly size: number;
-        }
-      | undefined;
     let reserved = 0;
     try {
-      if (location.segments.length === 0) {
-        throw Object.assign(new Error("served root is a directory"), {
-          code: "EISDIR",
-        });
-      }
-      let current = this.hostRoot;
-      for (const [index, segment] of location.segments.entries()) {
-        current = join(current, segment);
-        // biome-ignore lint/performance/noAwaitInLoops: components must be validated in order and cancellation is checked per component
-        const stats = await this.whileRequestOpen(() =>
-          hostFileSystem.lstat(current)
-        );
-        if (stats.isSymbolicLink()) {
-          throw Object.assign(new Error("symbolic links are disabled"), {
-            code: "ENOENT",
-          });
-        }
-        if (index < location.segments.length - 1 && !stats.isDirectory()) {
-          throw Object.assign(new Error("path component is not a directory"), {
-            code: "ENOTDIR",
-          });
-        }
-        if (index === location.segments.length - 1 && !stats.isFile()) {
-          throw Object.assign(new Error("unsupported file type"), {
-            code: stats.isDirectory() ? "EISDIR" : "EFTYPE",
-          });
-        }
-        if (index === location.segments.length - 1) {
-          leafIdentity = {
-            device: stats.dev,
-            inode: stats.ino,
-            size: stats.size,
-          };
-        }
-      }
-
-      if (leafIdentity === undefined) {
-        throw Object.assign(new Error("file disappeared"), { code: "ENOENT" });
-      }
-      this.reserve("file-read", leafIdentity.size);
-      reserved = leafIdentity.size;
+      const leaf = await this.lstatLeafIdentity(location);
+      this.reserve("file-read", leaf.size);
+      reserved = leaf.size;
       this.acquireHostRead();
       hasHostReadSlot = true;
       handle = await this.whileRequestOpen(() =>
         hostFileSystem.open(location.path, readOnlyNoFollowNonBlocking)
       );
-      const openedHandle = handle;
-      const stats = await this.whileRequestOpen(() => openedHandle.stat());
-      if (!stats.isFile()) {
-        throw Object.assign(new Error("unsupported file type"), {
-          code: "EFTYPE",
-        });
-      }
-      if (
-        stats.dev !== leafIdentity.device ||
-        stats.ino !== leafIdentity.inode
-      ) {
-        throw Object.assign(new Error("file identity changed"), {
-          code: "ESTALE",
-        });
-      }
-      if (stats.size > reserved) {
-        this.reserve("file-read", stats.size - reserved);
-      } else if (stats.size < reserved) {
-        this.releaseRead(reserved - stats.size);
-      }
-      reserved = stats.size;
-      const content = Buffer.allocUnsafe(stats.size);
-      let offset = 0;
-      while (offset < content.byteLength) {
-        const length = Math.min(64 * 1024, content.byteLength - offset);
-        // biome-ignore lint/performance/noAwaitInLoops: bounded chunks provide cooperative cancellation
-        const result = await this.whileRequestOpen(() =>
-          openedHandle.read(content, offset, length, offset)
-        );
-        if (result.bytesRead === 0) {
-          break;
-        }
-        offset += result.bytesRead;
-      }
-
-      if (offset === content.byteLength) {
-        const probe = Buffer.allocUnsafe(1);
-        const result = await this.whileRequestOpen(() =>
-          openedHandle.read(probe, 0, 1, offset)
-        );
-        if (result.bytesRead > 0) {
-          this.limitExceeded ??= "file-read";
-          throw new ServedRootLimitSignal(this.limitExceeded);
-        }
-      }
-
-      if (offset < reserved) {
-        throw new ServedRootSourceChangedError({
-          path: location.normalized,
-        });
-      }
-      return content;
+      const size = await this.verifyOpenedLeaf(handle, leaf);
+      reserved = this.retrueReadReservation(reserved, size);
+      return await this.readVerifiedContent(handle, size, location.normalized);
     } catch (error) {
       if (error instanceof ServedRootLimitSignal) {
         throw error;
@@ -391,25 +452,7 @@ export class RequestBudgetOverlayFs extends OverlayFs {
       if (error instanceof ServedRootSourceChangedError) {
         throw error;
       }
-      const { code } = error as NodeJS.ErrnoException;
-      const safeCode =
-        code &&
-        [
-          "EACCES",
-          "EFTYPE",
-          "EISDIR",
-          "ELOOP",
-          "ENOENT",
-          "ENOTDIR",
-          "EPERM",
-          "ESTALE",
-        ].includes(code)
-          ? code
-          : "EIO";
-      throw Object.assign(
-        new Error(`${safeCode}: unable to read '${location.normalized}'`),
-        { code: safeCode }
-      );
+      throw safeHostReadError(error, location.normalized);
     } finally {
       await handle?.close().catch(() => undefined);
       if (hasHostReadSlot) {
@@ -432,11 +475,7 @@ export class RequestBudgetOverlayFs extends OverlayFs {
       reservedBytes = stats.size;
       this.reserve("file-read", reservedBytes);
       const content = await super.readFileBuffer(...args);
-      if (content.byteLength > reservedBytes) {
-        this.reserve("file-read", content.byteLength - reservedBytes);
-      } else if (content.byteLength < reservedBytes) {
-        this.releaseRead(reservedBytes - content.byteLength);
-      }
+      this.retrueReadReservation(reservedBytes, content.byteLength);
       return content;
     } catch (error) {
       if (!(error instanceof ServedRootLimitSignal) && reservedBytes > 0) {
