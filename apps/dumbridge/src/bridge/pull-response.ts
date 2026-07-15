@@ -13,8 +13,11 @@ import type { PullFailureCode, PullResponseEvent } from "@dumbridge/wire";
 import { Effect, Option, Stream } from "effect";
 import type { WireEventReader } from "./channel";
 
-const pullReadError = (path: string) =>
-  new PullIOError({ operation: "read bridge response", path });
+// The wire or transport failure stays attached so the client can report a
+// response the bridge ended early or a lost connection as such instead of a
+// generic failed pull.
+const pullReadError = (path: string, cause?: unknown) =>
+  new PullIOError({ cause, operation: "read bridge response", path });
 
 const remotePullError = (code: PullFailureCode, path: string): PullError => {
   switch (code) {
@@ -47,7 +50,7 @@ export const nextPullEvent = (
     return pullReadError(path);
   }
   return reader.next().pipe(
-    Effect.mapError(() => pullReadError(path)),
+    Effect.mapError((error) => pullReadError(path, error)),
     Effect.flatMap((event) =>
       Option.isSome(event) && event.value.type === "pull-error"
         ? Effect.fail(remotePullError(event.value.code, path))

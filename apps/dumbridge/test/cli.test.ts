@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { encodeBridgeKey, mintCapability } from "@dumbridge/bridge-key";
+import { PullLimitError } from "@dumbridge/pull-transfer";
 import { Effect } from "effect";
 import packageJson from "../package.json" with { type: "json" };
 import { publicErrorMessage, resolveClientTransportOptions } from "../src/cli";
@@ -201,17 +202,44 @@ describe("dumbridge CLI", () => {
     ).toBe("The pull could not be completed.");
     expect(
       publicErrorMessage({
-        _tag: "PullRemoteLimitError",
-        path: "large.bin",
-      })
-    ).toBe("The remote pull exceeded a safety limit.");
-    expect(
-      publicErrorMessage({
         _tag: "ServedRootChangedError",
         message: "served root changed after bridge start",
       })
     ).toBe("The served root changed during the pull.");
     expect(publicErrorMessage({ message: "   " })).toBe("dumbridge failed.");
+  });
+
+  test("states the pull limit ceilings and a recovery in limit messages", () => {
+    expect(
+      publicErrorMessage({
+        _tag: "PullRemoteLimitError",
+        path: "large.bin",
+      })
+    ).toBe(
+      "The remote pull exceeded a safety limit: one pull may copy at most 4096 entries, 1 GiB per file, and 2 GiB in total; pull a smaller file or subdirectory."
+    );
+    expect(
+      publicErrorMessage(
+        new PullLimitError({
+          limit: "total bytes",
+          maximum: 2 * 1024 * 1024 * 1024,
+          observed: 2 * 1024 * 1024 * 1024 + 1,
+        })
+      )
+    ).toBe(
+      "The pull exceeded the total bytes limit: at most 2 GiB allowed and 2147483649 bytes observed; pull a smaller file or subdirectory."
+    );
+    expect(
+      publicErrorMessage(
+        new PullLimitError({
+          limit: "entries",
+          maximum: 4096,
+          observed: 4097,
+        })
+      )
+    ).toBe(
+      "The pull exceeded the entries limit: at most 4096 allowed and 4097 observed; pull a smaller file or subdirectory."
+    );
   });
 
   test("scrubs bridge key tokens from every public error message", () => {

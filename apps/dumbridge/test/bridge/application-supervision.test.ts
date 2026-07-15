@@ -16,6 +16,7 @@ import {
   BridgeLocator,
   BridgeLocatorInvalidError,
   BridgeProxyConfigurationError,
+  BridgeReadError,
   type BridgeSession,
   type BridgeTransport,
 } from "@dumbridge/bridge-transport";
@@ -830,6 +831,128 @@ describe("bridge application supervision", () => {
         expect(error.cause).toMatchObject({ _tag: "IncompleteSessionError" });
         expect(truncated.state.closeCalls).toBe(1);
       })
+  );
+
+  it.effect(
+    "reports a pull response that ends before completing as the bridge closing early",
+    () =>
+      Effect.gen(function* () {
+        const accepts: BridgeListener["accept"][] = [];
+        const listener = listenerFrom(accepts);
+        const server = yield* Effect.scoped(
+          openBridge({
+            maxConcurrentSessions: 1,
+            root: fixture,
+            transport: listenerTransport(listener),
+          })
+        );
+        const request = requestFor(server.link, {
+          remotePath: "note.txt",
+          type: "pull",
+        });
+        const serverSession = scriptedSession({ reads: [request] });
+        accepts.push(
+          Effect.succeed(serverSession.session),
+          Effect.fail(
+            new BridgeListenerClosedError({ message: "listener closed" })
+          )
+        );
+        yield* Effect.scoped(server.serve.pipe(Effect.flip));
+        // Replay everything up to the file-end and complete frames, so the
+        // client sees a cleanly ended but incomplete transfer.
+        expect(serverSession.state.writes.length).toBeGreaterThan(2);
+
+        const truncated = scriptedSession({
+          reads: serverSession.state.writes.slice(0, -2),
+        });
+        const error = yield* pullRemote({
+          destination: join(fixture, "destination-ended-early"),
+          link: server.link,
+          remotePath: "note.txt",
+          transport: clientTransport(truncated.session),
+        }).pipe(Effect.flip);
+
+        expect(error).toMatchObject({
+          _tag: "BridgeClientError",
+          message:
+            "The bridge ended the response before it completed. The serve process may have stopped or refused the query; check dumbridge serve on the local machine.",
+          operation: "pull-response",
+        });
+        expect(error.cause).toMatchObject({ _tag: "IncompleteSessionError" });
+        expect(truncated.state.closeCalls).toBe(1);
+      })
+  );
+
+  it.effect(
+    "reports a connection lost while reading a pull response as such",
+    () =>
+      Effect.gen(function* () {
+        const capability = mintCapability();
+        const link = success(
+          encodeBridgeKey({
+            capability,
+            expiresAt: farFutureExpiry,
+            locator: "lost-pull-client",
+            transport: "iroh",
+          })
+        );
+        const base = scriptedSession({});
+        const session: BridgeSession = {
+          ...base.session,
+          read: Effect.fail(
+            new BridgeReadError({ message: "connection reset" })
+          ),
+        };
+
+        const error = yield* pullRemote({
+          destination: join(fixture, "destination-lost"),
+          link,
+          remotePath: "note.txt",
+          transport: clientTransport(session),
+        }).pipe(Effect.flip);
+
+        expect(error).toMatchObject({
+          _tag: "BridgeClientError",
+          message:
+            "The bridge connection failed while reading the response. Check that dumbridge serve is still running on the local machine.",
+          operation: "pull-response",
+        });
+        expect(error.cause).toBeInstanceOf(BridgeReadError);
+        expect(base.state.closeCalls).toBe(1);
+      })
+  );
+
+  it.effect("reports a malformed pull frame as an invalid response", () =>
+    Effect.gen(function* () {
+      const capability = mintCapability();
+      const link = success(
+        encodeBridgeKey({
+          capability,
+          expiresAt: farFutureExpiry,
+          locator: "malformed-pull-client",
+          transport: "iroh",
+        })
+      );
+      const garbageFrame = Uint8Array.of(
+        ...[0, 0, 0, 8],
+        ...[0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff]
+      );
+      const malformed = scriptedSession({ reads: [garbageFrame] });
+
+      const error = yield* pullRemote({
+        destination: join(fixture, "destination-malformed"),
+        link,
+        remotePath: "note.txt",
+        transport: clientTransport(malformed.session),
+      }).pipe(Effect.flip);
+
+      expect(error).toMatchObject({
+        _tag: "BridgeClientError",
+        message: "The bridge returned an invalid response.",
+        operation: "pull-response",
+      });
+      expect(malformed.state.closeCalls).toBe(1);
+    })
   );
 
   it.effect("still reports a malformed frame as an invalid response", () =>

@@ -7,7 +7,12 @@ import {
   type IrohTransportOptions,
   makeIrohTransport,
 } from "@dumbridge/bridge-transport/iroh";
-import type { PullErrorTag } from "@dumbridge/pull-transfer";
+import { type PullErrorTag, PullLimitError } from "@dumbridge/pull-transfer";
+import {
+  maximumFileBytes,
+  maximumManifestEntries,
+  maximumTransferBytes,
+} from "@dumbridge/wire";
 import { BunRuntime, BunServices } from "@effect/platform-bun";
 import {
   Config,
@@ -273,6 +278,33 @@ const runCli = Command.runWith(command, {
   version: packageJson.version,
 });
 
+const formatPullBytes = (bytes: number) => {
+  const gibibyte = 1024 * 1024 * 1024;
+  const mebibyte = 1024 * 1024;
+  if (bytes >= gibibyte && bytes % gibibyte === 0) {
+    return `${bytes / gibibyte} GiB`;
+  }
+  if (bytes >= mebibyte && bytes % mebibyte === 0) {
+    return `${bytes / mebibyte} MiB`;
+  }
+  if (bytes >= 1024 && bytes % 1024 === 0) {
+    return `${bytes / 1024} KiB`;
+  }
+  return `${bytes} bytes`;
+};
+
+const pullRecovery = "pull a smaller file or subdirectory";
+
+// The bridge reports only that a limit fired, never which one or what it
+// measured, so the remote message states every ceiling the protocol fixes
+// for both sides instead of fabricating a measurement.
+const remotePullLimitMessage = `The remote pull exceeded a safety limit: one pull may copy at most ${maximumManifestEntries} entries, ${formatPullBytes(maximumFileBytes)} per file, and ${formatPullBytes(maximumTransferBytes)} in total; ${pullRecovery}.`;
+
+const pullLimitMessage = (error: PullLimitError) => {
+  const measure = error.limit.endsWith("bytes") ? formatPullBytes : String;
+  return `The pull exceeded the ${error.limit} limit: at most ${measure(error.maximum)} allowed and ${measure(error.observed)} observed; ${pullRecovery}.`;
+};
+
 const pullErrorMessages = {
   PullDestinationExistsError: "The pull destination already exists.",
   PullIntegrityError: "The pulled data failed integrity verification.",
@@ -280,13 +312,16 @@ const pullErrorMessages = {
   PullLimitError: "The pull exceeded a safety limit.",
   PullNotFoundError: "The remote path does not exist.",
   PullPathError: "The pull path is invalid.",
-  PullRemoteLimitError: "The remote pull exceeded a safety limit.",
+  PullRemoteLimitError: remotePullLimitMessage,
   PullSourceChangedError: "The remote source changed during the pull.",
   PullSymlinkError: "Symlinks cannot be pulled.",
   ServedRootChangedError: "The served root changed during the pull.",
 } satisfies Record<PullErrorTag, string>;
 
 export const publicErrorMessage = (error: unknown): string => {
+  if (error instanceof PullLimitError) {
+    return pullLimitMessage(error);
+  }
   if (typeof error === "object" && error !== null && "_tag" in error) {
     const tag = String(error._tag);
     if (Object.hasOwn(pullErrorMessages, tag)) {
