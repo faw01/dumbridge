@@ -113,6 +113,12 @@ interface FinishLifecycleProbe {
   readonly operation: string | null;
 }
 
+interface ConnectionPathProbe {
+  readonly noSelection: string;
+  readonly relaySelected: string;
+  readonly snapshotFailure: string;
+}
+
 describe("Iroh bridge transport", () => {
   it.live("exchanges bounded binary sessions through a scoped listener", () =>
     Effect.gen(function* () {
@@ -185,6 +191,36 @@ describe("Iroh bridge transport", () => {
       expect(transitions).toBe(1);
     })
   );
+
+  it.live("reports the connection path selected at connect time", () =>
+    Effect.gen(function* () {
+      const paths = yield* Effect.scoped(
+        Effect.gen(function* () {
+          const transport = makeLoopbackTransport();
+          const listener = yield* transport.listen;
+          const serverFiber = yield* listener.accept.pipe(Effect.forkScoped);
+          const client = yield* transport.connect(listener.locator);
+          yield* client.write(Uint8Array.of(1));
+          const server = yield* Fiber.join(serverFiber);
+
+          return {
+            client: client.connectionPath,
+            server: server.connectionPath,
+          };
+        })
+      );
+
+      expect(paths).toEqual({ client: "direct", server: "direct" });
+    })
+  );
+
+  it("classifies relay and unobservable path snapshots honestly", async () => {
+    const result = await runProbe<ConnectionPathProbe>("connection-path");
+
+    expect(result.relaySelected).toBe("relay");
+    expect(result.noSelection).toBe("unknown");
+    expect(result.snapshotFailure).toBe("unknown");
+  });
 
   it.live("rejects an invalid opaque locator with a typed failure", () =>
     Effect.gen(function* () {

@@ -113,8 +113,13 @@ export interface BridgeDeadlines {
   readonly listen: Duration.Input;
 }
 
+// The path selected when the session was established. Iroh may later upgrade
+// a relayed connection to a direct one; the snapshot is not re-observed.
+export type ConnectionPath = "direct" | "relay" | "unknown";
+
 export interface BridgeSession {
   readonly close: Effect.Effect<void>;
+  readonly connectionPath: ConnectionPath;
   readonly finish: Effect.Effect<
     void,
     BridgeFinishError | BridgeDeadlineExceededError

@@ -252,6 +252,56 @@ const sessionFailure = async (operation: SessionFailureOperation) =>
     )
   );
 
+const connectWithPathSnapshots = (paths: () => unknown) =>
+  Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const originalBind = EndpointBuilder.prototype.bind;
+        const stream = {
+          recv: { read: () => Promise.resolve([]) },
+          send: {
+            finish: () => Promise.resolve(),
+            stopped: () => Promise.resolve(null),
+            writeAll: () => Promise.resolve(),
+          },
+        } as unknown as BiStream;
+        const connection = {
+          close: () => undefined,
+          openBi: () => Promise.resolve(stream),
+          paths,
+        } as unknown as Connection;
+        const endpoint = {
+          close: () => Promise.resolve(),
+          connect: () => Promise.resolve(connection),
+        } as unknown as Endpoint;
+        EndpointBuilder.prototype.bind = () => Promise.resolve(endpoint);
+
+        yield* Effect.addFinalizer(() =>
+          Effect.sync(() => {
+            EndpointBuilder.prototype.bind = originalBind;
+          })
+        );
+
+        const client = yield* makeLoopbackTransport().connect(
+          makeDirectLocator()
+        );
+        return client.connectionPath;
+      })
+    )
+  );
+
+const connectionPathClassification = async () => {
+  const relaySelected = await connectWithPathSnapshots(() => [
+    { isRelay: false, isSelected: false },
+    { isRelay: true, isSelected: true },
+  ]);
+  const noSelection = await connectWithPathSnapshots(() => []);
+  const snapshotFailure = await connectWithPathSnapshots(() => {
+    throw new Error("forced native path snapshot failure");
+  });
+  return { noSelection, relaySelected, snapshotFailure };
+};
+
 type FinishLifecycleScenario = "peer-stop" | "success" | "timeout";
 
 const finishLifecycle = async (scenario: FinishLifecycleScenario) =>
@@ -342,6 +392,8 @@ const run = (scenario: string | undefined) => {
       return relayReadiness(true);
     case "relay-timeout":
       return relayReadiness(false);
+    case "connection-path":
+      return connectionPathClassification();
     case "session-failures":
       return sessionFailure("read").then(async (read) => {
         const write = await sessionFailure("write");
