@@ -9,8 +9,10 @@
   ],
   "scripts": {
     "build": "turbo run build --cache-dir=.turbo/cache",
-    "changeset:status": "changeset status --since=origin/main",
+    "changeset:status": "bun scripts/changeset-status.ts",
     "check": "turbo run check --cache-dir=.turbo/cache && ultracite check .",
+    "ci:publish": "changeset publish",
+    "ci:version": "changeset version && bun install",
     "fix": "turbo run fix --cache-dir=.turbo/cache && ultracite fix .",
     "test": "turbo run test --cache-dir=.turbo/cache",
     "typecheck": "turbo run typecheck --cache-dir=.turbo/cache",
