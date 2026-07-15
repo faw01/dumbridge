@@ -1,4 +1,3 @@
-import { describe, expect, it } from "@effect/vitest";
 import { encodeCapability, makeCapability } from "@dumbridge/bridge-key";
 import {
   type BridgeRequest,
@@ -10,6 +9,7 @@ import {
   type WireDecodeError,
   type WireFrame,
 } from "@dumbridge/wire";
+import { describe, expect, it } from "@effect/vitest";
 import { Result } from "effect";
 
 const digest = "a".repeat(64);

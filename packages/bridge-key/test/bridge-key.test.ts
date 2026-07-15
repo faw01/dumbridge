@@ -1,4 +1,3 @@
-import { describe, expect, it } from "@effect/vitest";
 import {
   capabilitiesEqual,
   checkBridgeKeyExpiry,
@@ -8,6 +7,7 @@ import {
   parseBridgeKey,
   redactBridgeKey,
 } from "@dumbridge/bridge-key";
+import { describe, expect, it } from "@effect/vitest";
 import { Encoding, Result } from "effect";
 
 const capabilityBytes = Uint8Array.from({ length: 32 }, (_, index) => index);
