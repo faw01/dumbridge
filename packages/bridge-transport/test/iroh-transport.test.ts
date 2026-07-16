@@ -1,6 +1,7 @@
 import { fileURLToPath } from "node:url";
 import {
   BridgeDeadlineExceededError,
+  BridgeDialError,
   BridgeDirectConnectError,
   BridgeLocator,
   BridgeLocatorInvalidError,
@@ -10,6 +11,7 @@ import {
   type BridgeSession,
 } from "@dumbridge/bridge-transport";
 import {
+  classifyDialFailure,
   configureIrohProxy,
   irohBindingSupportsProxy,
   makeIrohTransport,
@@ -17,7 +19,7 @@ import {
 } from "@dumbridge/bridge-transport/iroh";
 import { describe, expect, it } from "@effect/vitest";
 import { EndpointAddr, EndpointId, EndpointTicket } from "@number0/iroh";
-import { Effect, Fiber, Option } from "effect";
+import { Effect, Fiber, Logger, Option, References } from "effect";
 import { TestClock } from "effect/testing";
 
 const concatenate = (chunks: readonly Uint8Array[]) => {
@@ -249,7 +251,7 @@ describe("Iroh bridge transport", () => {
       expect(error).toBeInstanceOf(BridgeDirectConnectError);
       if (error instanceof BridgeDirectConnectError) {
         expect(error.message).toBe(
-          "Could not establish a direct connection to the bridge, and the bridge locator allows no relay fallback."
+          "No viable network path to the bridge: the direct connection failed (this network may block UDP) and the bridge locator allows no relay fallback."
         );
       }
     })
@@ -316,7 +318,9 @@ describe("Iroh bridge transport", () => {
         // requests the unusable proxy, so a dial with no working direct or
         // relay route must spend its connect deadline and fail like any
         // other unreachable peer — never as the pre-network
-        // BridgeProxyUnsupportedError configuration dead-end.
+        // BridgeProxyUnsupportedError configuration dead-end. The failure is
+        // classified: the relay link never came up, so the dial reports the
+        // relay host as unreachable instead of a generic failure.
         const transport = makeIrohTransport({
           deadlines: {
             accept: "1 second",
@@ -340,10 +344,88 @@ describe("Iroh bridge transport", () => {
         );
 
         expect(error).not.toBeInstanceOf(BridgeProxyUnsupportedError);
-        expect(["BridgeConnectError", "BridgeDeadlineExceededError"]).toContain(
-          error._tag
-        );
+        expect(error).toBeInstanceOf(BridgeDialError);
+        if (error instanceof BridgeDialError) {
+          expect(error.reason).toBe("relay-unreachable");
+          expect(error.relayHost).toBe("relay.invalid");
+        }
       })
+  );
+
+  it("classifies dial failures by the observed relay state", () => {
+    const cause = new BridgeDeadlineExceededError({
+      message: "connect deadline exceeded",
+      operation: "connect",
+    });
+    const offline = classifyDialFailure({
+      cause,
+      relayConnected: true,
+      relayUrl: "https://use1-1.relay.n0.iroh.link./",
+    });
+    const blocked = classifyDialFailure({
+      cause,
+      relayConnected: false,
+      relayUrl: "https://use1-1.relay.n0.iroh.link./",
+    });
+
+    expect(offline).toBeInstanceOf(BridgeDialError);
+    expect(offline.reason).toBe("peer-offline");
+    // The trailing dot iroh keeps on relay hostnames is stripped so the
+    // reported host matches what a user would put in an allowlist.
+    expect(offline.relayHost).toBe("use1-1.relay.n0.iroh.link");
+    expect(offline.cause).toBe(cause);
+    expect(blocked.reason).toBe("relay-unreachable");
+    expect(blocked.relayHost).toBe("use1-1.relay.n0.iroh.link");
+    expect(blocked.cause).toBe(cause);
+
+    // A relay value that does not parse as a URL is still named rather
+    // than dropped; the locator minted it, so it carries no credentials.
+    expect(
+      classifyDialFailure({
+        cause,
+        relayConnected: false,
+        relayUrl: "not-a-url",
+      }).relayHost
+    ).toBe("not-a-url");
+  });
+
+  it.live("logs the dial sequence at debug level without the locator", () =>
+    Effect.gen(function* () {
+      const transport = makeIrohTransport({
+        deadlines: {
+          accept: "1 second",
+          connect: "500 millis",
+          io: "1 second",
+          listen: "1 second",
+        },
+      });
+      const id = EndpointId.fromBytes(new Array<number>(32).fill(1));
+      const unreachable = new EndpointAddr(id, "https://relay.invalid/", [
+        "192.0.2.1:1",
+      ]);
+      const ticket = EndpointTicket.fromAddr(unreachable).toString();
+      const locator = BridgeLocator.fromString(ticket);
+      const entries: string[] = [];
+      const capturingLogger = Logger.make((options) => {
+        entries.push(JSON.stringify([options.logLevel, options.message]));
+      });
+
+      const error = yield* Effect.scoped(transport.connect(locator)).pipe(
+        Effect.flip,
+        Effect.provide(Logger.layer([capturingLogger])),
+        Effect.provideService(References.MinimumLogLevel, "Debug")
+      );
+
+      expect(error).toBeInstanceOf(BridgeDialError);
+      const logged = entries.join("\n");
+      expect(logged).toContain("bridge dial: attempting");
+      expect(logged).toContain("bridge dial: failed");
+      expect(logged).toContain("relay.invalid");
+      expect(logged).toContain("192.0.2.1:1");
+      expect(logged).toContain("relay-unreachable");
+      // The opaque locator ticket never appears in the dial log.
+      expect(logged).not.toContain(ticket);
+    })
   );
 
   it.effect(

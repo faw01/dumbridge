@@ -27,6 +27,7 @@ import {
   Option,
   pipe,
   Redacted,
+  References,
   Schema,
 } from "effect";
 import { Argument, Command, Flag } from "effect/unstable/cli";
@@ -34,7 +35,7 @@ import skillGuide from "../../../skills/dumbridge/SKILL.md" with {
   type: "text",
 };
 import packageJson from "../package.json" with { type: "json" };
-import { pullRemote, runRemote } from "./bridge/client";
+import { isDialFailure, pullRemote, runRemote } from "./bridge/client";
 import {
   detachServe,
   hostServeProcessControl,
@@ -111,8 +112,43 @@ const clientTransport = Effect.gen(function* () {
   if (resolution.proxyFallback) {
     yield* write(process.stderr, proxyFallbackNotice);
   }
-  return makeIrohTransport(resolution.options);
+  return {
+    proxyFallback: resolution.proxyFallback,
+    transport: makeIrohTransport(resolution.options),
+  };
 });
+
+// The proxy-present-but-unusable cause fires only after the fallback dial has
+// actually failed: the warning above already named the degradation, and a
+// fallback that connects needs no cause at all. Never the proxy URL itself,
+// which may carry credentials.
+export const proxyUnusableConnectNotice =
+  " This environment sets a proxy that the installed iroh binding cannot use, so the connection was attempted without it; if this network allows egress only through that proxy, no direct or relay path can succeed.";
+
+export const connectFailureMessage = (
+  error: unknown,
+  proxyFallback: boolean
+): string => {
+  const message = publicErrorMessage(error);
+  return proxyFallback && isDialFailure(error)
+    ? `${message}${proxyUnusableConnectNotice}`
+    : message;
+};
+
+const withProxyConnectCause =
+  (proxyFallback: boolean) =>
+  <A, E, R>(
+    effect: Effect.Effect<A, E, R>
+  ): Effect.Effect<A, E | CliError, R> =>
+    effect.pipe(
+      Effect.mapError((error) =>
+        proxyFallback && isDialFailure(error)
+          ? new CliError({
+              message: connectFailureMessage(error, proxyFallback),
+            })
+          : error
+      )
+    );
 
 // One line per invocation, stderr only: piped stdout stays exactly the
 // script's or pull's own output. The line names the path selected at connect
@@ -368,13 +404,13 @@ const run = Command.make(
   ({ keyFile, script }) =>
     Effect.gen(function* () {
       const key = yield* resolveBridgeKey(keyFile);
-      const transport = yield* clientTransport;
+      const { proxyFallback, transport } = yield* clientTransport;
       const result = yield* runRemote({
         link: Redacted.value(key),
         onConnected: reportConnectionPath,
         script,
         transport,
-      });
+      }).pipe(withProxyConnectCause(proxyFallback));
       if (result.served !== undefined) {
         yield* write(
           process.stderr,
@@ -402,7 +438,7 @@ const pull = Command.make(
   ({ destination, keyFile, remotePath }) =>
     Effect.gen(function* () {
       const key = yield* resolveBridgeKey(keyFile);
-      const transport = yield* clientTransport;
+      const { proxyFallback, transport } = yield* clientTransport;
       const request = {
         link: Redacted.value(key),
         onConnected: reportConnectionPath,
@@ -413,7 +449,7 @@ const pull = Command.make(
         Option.isSome(destination)
           ? { ...request, destination: destination.value }
           : request
-      );
+      ).pipe(withProxyConnectCause(proxyFallback));
       yield* write(
         process.stdout,
         `Pulled ${result.files} file${result.files === 1 ? "" : "s"} (${result.bytes} bytes) to ${result.destination}.\n`
@@ -551,7 +587,10 @@ const main = runCli(cliArguments.length === 0 ? ["--help"] : cliArguments).pipe(
         })
       )
     )
-  )
+  ),
+  // --log-level debug output shares stderr with the branded notices, so a
+  // piped stdout stays exactly the script's or pull's own output.
+  Effect.provideService(References.LogToStderr, true)
 );
 
 if (import.meta.main) {

@@ -40,6 +40,10 @@ _Avoid_: Download, sync
 The route a session's bytes travel: direct (peer-to-peer) or via relay. Run and pull report the path selected at connect time in one stderr line; a relayed session may later upgrade to direct without a new report.
 _Avoid_: Route, network path, transport mode
 
+**Dial sequence**:
+The connect-time attempt behind one run or pull: the paths attempted, the relay used, and each outcome. Logged on stderr at debug level; a failed dial is reported by its observed cause.
+_Avoid_: Connection log, handshake trace, dial log
+
 **Remote path**:
 The canonical, Windows-safe relative path that selects one file or directory below the served root; both bridge sides accept and reject the same remote paths.
 _Avoid_: Safe relative path, source path, virtual path

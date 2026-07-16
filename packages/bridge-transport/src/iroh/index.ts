@@ -3,6 +3,8 @@ import { Effect } from "effect";
 import {
   BridgeConnectError,
   type BridgeDeadlines,
+  BridgeDialError,
+  type BridgeDialReason,
   BridgeDirectConnectError,
   BridgeListenError,
   BridgeLocator,
@@ -36,6 +38,48 @@ export type { IrohReachability } from "./endpoint";
 export { normalizeIrohAddress } from "./endpoint";
 export type { IrohProxyConfiguration } from "./proxy";
 export { configureIrohProxy, irohBindingSupportsProxy } from "./proxy";
+
+// Iroh keeps a trailing dot on relay hostnames; the reported host matches
+// what a user would put in an egress allowlist.
+const trailingDot = /\.$/;
+
+const relayHostForDisplay = (relayUrl: string) => {
+  try {
+    return new URL(relayUrl).hostname.replace(trailingDot, "");
+  } catch {
+    return relayUrl;
+  }
+};
+
+const dialFailureMessages: Record<
+  BridgeDialReason,
+  (relayHost: string) => string
+> = {
+  "peer-offline": () =>
+    "The bridge did not answer: the relay is reachable, so dumbridge serve has likely stopped or the local machine is offline.",
+  "relay-unreachable": (relayHost) =>
+    `The relay at ${relayHost} could not be reached: this network may block it, and no direct path to the bridge was found. Allow HTTPS to ${relayHost} and retry.`,
+};
+
+// The adapter is the only place that knows why a dial failed: it watched the
+// relay link while the dial ran. The snapshot classifies the failure into an
+// iroh-agnostic reason; ambiguity stays honest — a blocked relay hides
+// whether the peer was also offline, so the reason names only what was
+// observed.
+export const classifyDialFailure = (observed: {
+  readonly cause: unknown;
+  readonly relayConnected: boolean;
+  readonly relayUrl: string;
+}): BridgeDialError => {
+  const reason = observed.relayConnected ? "peer-offline" : "relay-unreachable";
+  const relayHost = relayHostForDisplay(observed.relayUrl);
+  return new BridgeDialError({
+    cause: observed.cause,
+    message: dialFailureMessages[reason](relayHost),
+    reason,
+    relayHost,
+  });
+};
 
 export interface IrohTransportOptions {
   readonly deadlines?: Partial<BridgeDeadlines>;
@@ -150,6 +194,21 @@ const listen = (options: ResolvedOptions): BridgeTransport["listen"] =>
     };
   });
 
+// addr() includes the home relay only once its link is actually up, so the
+// snapshot distinguishes a blocked relay from a silent peer, and it survives
+// the endpoint close that a timed-out dial performs first. It is a plain
+// native read: endpoint.online() would answer the same question but its
+// pending promise keeps the runtime's event loop alive after the dial, and a
+// watcher callback needs the same teardown care. A native read failure is
+// reported as "the link never came up".
+const relayLinkObserved = (endpoint: Endpoint) => {
+  try {
+    return endpoint.addr().relayUrl() !== null;
+  } catch {
+    return false;
+  }
+};
+
 const connect = (
   locator: BridgeLocator,
   options: ResolvedOptions
@@ -168,6 +227,7 @@ const connect = (
     );
 
     const relayUrl = normalizedAddress.relayUrl();
+    const relayHost = relayUrl === null ? null : relayHostForDisplay(relayUrl);
     const builder = yield* Effect.try({
       catch: () =>
         new BridgeConnectError({
@@ -195,28 +255,52 @@ const connect = (
           message: "Could not open the bridge client endpoint.",
         })
     );
+    // The locator's addresses are the peer's published reachability hints,
+    // not secrets; the opaque locator ticket itself is never logged.
+    yield* Effect.logDebug("bridge dial: attempting", {
+      directAddresses: normalizedAddress.directAddresses(),
+      relay: relayHost ?? "none",
+    });
     const connection = yield* withDeadline(
       "connect",
       options.deadlines.connect,
       Effect.tryPromise({
-        catch: () =>
+        catch: (cause) =>
           new BridgeConnectError({
+            cause,
             message: "Could not connect to the bridge listener.",
           }),
         try: () => endpoint.connect(normalizedAddress, alpn),
       }),
       closeEndpoint(endpoint)
     ).pipe(
-      // With RelayMode.disabled there is no fallback: a dial that cannot
-      // holepunch fails or times out instead of degrading to a relay, and
-      // both shapes surface as the branded failure so callers do not retry.
-      Effect.mapError((error) =>
-        relayUrl === null
-          ? new BridgeDirectConnectError({
-              message:
-                "Could not establish a direct connection to the bridge, and the bridge locator allows no relay fallback.",
-            })
-          : error
+      Effect.mapError((error) => {
+        if (relayUrl === null) {
+          // With RelayMode.disabled there is no fallback: a dial that
+          // cannot holepunch fails or times out instead of degrading to a
+          // relay, and both shapes surface as the branded failure so
+          // callers do not retry.
+          return new BridgeDirectConnectError({
+            cause: error,
+            message:
+              "No viable network path to the bridge: the direct connection failed (this network may block UDP) and the bridge locator allows no relay fallback.",
+          });
+        }
+        // The snapshot is taken at failure time: a dial that fails with the
+        // relay link up points at the peer, one that fails with the link
+        // down points at the relay path.
+        return classifyDialFailure({
+          cause: error,
+          relayConnected: relayLinkObserved(endpoint),
+          relayUrl,
+        });
+      }),
+      Effect.tapError((error) =>
+        Effect.logDebug("bridge dial: failed", {
+          reason:
+            error instanceof BridgeDialError ? error.reason : "no-direct-path",
+          relay: relayHost ?? "none",
+        })
       )
     );
     const activeConnection = yield* acquireConnection(connection);
@@ -231,9 +315,28 @@ const connect = (
         try: () => activeConnection.openBi(),
       }),
       closeConnection(activeConnection)
+    ).pipe(
+      // Every dial that logged "attempting" ends with a terminal outcome
+      // line, even when the peer vanishes between the QUIC handshake and
+      // stream creation.
+      Effect.tapError(() =>
+        Effect.logDebug("bridge dial: failed", {
+          reason: "byte-session-open",
+          relay: relayHost ?? "none",
+        })
+      )
     );
 
-    return yield* makeSession(activeConnection, stream, options.deadlines.io);
+    const session = yield* makeSession(
+      activeConnection,
+      stream,
+      options.deadlines.io
+    );
+    yield* Effect.logDebug("bridge dial: connected", {
+      path: session.connectionPath,
+      relay: relayHost ?? "none",
+    });
+    return session;
   });
 
 const resolveOptions = (
