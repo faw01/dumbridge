@@ -510,8 +510,11 @@ export const stopDetachedServe = Effect.fn("DetachedServe.stop")(
 );
 
 // The status surface (serve --status) consumes this listing. Stale records
-// (dead pid, prior boot, unreadable) are reclaimed as they are encountered,
-// matching the stop path, so listing leaves only live records on disk.
+// whose process is provably gone (dead pid, prior boot) are reclaimed as
+// they are encountered, matching the stop path. An unreadable file is only
+// skipped, never reclaimed here: it may be a record a concurrent detach has
+// created but not yet finished writing, and unlinking it would orphan that
+// serve. An explicit stop still reclaims a genuinely corrupt file.
 export const listDetachedServes = Effect.fn("DetachedServe.list")(
   (options: {
     readonly control: ServeProcessControl;
@@ -521,10 +524,10 @@ export const listDetachedServes = Effect.fn("DetachedServe.list")(
       const entries = yield* readRecordEntries(options.stateDirectory);
       const live: DetachedServeRecord[] = [];
       for (const { fileName, stored } of entries) {
-        if (
-          stored.type === "record" &&
-          (yield* recordIsLive(stored.record, options.control))
-        ) {
+        if (stored.type !== "record") {
+          continue;
+        }
+        if (yield* recordIsLive(stored.record, options.control)) {
           live.push(stored.record);
           continue;
         }

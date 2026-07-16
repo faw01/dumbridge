@@ -536,7 +536,7 @@ describe("listDetachedServes", () => {
     })
   );
 
-  it.effect("prunes an unreadable record while listing", () =>
+  it.effect("leaves an unreadable file alone for stop to reclaim", () =>
     Effect.gen(function* () {
       yield* seedDetachedServe(rootPath("served"), 77);
       yield* corruptStoredRecords;
@@ -545,7 +545,7 @@ describe("listDetachedServes", () => {
       const records = yield* listDetachedServes({ control, stateDirectory });
 
       expect(records).toEqual([]);
-      expect(yield* recordTexts).toEqual([]);
+      expect((yield* recordTexts).length).toBe(1);
     })
   );
 
@@ -555,7 +555,7 @@ describe("listDetachedServes", () => {
       Effect.gen(function* () {
         // One millisecond past the JavaScript Date range: a status surface
         // could not render it, so the record must decode as unreadable and
-        // be reclaimed rather than poison the whole listing.
+        // stay unlisted rather than poison the whole listing.
         yield* writeLegacyRecord({
           pid: 77,
           root: rootPath("served"),
@@ -566,7 +566,7 @@ describe("listDetachedServes", () => {
         const records = yield* listDetachedServes({ control, stateDirectory });
 
         expect(records).toEqual([]);
-        expect(yield* recordTexts).toEqual([]);
+        expect((yield* recordTexts).length).toBe(1);
       })
   );
 
