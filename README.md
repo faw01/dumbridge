@@ -28,6 +28,7 @@ npx --yes dumbridge pull .agents/skills/wayfinder .agents/skills/wayfinder
 - `dumbridge run '<script>'` evaluates one Bash-shaped script against the live served root in a bounded Just Bash sandbox, never the host shell. Its writes are discarded.
 - `dumbridge pull <remote-path> [destination]` copies one exact file or directory, verifies content, refuses symlinks, and never overwrites an existing destination.
 - `run` and `pull` read the bridge key from `--key-file <path>` when given (`-` reads stdin), otherwise from `DUMBRIDGE_KEY`; the key is never accepted as a command argument.
+- `dumbridge doctor` prints a no-key, no-session environment diagnosis — DNS resolution of the iroh relay hosts, UDP egress, relay reachability on port 443, and HTTP(S) proxy capability — and exits non-zero when any check fails.
 - `dumbridge skill` prints the bundled agent usage guide without contacting a bridge.
 
 The bridge key is a bearer secret: anyone holding it while `serve` is running can read below the served root.

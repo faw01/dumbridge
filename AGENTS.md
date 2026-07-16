@@ -2,7 +2,7 @@
 
 Use Bun for package management and runtime commands. Run `bun run verify` before committing.
 
-Keep the product surface to `serve`, `run`, `pull`, and the read-only informational `skill` verb. The local side is read-only: never execute the host shell or write below the served root. Effect v4 owns the CLI and lifecycle; iroh stays behind the `BridgeTransport` seam; Just Bash stays behind the `SafeShell` seam. Prefer a few deep modules, explicit Effect errors, and tests through public behavior. Comments explain constraints, not code narration.
+Keep the product surface to `serve`, `run`, `pull`, the no-key `doctor` diagnosis, and the read-only informational `skill` verb. The local side is read-only: never execute the host shell or write below the served root. Effect v4 owns the CLI and lifecycle; iroh stays behind the `BridgeTransport` seam; Just Bash stays behind the `SafeShell` seam. Prefer a few deep modules, explicit Effect errors, and tests through public behavior. Comments explain constraints, not code narration.
 
 Tests use `@effect/vitest` `it.effect`; time-dependent tests use `TestClock`, not real-time polling. Effect suites run through vitest under the Bun runtime (`bun --bun vitest run`); suites requiring Bun APIs (`bun:ffi` in atomic-publish, real CLI process spawns, the tarball check) stay on `bun test`, and each package's `test` script runs every runner it needs. Read config through `Config`; use `Config.redacted` for secret-bearing values; `process.env` may only appear in `cli.ts` and test files.
 
