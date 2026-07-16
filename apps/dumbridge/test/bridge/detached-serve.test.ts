@@ -549,6 +549,27 @@ describe("listDetachedServes", () => {
     })
   );
 
+  it.effect(
+    "treats a record whose timestamp no Date can represent as unreadable",
+    () =>
+      Effect.gen(function* () {
+        // One millisecond past the JavaScript Date range: a status surface
+        // could not render it, so the record must decode as unreadable and
+        // be reclaimed rather than poison the whole listing.
+        yield* writeLegacyRecord({
+          pid: 77,
+          root: rootPath("served"),
+          startedAtEpochMs: 8_640_000_000_000_001,
+        });
+        const { control } = makeControl({ alivePids: new Set([77]) });
+
+        const records = yield* listDetachedServes({ control, stateDirectory });
+
+        expect(records).toEqual([]);
+        expect(yield* recordTexts).toEqual([]);
+      })
+  );
+
   it.effect("lists a live serve recorded before the upgrade", () =>
     Effect.gen(function* () {
       yield* writeLegacyRecord({

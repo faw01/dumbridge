@@ -40,19 +40,24 @@ const keyExpiryLine = /^The key expires at (\S+)\./m;
 const cliStderrPrefix = /^dumbridge: /;
 const maximumStartupStderrLength = 512;
 
+// Timestamps must fit the JavaScript Date range: the status surface renders
+// them with toISOString, so a value outside it would make one tampered record
+// poison the whole listing instead of decoding as unreadable and being
+// reclaimed like any other corrupt record.
+const EpochMilliseconds = Schema.Number.check(
+  Schema.isInt(),
+  Schema.isGreaterThan(0),
+  Schema.isLessThanOrEqualTo(8_640_000_000_000_000)
+);
+
 // The record deliberately excludes the bridge key: the key must never land in
 // any file, and process death alone revokes it. The key's expiry deadline is
 // not the key and is persisted for status surfaces.
 const DetachedServeRecordSchema = Schema.Struct({
-  expiresAtEpochMs: Schema.optionalKey(
-    Schema.Number.check(Schema.isInt(), Schema.isGreaterThan(0))
-  ),
+  expiresAtEpochMs: Schema.optionalKey(EpochMilliseconds),
   pid: Schema.Number.check(Schema.isInt(), Schema.isGreaterThan(0)),
   root: Schema.String,
-  startedAtEpochMs: Schema.Number.check(
-    Schema.isInt(),
-    Schema.isGreaterThan(0)
-  ),
+  startedAtEpochMs: EpochMilliseconds,
 });
 
 const DetachedServeRecordJson = Schema.fromJsonString(
