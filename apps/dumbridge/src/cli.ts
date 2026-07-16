@@ -3,7 +3,11 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { redactBridgeKey } from "@dumbridge/bridge-key";
-import type { ConnectionPath } from "@dumbridge/bridge-transport";
+import type {
+  BridgeTransport,
+  ConnectionPath,
+  DiagnosisCheck,
+} from "@dumbridge/bridge-transport";
 import {
   type IrohTransportOptions,
   irohBindingSupportsProxy,
@@ -383,11 +387,42 @@ const skill = Command.make("skill", {}, () =>
   )
 );
 
+// Wide enough for the longest check name ("relay-reachability") plus a
+// two-space gutter, so details line up in one scannable column.
+const doctorNameWidth = 20;
+
+const renderDiagnosisCheck = (check: DiagnosisCheck) =>
+  `${check.status.padEnd(6)}${check.name.padEnd(doctorNameWidth)}${check.detail}\n`;
+
+export const runDoctor = (
+  transport: Pick<BridgeTransport, "diagnose">
+): Effect.Effect<{ readonly exitCode: 0 | 1; readonly report: string }> =>
+  transport.diagnose.pipe(
+    Effect.map((checks) => ({
+      exitCode: checks.some((check) => check.status === "fail")
+        ? (1 as const)
+        : (0 as const),
+      report: checks.map(renderDiagnosisCheck).join(""),
+    }))
+  );
+
+const doctor = Command.make("doctor", {}, () =>
+  Effect.gen(function* () {
+    const result = yield* runDoctor(makeIrohTransport());
+    yield* write(process.stdout, result.report);
+    process.exitCode = result.exitCode;
+  })
+).pipe(
+  Command.withDescription(
+    "Diagnose this environment without a bridge key or session: DNS resolution of the iroh relay hosts, UDP egress, relay reachability on port 443, and HTTP(S) proxy capability. Exits non-zero when any check fails."
+  )
+);
+
 const command = Command.make("dumbridge").pipe(
   Command.withDescription(
     "Run serve locally, set DUMBRIDGE_KEY in the cloud, then use run or pull."
   ),
-  Command.withSubcommands([serve, run, pull, skill])
+  Command.withSubcommands([serve, run, pull, doctor, skill])
 );
 
 const runCli = Command.runWith(command, {
