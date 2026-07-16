@@ -20,6 +20,7 @@ export class BridgeAcceptError extends Schema.TaggedErrorClass<BridgeAcceptError
 export class BridgeConnectError extends Schema.TaggedErrorClass<BridgeConnectError>()(
   "BridgeConnectError",
   {
+    cause: Schema.optionalKey(Schema.Defect()),
     message: Schema.String,
   }
 ) {}
@@ -29,6 +30,28 @@ export class BridgeDeadlineExceededError extends Schema.TaggedErrorClass<BridgeD
   {
     message: Schema.String,
     operation: BridgeDeadlineOperation,
+  }
+) {}
+
+// Why a dial against a relay-carrying locator failed, as far as the adapter
+// can honestly observe: "relay-unreachable" when the relay link never came up
+// before the dial failed (egress policy, DNS, or a dead relay host), and
+// "peer-offline" when the relay was reachable yet the peer never answered
+// (serve stopped or the local machine is offline).
+const BridgeDialReason = Schema.Literals(["peer-offline", "relay-unreachable"]);
+
+export type BridgeDialReason = typeof BridgeDialReason.Type;
+
+// A dial that failed after the relay reachability snapshot was taken; the
+// reason and the relay host travel with the failure so the client can report
+// the cause instead of a generic "unreachable".
+export class BridgeDialError extends Schema.TaggedErrorClass<BridgeDialError>()(
+  "BridgeDialError",
+  {
+    cause: Schema.optionalKey(Schema.Defect()),
+    message: Schema.String,
+    reason: BridgeDialReason,
+    relayHost: Schema.String,
   }
 ) {}
 
@@ -168,6 +191,7 @@ export interface BridgeTransport {
     BridgeSession,
     | BridgeConnectError
     | BridgeDeadlineExceededError
+    | BridgeDialError
     | BridgeDirectConnectError
     | BridgeLocatorInvalidError
     | BridgeProxyConfigurationError
