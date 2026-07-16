@@ -36,9 +36,7 @@ afterEach(async () => {
 const recordTexts = Effect.promise(async (): Promise<readonly string[]> => {
   let names: readonly string[];
   try {
-    names = (await readdir(stateDirectory)).sort((a, b) =>
-      a.localeCompare(b)
-    );
+    names = (await readdir(stateDirectory)).sort((a, b) => a.localeCompare(b));
   } catch {
     return [];
   }
