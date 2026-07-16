@@ -646,6 +646,35 @@ describe("stopDetachedServe", () => {
       })
   );
 
+  it.effect.skipIf(process.platform === "win32")(
+    "selects a pre-upgrade record through its symlink spelling",
+    () =>
+      Effect.gen(function* () {
+        yield* Effect.promise(() => mkdir(rootPath("real-root")));
+        yield* Effect.promise(() =>
+          symlink(rootPath("real-root"), rootPath("alias-root"))
+        );
+        // A pre-upgrade release resolved but did not realpath the root, so
+        // its record can carry the symlink spelling.
+        yield* writeLegacyRecord({
+          pid: 77,
+          root: rootPath("alias-root"),
+          startedAtEpochMs: Date.now(),
+        });
+        const { calls, control } = makeControl({ alivePids: new Set([77]) });
+
+        const result = yield* stopDetachedServe({
+          control,
+          root: rootPath("real-root"),
+          stateDirectory,
+        });
+
+        expect(result).toEqual({ pid: 77, type: "stopped" });
+        expect(calls.terminated).toEqual([77]);
+        expect(yield* recordTexts).toEqual([]);
+      })
+  );
+
   it.effect("stops a live serve recorded before the upgrade", () =>
     Effect.gen(function* () {
       yield* writeLegacyRecord({

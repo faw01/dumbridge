@@ -45,7 +45,7 @@ The canonical, Windows-safe relative path that selects one file or directory bel
 _Avoid_: Safe relative path, source path, virtual path
 
 **Sanitized root display**:
-The bounded, control-character-free final component of the served root's path; the only fragment of the host path any message may show.
+The bounded, control-character-free final component of the served root's path; the only fragment of the host path any message crossing the bridge may show. Local serve messages may name full roots: they are the stop selectors.
 _Avoid_: Root name, host path, display path
 
 **Root banner**:

@@ -215,7 +215,12 @@ const recordEntriesForRoot = (
     if (keyed.type !== "absent") {
       entries.push({ fileName, stored: keyed });
     }
-    if (legacy.type === "record" && legacy.record.root === root) {
+    if (
+      legacy.type === "record" &&
+      // A pre-upgrade record resolved but did not realpath its root, so a
+      // symlink spelling must be canonicalized before it can match.
+      (yield* canonicalRoot(legacy.record.root)) === root
+    ) {
       entries.push({ fileName: legacyRecordFileName, stored: legacy });
     }
     return entries;
