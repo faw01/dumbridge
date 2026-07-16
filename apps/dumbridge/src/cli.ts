@@ -191,18 +191,20 @@ const serveDetached = (
     );
   });
 
-const serveStop = Effect.gen(function* () {
-  const result = yield* stopDetachedServe({
-    control: hostServeProcessControl,
-    stateDirectory: yield* stateDirectory,
+const serveStop = (root: Option.Option<string>) =>
+  Effect.gen(function* () {
+    const result = yield* stopDetachedServe({
+      control: hostServeProcessControl,
+      stateDirectory: yield* stateDirectory,
+      ...(Option.isSome(root) ? { root: root.value } : {}),
+    });
+    yield* write(
+      process.stdout,
+      result.type === "stopped"
+        ? "Stopped the detached serve.\n"
+        : "Removed a stale detached serve record; nothing was running.\n"
+    );
   });
-  yield* write(
-    process.stdout,
-    result.type === "stopped"
-      ? "Stopped the detached serve.\n"
-      : "Removed a stale detached serve record; nothing was running.\n"
-  );
-});
 
 interface ServeInvocation {
   readonly detach: boolean;
@@ -226,9 +228,6 @@ const serveInvocationError = (flags: ServeInvocation): CliError | undefined => {
   }
   if (!flags.stop) {
     return;
-  }
-  if (Option.isSome(flags.root)) {
-    return new CliError({ message: "serve --stop does not take a root." });
   }
   if (Option.isSome(flags.ttl)) {
     return new CliError({ message: "serve --stop does not take a --ttl." });
@@ -269,7 +268,9 @@ const serve = Command.make(
     ),
     root: Argument.string("root").pipe(Argument.optional),
     stop: Flag.boolean("stop").pipe(
-      Flag.withDescription("Stop the detached server, revoking its key.")
+      Flag.withDescription(
+        "Stop a detached server, revoking its key. Pass its root when several are running."
+      )
     ),
     ttl: Flag.string("ttl").pipe(
       Flag.optional,
@@ -285,7 +286,7 @@ const serve = Command.make(
         return yield* invalid;
       }
       if (flags.stop) {
-        return yield* serveStop;
+        return yield* serveStop(flags.root);
       }
       const { root, ttl } = flags;
       if (Option.isNone(root)) {
