@@ -314,6 +314,16 @@ const connect = (
         try: () => activeConnection.openBi(),
       }),
       closeConnection(activeConnection)
+    ).pipe(
+      // Every dial that logged "attempting" ends with a terminal outcome
+      // line, even when the peer vanishes between the QUIC handshake and
+      // stream creation.
+      Effect.tapError(() =>
+        Effect.logDebug("bridge dial: failed", {
+          reason: "byte-session-open",
+          relay: relayHost ?? "none",
+        })
+      )
     );
 
     const session = yield* makeSession(
