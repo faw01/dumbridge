@@ -7,7 +7,8 @@ import {
 } from "@dumbridge/bridge-key";
 import {
   type BridgeDeadlineExceededError,
-  type BridgeDirectConnectError,
+  type BridgeDialError,
+  BridgeDirectConnectError,
   BridgeLocator,
   type BridgeLocatorInvalidError,
   type BridgeProxyConfigurationError,
@@ -138,6 +139,19 @@ const transientConnectFailure = (error: unknown) =>
     error
   );
 
+// A classified dial failure already carries its cause-specific message from
+// the transport seam; wrapping it as a connect failure keeps the one-retry
+// contract every pre-request connection failure has.
+const classifiedConnectFailure = (error: BridgeDialError) =>
+  clientError("connect", error.message, error);
+
+// An unusable proxy only becomes the likely cause once the fallback dial has
+// actually failed, so the CLI asks whether a failure happened while
+// connecting rather than pattern-matching the client's private error class.
+export const isConnectFailure = (error: unknown): boolean =>
+  error instanceof BridgeDirectConnectError ||
+  (error instanceof BridgeClientError && error.operation === "connect");
+
 const rejectMessages: Record<RejectCode, string> = {
   "expired-key":
     "The bridge rejected the bridge key: the key has expired. Run dumbridge serve again to mint a fresh key.",
@@ -159,6 +173,7 @@ const openSession = (transport: BridgeTransport, link: string) =>
         Effect.catchTags({
           BridgeConnectError: transientConnectFailure,
           BridgeDeadlineExceededError: transientConnectFailure,
+          BridgeDialError: classifiedConnectFailure,
         })
       );
     return { capability: decoded.capability, session };

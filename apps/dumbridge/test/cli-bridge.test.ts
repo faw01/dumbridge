@@ -236,6 +236,50 @@ describe("dumbridge CLI bridge", () => {
     }
   }, 40_000);
 
+  test("logs the dial sequence at debug level without leaking secrets", async () => {
+    const server = Bun.spawn([process.execPath, cli, "serve", servedRoot], {
+      env: cleanEnvironment(),
+      stderr: "pipe",
+      stdout: "pipe",
+    });
+
+    try {
+      const { link } = await withTimeout(
+        readBridgeStartup(server.stdout),
+        5000
+      );
+      await writeFile(join(servedRoot, "debugged.txt"), "debug run\n");
+      // The proxy variable makes this the worst case for leakage: the dial
+      // sequence must name paths and outcomes while the proxy credential and
+      // the bridge key stay out of the log.
+      const environment = cleanEnvironment({
+        DUMBRIDGE_KEY: link,
+        HTTPS_PROXY: "http://user:proxy-secret@proxy.example:3128",
+      });
+
+      const run = await runCli(
+        ["run", "--log-level", "debug", "cat debugged.txt"],
+        environment
+      );
+      expect(run.exitCode).toBe(0);
+      // Debug logging shares stderr with the branded notices; piped stdout
+      // stays exactly the script's own output.
+      expect(run.stdout).toBe("debug run\n");
+      expect(run.stderr).toContain("bridge dial: attempting");
+      expect(run.stderr).toContain("bridge dial: connected");
+      expect(run.stderr).not.toContain(link);
+      expect(run.stderr).not.toContain("proxy-secret");
+      expect(run.stderr).not.toContain("proxy.example");
+
+      const quiet = await runCli(["run", "cat debugged.txt"], environment);
+      expect(quiet.exitCode).toBe(0);
+      expect(quiet.stderr).not.toContain("bridge dial:");
+    } finally {
+      server.kill();
+      await server.exited;
+    }
+  }, 40_000);
+
   test("run succeeds under an unusable proxy by warning and dialing direct", async () => {
     const server = Bun.spawn([process.execPath, cli, "serve", servedRoot], {
       env: cleanEnvironment(),

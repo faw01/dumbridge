@@ -4,13 +4,18 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { encodeBridgeKey, mintCapability } from "@dumbridge/bridge-key";
-import type { DiagnosisCheck } from "@dumbridge/bridge-transport";
+import {
+  BridgeDirectConnectError,
+  type DiagnosisCheck,
+} from "@dumbridge/bridge-transport";
 import { PullLimitError } from "@dumbridge/pull-transfer";
 import { Effect } from "effect";
 import packageJson from "../package.json" with { type: "json" };
 import {
+  connectFailureMessage,
   connectionPathNotice,
   proxyFallbackNotice,
+  proxyUnusableConnectNotice,
   publicErrorMessage,
   resolveClientTransportOptions,
   runDoctor,
@@ -275,6 +280,34 @@ describe("dumbridge CLI", () => {
     expect(result.stderr).toBe(`${proxyFallbackNotice}${expiredKeyMessage(1)}`);
     expect(result.stderr).not.toContain("proxy-secret");
     expect(result.stderr).not.toContain("proxy.example");
+  });
+
+  test("names the unusable proxy as the cause only after a connect failure", () => {
+    const directFailure = new BridgeDirectConnectError({
+      message:
+        "No viable network path to the bridge: the direct connection failed (this network may block UDP) and the bridge locator allows no relay fallback.",
+    });
+
+    // The proxy note fires only when a proxy fallback happened AND the
+    // connection then actually failed; a non-connect failure or a proxyless
+    // environment keeps the plain cause message.
+    expect(connectFailureMessage(directFailure, true)).toBe(
+      `${directFailure.message}${proxyUnusableConnectNotice}`
+    );
+    expect(connectFailureMessage(directFailure, false)).toBe(
+      directFailure.message
+    );
+    expect(
+      connectFailureMessage(
+        new PullLimitError({
+          limit: "entries",
+          maximum: 4096,
+          observed: 4097,
+        }),
+        true
+      )
+    ).not.toContain(proxyUnusableConnectNotice);
+    expect(proxyUnusableConnectNotice).not.toContain("http");
   });
 
   test("names each connection path in one branded stderr line", () => {

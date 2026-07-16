@@ -10,6 +10,7 @@ import {
   BridgeAcceptError,
   BridgeConnectError,
   BridgeDeadlineExceededError,
+  BridgeDialError,
   BridgeDirectConnectError,
   BridgeFinishError,
   type BridgeListener,
@@ -1169,6 +1170,70 @@ describe("bridge application supervision", () => {
             Effect.sync(() => {
               expect(error).toBe(failure);
               expect(connectCalls).toBe(1);
+            })
+          )
+        );
+      });
+    })
+  );
+
+  it.live("reports each classified dial failure with its cause message", () =>
+    Effect.gen(function* () {
+      const capability = mintCapability();
+      const link = success(
+        encodeBridgeKey({
+          capability,
+          expiresAt: farFutureExpiry,
+          locator: "classified-client",
+          transport: "iroh",
+        })
+      );
+      const failures = [
+        {
+          error: new BridgeDialError({
+            message:
+              "The bridge did not answer: the relay is reachable, so dumbridge serve has likely stopped or the local machine is offline.",
+            reason: "peer-offline" as const,
+            relayHost: "use1-1.relay.n0.iroh.link",
+          }),
+          expectedMessage:
+            "The bridge did not answer: the relay is reachable, so dumbridge serve has likely stopped or the local machine is offline.",
+        },
+        {
+          error: new BridgeDialError({
+            message:
+              "The relay at use1-1.relay.n0.iroh.link could not be reached: this network may block it, and no direct path to the bridge was found. Allow HTTPS to use1-1.relay.n0.iroh.link and retry.",
+            reason: "relay-unreachable" as const,
+            relayHost: "use1-1.relay.n0.iroh.link",
+          }),
+          expectedMessage:
+            "The relay at use1-1.relay.n0.iroh.link could not be reached: this network may block it, and no direct path to the bridge was found. Allow HTTPS to use1-1.relay.n0.iroh.link and retry.",
+        },
+      ];
+
+      yield* Effect.forEach(failures, (failure) => {
+        let connectCalls = 0;
+        const transport: BridgeTransport = {
+          connect: () => {
+            connectCalls += 1;
+            return Effect.fail(failure.error);
+          },
+          listen: Effect.die("listener is not used in this test"),
+        };
+
+        return runRemote({ link, script: "cat note.txt", transport }).pipe(
+          Effect.flip,
+          Effect.tap((error) =>
+            Effect.sync(() => {
+              expect(error).toMatchObject({
+                _tag: "BridgeClientError",
+                message: failure.expectedMessage,
+                operation: "connect",
+              });
+              expect(error.cause).toBe(failure.error);
+              // A classified dial failure keeps the one-retry contract that
+              // every pre-request connection failure has.
+              expect(connectCalls).toBe(2);
             })
           )
         );
