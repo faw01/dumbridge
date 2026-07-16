@@ -1,3 +1,4 @@
+import { Endpoint } from "@number0/iroh";
 import { Effect } from "effect";
 import {
   BridgeProxyConfigurationError,
@@ -14,6 +15,14 @@ interface ProxyAwareEndpointBuilder {
 }
 
 export type ProxyEnvironment = Readonly<Record<string, string | undefined>>;
+
+// The published @number0/iroh binding omits the proxy builder methods; only
+// the patched binding exposes proxyUrl. Callers probe this before committing
+// a dial to a proxy the adapter would otherwise have to reject as a
+// configuration dead-end.
+export const irohBindingSupportsProxy = (
+  builder: object = Endpoint.builder()
+): boolean => (builder as ProxyAwareEndpointBuilder).proxyUrl !== undefined;
 
 const proxyEnvironmentKeys = [
   "HTTP_PROXY",

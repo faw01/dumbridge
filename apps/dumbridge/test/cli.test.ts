@@ -9,6 +9,7 @@ import { Effect } from "effect";
 import packageJson from "../package.json" with { type: "json" };
 import {
   connectionPathNotice,
+  proxyFallbackNotice,
   publicErrorMessage,
   resolveClientTransportOptions,
 } from "../src/cli";
@@ -190,16 +191,62 @@ describe("dumbridge CLI", () => {
     );
   });
 
-  test("uses relay-only reachability whenever a cloud proxy is selected", () => {
+  test("commits to the relay only when the binding can use the proxy", () => {
     expect(
-      resolveClientTransportOptions({ HTTPS_PROXY: "http://proxy" })
+      resolveClientTransportOptions({ HTTPS_PROXY: "http://proxy" }, true)
     ).toEqual({
-      proxy: { _tag: "FromEnvironment" },
-      reachability: "relay-only",
+      options: {
+        proxy: { _tag: "FromEnvironment" },
+        reachability: "relay-only",
+      },
+      proxyFallback: false,
     });
-    expect(resolveClientTransportOptions({})).toEqual({
-      proxy: { _tag: "Disabled" },
+    expect(resolveClientTransportOptions({}, true)).toEqual({
+      options: { proxy: { _tag: "Disabled" } },
+      proxyFallback: false,
     });
+    expect(resolveClientTransportOptions({}, false)).toEqual({
+      options: { proxy: { _tag: "Disabled" } },
+      proxyFallback: false,
+    });
+  });
+
+  test("falls back to a direct-capable dial when the binding cannot use the proxy", () => {
+    // No proxy is requested and no reachability is forced, so the locator in
+    // the bridge key keeps deciding the relay policy: a direct-only key stays
+    // a direct-only attempt, and a relay-carrying key keeps its fallback.
+    expect(
+      resolveClientTransportOptions(
+        { HTTPS_PROXY: "http://user:proxy-secret@proxy.example:3128" },
+        false
+      )
+    ).toEqual({
+      options: { proxy: { _tag: "Disabled" } },
+      proxyFallback: true,
+    });
+  });
+
+  test("names the proxy fallback in one branded stderr line", () => {
+    expect(proxyFallbackNotice).toBe(
+      "dumbridge: this environment sets a proxy, but the installed iroh binding cannot route through it; attempting a direct connection instead\n"
+    );
+  });
+
+  test("warns once about an unusable proxy without leaking its URL", async () => {
+    const link = mintKeyExpiringAt(1);
+    const result = await invokeCli({
+      args: ["run", "true"],
+      environment: {
+        DUMBRIDGE_KEY: link,
+        HTTPS_PROXY: "http://user:proxy-secret@proxy.example:3128",
+      },
+    });
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toBe("");
+    expect(result.stderr).toBe(`${proxyFallbackNotice}${expiredKeyMessage(1)}`);
+    expect(result.stderr).not.toContain("proxy-secret");
+    expect(result.stderr).not.toContain("proxy.example");
   });
 
   test("names each connection path in one branded stderr line", () => {

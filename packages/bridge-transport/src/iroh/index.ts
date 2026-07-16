@@ -31,7 +31,7 @@ const defaultDeadlines: BridgeDeadlines = {
 export type { IrohReachability } from "./endpoint";
 export { normalizeIrohAddress } from "./endpoint";
 export type { IrohProxyConfiguration } from "./proxy";
-export { configureIrohProxy } from "./proxy";
+export { configureIrohProxy, irohBindingSupportsProxy } from "./proxy";
 
 export interface IrohTransportOptions {
   readonly deadlines?: Partial<BridgeDeadlines>;
