@@ -70,6 +70,8 @@ Ask the user to place the new key in the cloud environment as a secret file or e
 
 Every dumbridge failure prints a branded `dumbridge:` message on stderr and exits non-zero; a `run` whose script executes exits with the script's own exit code instead.
 
+When connection failures persist, run `dumbridge doctor`: it needs no bridge key and opens no session, prints one self-descriptive check per line — DNS resolution of the iroh relay hosts, UDP egress, relay reachability on port 443, and HTTP(S) proxy capability — and exits non-zero when any check fails. Use it to identify proxy-only or UDP-blocked environments before asking the user to verify that the bridge process is running.
+
 - `'<path>' is outside the served root; the served root is visible at /workspace.` - a note appended to the script's stderr when a read left the one shared directory. Nothing above the served root exists here; go back to relative paths from `.`.
 - `remote read shell <name> limit exceeded: ...` - the script hit a per-request cap; the message states the ceiling, whether it is cumulative, and how to recover. For a `file-read` limit, narrow the query to fewer files or a subdirectory instead of retrying the broad form.
 - `remote read shell time budget of <duration> exceeded` - the script ran longer than the bridge allows for one `run`. Narrow the query; the budget does not grow on retry.

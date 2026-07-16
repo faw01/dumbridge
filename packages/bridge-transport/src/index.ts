@@ -126,6 +126,16 @@ export interface BridgeDeadlines {
 // a relayed connection to a direct one; the snapshot is not re-observed.
 export type ConnectionPath = "direct" | "relay" | "unknown";
 
+// One self-descriptive environment check result: the name and detail carry
+// the full meaning, so no caller has to map a status code to a message. A
+// "warn" is a degraded-but-workable path (for example, UDP blocked but the
+// relay reachable); only "fail" means the environment cannot reach a bridge.
+export interface DiagnosisCheck {
+  readonly detail: string;
+  readonly name: string;
+  readonly status: "ok" | "warn" | "fail";
+}
+
 export interface BridgeSession {
   readonly close: Effect.Effect<void>;
   readonly connectionPath: ConnectionPath;
@@ -164,6 +174,9 @@ export interface BridgeTransport {
     | BridgeProxyUnsupportedError,
     Scope.Scope
   >;
+  // A no-key, no-session environment diagnosis. Probe failures are data
+  // (checks with "warn" or "fail" status), never a failed effect.
+  readonly diagnose: Effect.Effect<readonly DiagnosisCheck[]>;
   readonly listen: Effect.Effect<
     BridgeListener,
     | BridgeDeadlineExceededError

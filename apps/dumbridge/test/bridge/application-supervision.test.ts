@@ -127,13 +127,19 @@ const scriptedSession = (options: {
   return { session, state };
 };
 
+const unusedDiagnose: BridgeTransport["diagnose"] = Effect.die(
+  "diagnosis is not used in this test"
+);
+
 const listenerTransport = (listener: BridgeListener): BridgeTransport => ({
   connect: () => Effect.die("client connection is not used in this test"),
+  diagnose: unusedDiagnose,
   listen: Effect.succeed(listener),
 });
 
 const clientTransport = (session: BridgeSession): BridgeTransport => ({
   connect: () => Effect.succeed(session),
+  diagnose: unusedDiagnose,
   listen: Effect.die("listener is not used in this test"),
 });
 
@@ -777,6 +783,7 @@ describe("bridge application supervision", () => {
           connectCalls += 1;
           return Effect.die("invalid paths must not connect");
         },
+        diagnose: unusedDiagnose,
         listen: Effect.die("listener is not used in this test"),
       };
 
@@ -1101,6 +1108,7 @@ describe("bridge application supervision", () => {
               )
             : Effect.succeed(connected.session);
         },
+        diagnose: unusedDiagnose,
         listen: Effect.die("listener is not used in this test"),
       };
 
@@ -1151,6 +1159,7 @@ describe("bridge application supervision", () => {
             connectCalls += 1;
             return Effect.fail(failure);
           },
+          diagnose: unusedDiagnose,
           listen: Effect.die("listener is not used in this test"),
         };
 
@@ -1186,6 +1195,7 @@ describe("bridge application supervision", () => {
             new BridgeConnectError({ message: "persistent handshake failure" })
           );
         },
+        diagnose: unusedDiagnose,
         listen: Effect.die("listener is not used in this test"),
       };
 
@@ -1339,6 +1349,7 @@ describe("bridge application supervision", () => {
           connectCalls += 1;
           return Effect.succeed(session);
         },
+        diagnose: unusedDiagnose,
         listen: Effect.die("listener is not used in this test"),
       };
 
@@ -1364,6 +1375,7 @@ describe("bridge application supervision", () => {
       const rejectedPayload = "bm90LXJlYWxseS1hLWJyaWRnZS1rZXk";
       const transport: BridgeTransport = {
         connect: () => Effect.die("invalid keys must not connect"),
+        diagnose: unusedDiagnose,
         listen: Effect.die("listener is not used in this test"),
       };
 

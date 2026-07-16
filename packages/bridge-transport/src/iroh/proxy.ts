@@ -40,6 +40,11 @@ const proxyEnvironmentKeys = [
   "all_proxy",
 ] as const;
 
+// Truthiness, not presence: the client transport selection ignores empty
+// proxy variables (common placeholder exports), so the diagnosis must too.
+export const hasProxyEnvironment = (environment: ProxyEnvironment) =>
+  proxyEnvironmentKeys.some((key) => Boolean(environment[key]));
+
 const proxyUrlFromEnvironment = (
   environment: ProxyEnvironment
 ): Effect.Effect<string, BridgeProxyConfigurationError> => {

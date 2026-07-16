@@ -52,6 +52,14 @@ _Avoid_: Root name, host path, display path
 The one-line notice the first run against a bridge prints, naming the served root by its sanitized root display.
 _Avoid_: Welcome message, MOTD, header
 
+**Doctor**:
+The no-key, no-session environment diagnosis `dumbridge doctor` prints, exiting non-zero when any diagnosis check fails.
+_Avoid_: Health check, preflight, connectivity test
+
+**Diagnosis check**:
+One self-descriptive doctor result carrying a name, an ok/warn/fail status, and a detail; warn marks a degraded-but-workable path, fail an environment that cannot reach a bridge.
+_Avoid_: Probe result, status code, health status
+
 **Skill guide**:
 The bundled agent usage instructions that `dumbridge skill` prints without contacting a bridge.
 _Avoid_: Docs command, manual

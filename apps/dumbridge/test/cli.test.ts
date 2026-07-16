@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { encodeBridgeKey, mintCapability } from "@dumbridge/bridge-key";
+import type { DiagnosisCheck } from "@dumbridge/bridge-transport";
 import { PullLimitError } from "@dumbridge/pull-transfer";
 import { Effect } from "effect";
 import packageJson from "../package.json" with { type: "json" };
@@ -12,6 +13,7 @@ import {
   proxyFallbackNotice,
   publicErrorMessage,
   resolveClientTransportOptions,
+  runDoctor,
 } from "../src/cli";
 
 const cliPath = fileURLToPath(new URL("../src/cli.ts", import.meta.url));
@@ -88,17 +90,22 @@ describe("dumbridge CLI", () => {
   });
 
   test("advertises only the v1 commands", async () => {
-    const [root, serve, run, pullHelp] = await Promise.all([
+    const [root, serve, run, pullHelp, doctorHelp] = await Promise.all([
       invoke("--help"),
       invoke("serve", "--help"),
       invoke("run", "--help"),
       invoke("pull", "--help"),
+      invoke("doctor", "--help"),
     ]);
 
     expect(root.stdout).toContain("serve");
     expect(root.stdout).toContain("run");
     expect(root.stdout).toContain("pull");
+    expect(root.stdout).toContain("doctor");
     expect(root.stdout).toContain("skill");
+    expect(doctorHelp.stdout).toContain("dumbridge doctor");
+    expect(doctorHelp.stdout).toContain("without a bridge key");
+    expect(doctorHelp.stdout).toContain("Exits non-zero when any check fails");
     expect(serve.stdout).toContain("dumbridge serve [flags] [<root>]");
     expect(serve.stdout).toContain("--ttl");
     expect(serve.stdout).toContain("--detach");
@@ -279,6 +286,112 @@ describe("dumbridge CLI", () => {
     );
     expect(connectionPathNotice("unknown")).toBe(
       "dumbridge: connected (path unknown)\n"
+    );
+  });
+
+  test("doctor renders one line per check and exits zero when all are ok", async () => {
+    const checks: readonly DiagnosisCheck[] = [
+      {
+        detail: "Resolved all 4 iroh relay hosts.",
+        name: "dns-resolution",
+        status: "ok",
+      },
+      {
+        detail: "A UDP datagram was answered.",
+        name: "udp-egress",
+        status: "ok",
+      },
+      {
+        detail: "All 4 iroh relay hosts accepted a TCP connection on port 443.",
+        name: "relay-reachability",
+        status: "ok",
+      },
+      {
+        detail: "No HTTP(S) proxy is configured in the environment.",
+        name: "proxy-capability",
+        status: "ok",
+      },
+    ];
+
+    const result = await Effect.runPromise(
+      runDoctor({ diagnose: Effect.succeed(checks) })
+    );
+
+    expect(result.exitCode).toBe(0);
+    expect(result.report).toBe(
+      [
+        "ok    dns-resolution      Resolved all 4 iroh relay hosts.",
+        "ok    udp-egress          A UDP datagram was answered.",
+        "ok    relay-reachability  All 4 iroh relay hosts accepted a TCP connection on port 443.",
+        "ok    proxy-capability    No HTTP(S) proxy is configured in the environment.",
+        "",
+      ].join("\n")
+    );
+  });
+
+  test("doctor keeps a zero exit code when checks warn but none fail", async () => {
+    const checks: readonly DiagnosisCheck[] = [
+      {
+        detail: "Resolved all 4 iroh relay hosts.",
+        name: "dns-resolution",
+        status: "ok",
+      },
+      {
+        detail: "UDP egress looks blocked.",
+        name: "udp-egress",
+        status: "warn",
+      },
+      {
+        detail: "Relay traffic must travel through the proxy.",
+        name: "relay-reachability",
+        status: "warn",
+      },
+      {
+        detail:
+          "An HTTP(S) proxy is configured and the installed iroh binding can use it.",
+        name: "proxy-capability",
+        status: "ok",
+      },
+    ];
+
+    const result = await Effect.runPromise(
+      runDoctor({ diagnose: Effect.succeed(checks) })
+    );
+
+    expect(result.exitCode).toBe(0);
+    expect(result.report).toContain(
+      "warn  udp-egress          UDP egress looks blocked."
+    );
+    expect(result.report).toContain(
+      "warn  relay-reachability  Relay traffic must travel through the proxy."
+    );
+  });
+
+  test("doctor exits non-zero when any check fails", async () => {
+    const checks: readonly DiagnosisCheck[] = [
+      {
+        detail: "Could not resolve any iroh relay host.",
+        name: "dns-resolution",
+        status: "fail",
+      },
+      {
+        detail: "UDP egress looks blocked.",
+        name: "udp-egress",
+        status: "warn",
+      },
+    ];
+
+    const result = await Effect.runPromise(
+      runDoctor({ diagnose: Effect.succeed(checks) })
+    );
+
+    expect(result.exitCode).toBe(1);
+    expect(result.report).toBe(
+      [
+        "fail  dns-resolution      Could not resolve any iroh relay host.",
+        "warn  udp-egress          UDP egress looks blocked.",
+        "",
+      ].join("\n")
     );
   });
 

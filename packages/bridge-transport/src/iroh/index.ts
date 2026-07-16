@@ -9,6 +9,7 @@ import {
   BridgeLocatorInvalidError,
   type BridgeTransport,
 } from "../index";
+import { diagnoseHostIrohEnvironment } from "./diagnose";
 import {
   acquireEndpoint,
   closeConnection,
@@ -17,6 +18,7 @@ import {
   normalizeIrohAddress,
   withDeadline,
 } from "./endpoint";
+import type { ProxyEnvironment } from "./proxy";
 import { configureIrohProxy, type IrohProxyConfiguration } from "./proxy";
 import { acceptSession, acquireConnection, makeSession } from "./session";
 
@@ -28,6 +30,8 @@ const defaultDeadlines: BridgeDeadlines = {
   listen: "15 seconds",
 };
 
+export type { IrohDiagnosticProbes } from "./diagnose";
+export { diagnoseIrohEnvironment } from "./diagnose";
 export type { IrohReachability } from "./endpoint";
 export { normalizeIrohAddress } from "./endpoint";
 export type { IrohProxyConfiguration } from "./proxy";
@@ -35,12 +39,16 @@ export { configureIrohProxy, irohBindingSupportsProxy } from "./proxy";
 
 export interface IrohTransportOptions {
   readonly deadlines?: Partial<BridgeDeadlines>;
+  // The proxy environment the diagnosis inspects, threaded in from the CLI
+  // shell; omitted means no proxy variables are visible to diagnose.
+  readonly environment?: ProxyEnvironment;
   readonly proxy?: IrohProxyConfiguration;
   readonly reachability?: IrohReachability;
 }
 
 interface ResolvedOptions {
   readonly deadlines: BridgeDeadlines;
+  readonly environment: ProxyEnvironment;
   readonly proxy: IrohProxyConfiguration;
   readonly reachability: IrohReachability;
 }
@@ -235,6 +243,7 @@ const resolveOptions = (
     ...defaultDeadlines,
     ...options?.deadlines,
   },
+  environment: options?.environment ?? {},
   proxy: options?.proxy ?? { _tag: "Disabled" },
   reachability: options?.reachability ?? "direct-or-relay",
 });
@@ -246,6 +255,7 @@ export const makeIrohTransport = (
 
   return {
     connect: (locator) => connect(locator, resolved),
+    diagnose: diagnoseHostIrohEnvironment(resolved.environment),
     listen: listen(resolved),
   };
 };
