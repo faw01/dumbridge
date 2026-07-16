@@ -750,7 +750,6 @@ describe("bridge application supervision", () => {
       });
       expect(reported).toEqual(["relay", "direct"]);
 
-      // A request that fails after connecting still reported its path first.
       const failing = scriptedSession({
         connectionPath: "direct",
         reads: [encoded({ code: "not-found", type: "pull-error" })],
@@ -949,8 +948,6 @@ describe("bridge application supervision", () => {
           )
         );
         yield* Effect.scoped(server.serve.pipe(Effect.flip));
-        // Replay everything up to the file-end and complete frames, so the
-        // client sees a cleanly ended but incomplete transfer.
         expect(serverSession.state.writes.length).toBeGreaterThan(2);
 
         const truncated = scriptedSession({
@@ -1145,8 +1142,6 @@ describe("bridge application supervision", () => {
           message: "The bridge proxy configuration is invalid.",
           requested: "environment",
         }),
-        // A failed direct-only dial already spent its full connect deadline;
-        // failing fast beats a second slow attempt.
         new BridgeDirectConnectError({
           message:
             "No viable network path to the bridge: the direct connection failed (this network may block UDP) and the bridge locator allows no relay fallback.",
@@ -1232,11 +1227,7 @@ describe("bridge application supervision", () => {
                 operation: "connect",
               });
               expect(error.cause).toBe(failure.error);
-              // The dial itself failed, so the CLI may name an unusable
-              // proxy as the likely cause.
               expect(isDialFailure(error)).toBe(true);
-              // A classified dial failure keeps the one-retry contract that
-              // every pre-request connection failure has.
               expect(connectCalls).toBe(2);
             })
           )
@@ -1281,8 +1272,6 @@ describe("bridge application supervision", () => {
         operation: "connect",
       });
       expect(error.cause).toBeInstanceOf(BridgeConnectError);
-      // A generic connect failure carries no dial classification, so the
-      // CLI must not blame an unusable proxy for it.
       expect(isDialFailure(error)).toBe(false);
       expect(connectCalls).toBe(2);
     })

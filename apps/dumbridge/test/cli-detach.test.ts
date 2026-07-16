@@ -35,8 +35,6 @@ let servedRoot = "";
 let stateDirectory = "";
 let spawnedServePids: number[] = [];
 
-// The fixture is realpath'd so the roots the tests pass are already
-// canonical and error messages naming the root can be compared literally.
 beforeEach(async () => {
   fixture = await realpath(
     await mkdtemp(join(tmpdir(), "dumbridge-detach-cli-"))
@@ -58,8 +56,6 @@ afterEach(async () => {
   await rm(fixture, { force: true, recursive: true });
 });
 
-// The tests never derive record file names from a root: they read whatever
-// record files the CLI left in the state directory.
 const readRecordTexts = async () => {
   let names: string[];
   try {
@@ -237,10 +233,6 @@ describe("dumbridge serve flags", () => {
 
   test("status lists live serves one per line and prunes stale records", async () => {
     await mkdir(stateDirectory, { recursive: true });
-    // Seeded records stand in for serves detached earlier: the test runner's
-    // own pid is live in this boot, so its records list; the impossible pid
-    // is dead, so its record must be pruned. Status discovers records by
-    // file name shape, so the hashes need not match the roots.
     const startedAtEpochMs = Date.now();
     const startedAtIso = new Date(startedAtEpochMs).toISOString();
     const rootA = join(fixture, "served-a");
@@ -287,8 +279,6 @@ describe("dumbridge serve flags", () => {
 
   test("stopping a stale record cleans it up without failing", async () => {
     await mkdir(stateDirectory, { recursive: true });
-    // Simulates a record left by a past process. A bare stop discovers
-    // records by their file name shape, so the hash need not match the root.
     await writeFile(
       join(stateDirectory, `detached-serve-${"0".repeat(64)}.json`),
       JSON.stringify({

@@ -10,9 +10,6 @@ import {
   type ProxyEnvironment,
 } from "./proxy";
 
-// Network and binding effects stay behind this seam so the diagnosis
-// composition never touches a real socket in tests. Each probe owns its own
-// timeout and settles either way; a rejection is the "unreachable" signal.
 export interface IrohDiagnosticProbes {
   readonly makeEndpointBuilder: () => object;
   readonly openTcp: (host: string, port: number) => Promise<void>;
@@ -277,12 +274,8 @@ export const diagnoseIrohEnvironment = (
 const probeTimeoutMilliseconds = 4000;
 const udpReplyTimeoutMilliseconds = 2000;
 
-// A public anycast DNS resolver: answering the probe datagram proves UDP
-// egress and a working return path without contacting any iroh host.
 const udpProbeResolver = { address: "1.1.1.1", port: 53 };
 
-// The datagram is a minimal DNS A query for example.com; its payload only
-// matters insofar as the resolver sends something back.
 const udpProbeQuery = () => {
   const encoder = new TextEncoder();
   const question = "example.com"

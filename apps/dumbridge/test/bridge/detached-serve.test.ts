@@ -25,8 +25,6 @@ import {
 
 let stateDirectory = "";
 
-// The fixture is realpath'd so the absolute roots built from it are already
-// canonical and can be compared literally against persisted roots.
 beforeEach(async () => {
   stateDirectory = await realpath(
     await mkdtemp(join(tmpdir(), "dumbridge-detach-"))
@@ -39,11 +37,6 @@ afterEach(async () => {
 
 const rootPath = (name: string) => join(stateDirectory, name);
 
-// The tests never derive hashed record file names themselves: records are
-// seeded through detachServe and inspected by reading whatever the state
-// directory holds, so they survive changes to the on-disk naming scheme. The
-// one literal name is `detached-serve.json`, the compatibility contract with
-// records written before they were keyed by root.
 const legacyRecordFileName = "detached-serve.json";
 
 const recordTexts = Effect.promise(async (): Promise<readonly string[]> => {
@@ -553,9 +546,6 @@ describe("listDetachedServes", () => {
     "treats a record whose timestamp no Date can represent as unreadable",
     () =>
       Effect.gen(function* () {
-        // One millisecond past the JavaScript Date range: a status surface
-        // could not render it, so the record must decode as unreadable and
-        // stay unlisted rather than poison the whole listing.
         yield* writeLegacyRecord({
           pid: 77,
           root: rootPath("served"),
@@ -725,8 +715,6 @@ describe("stopDetachedServe", () => {
         yield* Effect.promise(() =>
           symlink(rootPath("real-root"), rootPath("alias-root"))
         );
-        // A pre-upgrade release resolved but did not realpath the root, so
-        // its record can carry the symlink spelling.
         yield* writeLegacyRecord({
           pid: 77,
           root: rootPath("alias-root"),

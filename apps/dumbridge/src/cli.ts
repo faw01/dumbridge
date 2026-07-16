@@ -150,10 +150,6 @@ const withProxyConnectCause =
       )
     );
 
-// One line per invocation, stderr only: piped stdout stays exactly the
-// script's or pull's own output. The line names the path selected at connect
-// time; iroh may upgrade a relayed session to direct afterwards. It prints as
-// soon as the session opens, so it survives requests that fail later.
 const connectionPathNotices: Record<ConnectionPath, string> = {
   direct: "dumbridge: connected directly\n",
   relay: "dumbridge: connected via relay\n",
@@ -232,7 +228,6 @@ const serveDetached = (
     );
   });
 
-// One serve per line, tab-separated so a root containing spaces still parses.
 const serveStatus = Effect.gen(function* () {
   const records = yield* listDetachedServes({
     control: hostServeProcessControl,
@@ -277,12 +272,8 @@ interface ServeInvocation {
   readonly ttl: Option.Option<string>;
 }
 
-// serve starts a bridge unless --detach, --stop, or --status selects another
-// request; the three selectors are mutually exclusive.
 const serveModes = ["detach", "stop", "status"] as const;
 
-// --stop and --status take none of the start-shaped flags; --status also
-// takes no root because it always lists every detached serve.
 const serveSelectorFlagError = (
   mode: "status" | "stop",
   flags: ServeInvocation
@@ -469,8 +460,6 @@ const skill = Command.make("skill", {}, () =>
   )
 );
 
-// Wide enough for the longest check name ("relay-reachability") plus a
-// two-space gutter, so details line up in one scannable column.
 const doctorNameWidth = 20;
 
 const renderDiagnosisCheck = (check: DiagnosisCheck) =>
@@ -588,8 +577,6 @@ const main = runCli(cliArguments.length === 0 ? ["--help"] : cliArguments).pipe(
       )
     )
   ),
-  // --log-level debug output shares stderr with the branded notices, so a
-  // piped stdout stays exactly the script's or pull's own output.
   Effect.provideService(References.LogToStderr, true)
 );
 

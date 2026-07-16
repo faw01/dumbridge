@@ -236,8 +236,6 @@ describe("Iroh bridge transport", () => {
           listen: "1 second",
         },
       });
-      // TEST-NET-1 (RFC 5737) is never routable, so holepunching cannot
-      // succeed and there is no relay in the locator to fall back to.
       const id = EndpointId.fromBytes(new Array<number>(32).fill(1));
       const unreachable = new EndpointAddr(id, null, ["192.0.2.1:1"]);
       const locator = BridgeLocator.fromString(
@@ -329,8 +327,6 @@ describe("Iroh bridge transport", () => {
             listen: "1 second",
           },
         });
-        // TEST-NET-1 (RFC 5737) direct address and a reserved .invalid relay
-        // host: neither route can ever succeed.
         const id = EndpointId.fromBytes(new Array<number>(32).fill(1));
         const unreachable = new EndpointAddr(id, "https://relay.invalid/", [
           "192.0.2.1:1",
@@ -370,16 +366,12 @@ describe("Iroh bridge transport", () => {
 
     expect(offline).toBeInstanceOf(BridgeDialError);
     expect(offline.reason).toBe("peer-offline");
-    // The trailing dot iroh keeps on relay hostnames is stripped so the
-    // reported host matches what a user would put in an allowlist.
     expect(offline.relayHost).toBe("use1-1.relay.n0.iroh.link");
     expect(offline.cause).toBe(cause);
     expect(blocked.reason).toBe("relay-unreachable");
     expect(blocked.relayHost).toBe("use1-1.relay.n0.iroh.link");
     expect(blocked.cause).toBe(cause);
 
-    // A relay value that does not parse as a URL is still named rather
-    // than dropped; the locator minted it, so it carries no credentials.
     expect(
       classifyDialFailure({
         cause,
@@ -423,7 +415,6 @@ describe("Iroh bridge transport", () => {
       expect(logged).toContain("relay.invalid");
       expect(logged).toContain("192.0.2.1:1");
       expect(logged).toContain("relay-unreachable");
-      // The opaque locator ticket never appears in the dial log.
       expect(logged).not.toContain(ticket);
     })
   );
@@ -796,8 +787,6 @@ describe("Iroh bridge transport", () => {
         Effect.flip
       );
 
-      // The revoked listener's locator was minted direct-only, so the failed
-      // dial is reported as a failed direct connection.
       expect(error).toBeInstanceOf(BridgeDirectConnectError);
     })
   );
