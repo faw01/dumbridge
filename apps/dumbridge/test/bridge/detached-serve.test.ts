@@ -492,7 +492,7 @@ describe("detachServe", () => {
 
 describe("listDetachedServes", () => {
   it.effect(
-    "lists live serves by root and skips stale records and foreign files",
+    "lists live serves by root, prunes stale records, and leaves foreign files",
     () =>
       Effect.gen(function* () {
         yield* seedDetachedServe(rootPath("root-b"), 222);
@@ -512,13 +512,41 @@ describe("listDetachedServes", () => {
           { pid: 111, root: rootPath("root-a") },
           { pid: 222, root: rootPath("root-b") },
         ]);
-        expect((yield* recordTexts).length).toBe(3);
+        expect(yield* storedPids).toEqual([111, 222]);
         expect(
           yield* Effect.promise(() =>
             readFile(join(stateDirectory, "notes.txt"), "utf8")
           )
         ).toBe("not a record");
       })
+  );
+
+  it.effect("prunes a live-pid record written before the current boot", () =>
+    Effect.gen(function* () {
+      yield* seedDetachedServe(rootPath("pre-boot-root"), 77);
+      const { control } = makeControl({
+        alivePids: new Set([77]),
+        bootTimeMs: Date.now() + 86_400_000,
+      });
+
+      const records = yield* listDetachedServes({ control, stateDirectory });
+
+      expect(records).toEqual([]);
+      expect(yield* recordTexts).toEqual([]);
+    })
+  );
+
+  it.effect("prunes an unreadable record while listing", () =>
+    Effect.gen(function* () {
+      yield* seedDetachedServe(rootPath("served"), 77);
+      yield* corruptStoredRecords;
+      const { control } = makeControl({});
+
+      const records = yield* listDetachedServes({ control, stateDirectory });
+
+      expect(records).toEqual([]);
+      expect(yield* recordTexts).toEqual([]);
+    })
   );
 
   it.effect("lists a live serve recorded before the upgrade", () =>

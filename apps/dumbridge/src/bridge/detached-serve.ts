@@ -504,7 +504,9 @@ export const stopDetachedServe = Effect.fn("DetachedServe.stop")(
     })
 );
 
-// The status surface (serve --status) is expected to consume this listing.
+// The status surface (serve --status) consumes this listing. Stale records
+// (dead pid, prior boot, unreadable) are reclaimed as they are encountered,
+// matching the stop path, so listing leaves only live records on disk.
 export const listDetachedServes = Effect.fn("DetachedServe.list")(
   (options: {
     readonly control: ServeProcessControl;
@@ -513,13 +515,19 @@ export const listDetachedServes = Effect.fn("DetachedServe.list")(
     Effect.gen(function* () {
       const entries = yield* readRecordEntries(options.stateDirectory);
       const live: DetachedServeRecord[] = [];
-      for (const { stored } of entries) {
+      for (const { fileName, stored } of entries) {
         if (
           stored.type === "record" &&
           (yield* recordIsLive(stored.record, options.control))
         ) {
           live.push(stored.record);
+          continue;
         }
+        yield* removeRecordIfUnchanged(
+          options.stateDirectory,
+          fileName,
+          stored
+        );
       }
       return live.sort((left, right) => byCodeUnit(left.root, right.root));
     })
