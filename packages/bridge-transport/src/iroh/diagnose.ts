@@ -345,22 +345,32 @@ const sendHostUdpProbe = () =>
     );
   });
 
+// An explicit timer, not socket.setTimeout: the socket idle timer is not
+// guaranteed to cover the connect handshake, so a relay dropping SYN
+// packets could otherwise pin the probe to the OS TCP retry window.
 const openHostTcp = (host: string, port: number) =>
   new Promise<void>((resolve, reject) => {
     const socket = connect({ host, port });
-    socket.setTimeout(probeTimeoutMilliseconds);
-    socket.once("connect", () => {
+    let settled = false;
+    const finish = (error?: Error) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      clearTimeout(timer);
       socket.destroy();
-      resolve();
-    });
-    socket.once("timeout", () => {
-      socket.destroy();
-      reject(new Error("The TCP connection attempt timed out."));
-    });
-    socket.once("error", (error) => {
-      socket.destroy();
-      reject(error);
-    });
+      if (error === undefined) {
+        resolve();
+      } else {
+        reject(error);
+      }
+    };
+    const timer = setTimeout(
+      () => finish(new Error("The TCP connection attempt timed out.")),
+      probeTimeoutMilliseconds
+    );
+    socket.once("connect", () => finish());
+    socket.once("error", (error) => finish(error));
   });
 
 const hostDiagnosticProbes: IrohDiagnosticProbes = {
