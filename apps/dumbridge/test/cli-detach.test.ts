@@ -225,6 +225,66 @@ describe("dumbridge serve flags", () => {
     });
   });
 
+  test("status with no detached serves prints one line and exits zero", async () => {
+    const result = await runCli(["serve", "--status"]);
+
+    expect(result).toEqual({
+      exitCode: 0,
+      stderr: "",
+      stdout: "No detached serves are running.\n",
+    });
+  });
+
+  test("status lists live serves one per line and prunes stale records", async () => {
+    await mkdir(stateDirectory, { recursive: true });
+    // Seeded records stand in for serves detached earlier: the test runner's
+    // own pid is live in this boot, so its records list; the impossible pid
+    // is dead, so its record must be pruned. Status discovers records by
+    // file name shape, so the hashes need not match the roots.
+    const startedAtEpochMs = Date.now();
+    const startedAtIso = new Date(startedAtEpochMs).toISOString();
+    const rootA = join(fixture, "served-a");
+    const rootB = join(fixture, "served-b");
+    await Promise.all([
+      writeFile(
+        join(stateDirectory, `detached-serve-${"a".repeat(64)}.json`),
+        JSON.stringify({
+          expiresAtEpochMs: 1_798_761_600_000,
+          pid: process.pid,
+          root: rootA,
+          startedAtEpochMs,
+        })
+      ),
+      writeFile(
+        join(stateDirectory, `detached-serve-${"b".repeat(64)}.json`),
+        JSON.stringify({
+          pid: process.pid,
+          root: rootB,
+          startedAtEpochMs,
+        })
+      ),
+      writeFile(
+        join(stateDirectory, `detached-serve-${"c".repeat(64)}.json`),
+        JSON.stringify({
+          pid: 2 ** 22 - 1,
+          root: join(fixture, "served-c"),
+          startedAtEpochMs,
+        })
+      ),
+    ]);
+
+    const result = await runCli(["serve", "--status"]);
+
+    expect(result).toEqual({
+      exitCode: 0,
+      stderr: "",
+      stdout:
+        `${rootA}\tpid ${process.pid}\tstarted ${startedAtIso}\tkey expires 2027-01-01T00:00:00.000Z\n` +
+        `${rootB}\tpid ${process.pid}\tstarted ${startedAtIso}\tkey expiry unknown\n`,
+    });
+    expect((await readRecordTexts()).length).toBe(2);
+  });
+
   test("stopping a stale record cleans it up without failing", async () => {
     await mkdir(stateDirectory, { recursive: true });
     // Simulates a record left by a past process. A bare stop discovers

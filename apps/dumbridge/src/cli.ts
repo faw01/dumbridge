@@ -34,6 +34,7 @@ import { pullRemote, runRemote } from "./bridge/client";
 import {
   detachServe,
   hostServeProcessControl,
+  listDetachedServes,
   type ServeReachability,
   stopDetachedServe,
 } from "./bridge/detached-serve";
@@ -191,6 +192,26 @@ const serveDetached = (
     );
   });
 
+// One serve per line, tab-separated so a root containing spaces still parses.
+const serveStatus = Effect.gen(function* () {
+  const records = yield* listDetachedServes({
+    control: hostServeProcessControl,
+    stateDirectory: yield* stateDirectory,
+  });
+  if (records.length === 0) {
+    return yield* write(process.stdout, "No detached serves are running.\n");
+  }
+  const lines = records.map(
+    (record) =>
+      `${record.root}\tpid ${record.pid}\tstarted ${new Date(record.startedAtEpochMs).toISOString()}\t${
+        record.expiresAtEpochMs === undefined
+          ? "key expiry unknown"
+          : `key expires ${new Date(record.expiresAtEpochMs).toISOString()}`
+      }\n`
+  );
+  yield* write(process.stdout, lines.join(""));
+});
+
 const serveStop = (root: Option.Option<string>) =>
   Effect.gen(function* () {
     const result = yield* stopDetachedServe({
@@ -306,6 +327,9 @@ const serve = Command.make(
       const invalid = serveInvocationError(flags);
       if (invalid !== undefined) {
         return yield* invalid;
+      }
+      if (flags.status) {
+        return yield* serveStatus;
       }
       if (flags.stop) {
         return yield* serveStop(flags.root);
