@@ -146,6 +146,8 @@ export interface BridgeDeadlines {
   readonly listen: Duration.Input;
 }
 
+// The path selected when the session was established. Iroh may later upgrade
+// a relayed connection to a direct one; the snapshot is not re-observed.
 export type ConnectionPath = "direct" | "relay" | "unknown";
 
 export interface DiagnosisCheck {

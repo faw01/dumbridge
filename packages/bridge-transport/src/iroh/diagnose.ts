@@ -274,8 +274,12 @@ export const diagnoseIrohEnvironment = (
 const probeTimeoutMilliseconds = 4000;
 const udpReplyTimeoutMilliseconds = 2000;
 
+// A public anycast DNS resolver: answering the probe datagram proves UDP
+// egress and a working return path without contacting any iroh host.
 const udpProbeResolver = { address: "1.1.1.1", port: 53 };
 
+// The datagram is a minimal DNS A query for example.com; its payload only
+// matters insofar as the resolver sends something back.
 const udpProbeQuery = () => {
   const encoder = new TextEncoder();
   const question = "example.com"
