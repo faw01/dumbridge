@@ -126,9 +126,11 @@ const relayCheck = (request: {
       }
       // In a proxy-only sandbox a direct TCP connection is expected to be
       // refused; relay bytes can still travel through the HTTP(S) proxy.
+      // Probing through the proxy would mean speaking HTTP CONNECT here — a
+      // parallel probing stack — so the detail names the untested path.
       if (request.proxyConfigured) {
         return {
-          detail: `No iroh relay host accepted a direct TCP connection on port ${relayPort}; with an HTTP(S) proxy configured, relay traffic must travel through the proxy.`,
+          detail: `No iroh relay host accepted a direct TCP connection on port ${relayPort}; with an HTTP(S) proxy configured, relay traffic must travel through the proxy, a path this probe does not test.`,
           name,
           status: "warn" as const,
         };
@@ -167,12 +169,15 @@ const proxyCheck = (request: {
       name,
       status: "ok" as const,
     }),
+    // Both failures are "fail", not "warn": a client that sees any proxy
+    // variable configures the proxy from the environment before connecting,
+    // so an unusable proxy configuration blocks run and pull outright.
     Effect.catchTags({
       BridgeProxyConfigurationError: (error) =>
         Effect.succeed({
           detail: error.message,
           name,
-          status: "warn" as const,
+          status: "fail" as const,
         }),
       BridgeProxyUnsupportedError: (error) =>
         Effect.succeed({

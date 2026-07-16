@@ -126,7 +126,7 @@ describe("Iroh environment diagnosis", () => {
       });
       expect(proxied).toEqual({
         detail:
-          "No iroh relay host accepted a direct TCP connection on port 443; with an HTTP(S) proxy configured, relay traffic must travel through the proxy.",
+          "No iroh relay host accepted a direct TCP connection on port 443; with an HTTP(S) proxy configured, relay traffic must travel through the proxy, a path this probe does not test.",
         name: "relay-reachability",
         status: "warn",
       });
@@ -173,20 +173,24 @@ describe("Iroh environment diagnosis", () => {
     })
   );
 
-  it.effect("warns on proxy variables that hold no usable proxy URL", () =>
-    Effect.gen(function* () {
-      const checks = yield* diagnose(
-        {},
-        { ALL_PROXY: "socks5://user:secret-credential@proxy.example" }
-      );
+  // A client that sees any proxy variable configures the proxy before
+  // connecting, so an unusable proxy configuration blocks run and pull.
+  it.effect(
+    "fails proxy-capability on variables with no usable proxy URL",
+    () =>
+      Effect.gen(function* () {
+        const checks = yield* diagnose(
+          {},
+          { ALL_PROXY: "socks5://user:secret-credential@proxy.example" }
+        );
 
-      expect(checks[3]).toEqual({
-        detail:
-          "No valid HTTP(S) proxy was found in the proxy environment variables.",
-        name: "proxy-capability",
-        status: "warn",
-      });
-    })
+        expect(checks[3]).toEqual({
+          detail:
+            "No valid HTTP(S) proxy was found in the proxy environment variables.",
+          name: "proxy-capability",
+          status: "fail",
+        });
+      })
   );
 
   it.effect("never leaks proxy credentials into any check detail", () =>
