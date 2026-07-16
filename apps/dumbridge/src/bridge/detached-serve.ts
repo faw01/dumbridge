@@ -386,8 +386,10 @@ export const detachServe = Effect.fn("DetachedServe.detach")(
         );
       }
 
+      // The child receives the same canonical root the record is keyed by,
+      // so a symlink retargeted after this point cannot make them disagree.
       const startup = yield* options.control.spawnDetachedServe({
-        root: options.root,
+        root,
         ...(options.reachability === undefined
           ? {}
           : { reachability: options.reachability }),

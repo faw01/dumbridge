@@ -342,6 +342,28 @@ describe("detachServe", () => {
       })
   );
 
+  it.effect.skipIf(process.platform === "win32")(
+    "spawns the canonical root when detached through a symlink",
+    () =>
+      Effect.gen(function* () {
+        yield* Effect.promise(() => mkdir(rootPath("real-root")));
+        yield* Effect.promise(() =>
+          symlink(rootPath("real-root"), rootPath("alias-root"))
+        );
+        const { calls, control } = makeControl({ spawnedPid: 55 });
+
+        yield* detachServe({
+          control,
+          root: rootPath("alias-root"),
+          stateDirectory,
+        });
+
+        expect(calls.spawns).toEqual([rootPath("real-root")]);
+        const [text] = yield* recordTexts;
+        expect(JSON.parse(text ?? "").root).toBe(rootPath("real-root"));
+      })
+  );
+
   it.effect("refuses a root already served by a pre-upgrade record", () =>
     Effect.gen(function* () {
       yield* writeLegacyRecord({
