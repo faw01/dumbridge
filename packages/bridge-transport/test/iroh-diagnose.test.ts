@@ -57,8 +57,6 @@ describe("Iroh environment diagnosis", () => {
     })
   );
 
-  // A binding that yields no relay hosts leaves nothing to probe; both
-  // host-based checks must fail rather than report an "all 0 ok" pass.
   it.effect("fails the host checks when no relay hosts are configured", () =>
     Effect.gen(function* () {
       const checks = yield* diagnoseIrohEnvironment({
@@ -108,9 +106,6 @@ describe("Iroh environment diagnosis", () => {
     })
   );
 
-  // A proxied relay dial sends the relay hostname inside HTTP CONNECT for
-  // the proxy to resolve, so blocked local DNS is workable with a usable
-  // proxy but stays fatal when the proxy is unusable.
   it.effect("downgrades blocked local DNS only behind a usable proxy", () =>
     Effect.gen(function* () {
       const noResolver = () => Promise.reject(new Error("blocked"));
@@ -188,9 +183,6 @@ describe("Iroh environment diagnosis", () => {
     })
   );
 
-  // The escape hatch requires a proxy the binding can actually route
-  // through; a proxy the client must fall back from leaves the direct 443
-  // path as the only relay route, so its blockage stays a failure.
   it.effect("keeps blocked 443 a failure when the proxy is unusable", () =>
     Effect.gen(function* () {
       const [, , relay] = yield* diagnose(
@@ -234,9 +226,6 @@ describe("Iroh environment diagnosis", () => {
       })
   );
 
-  // A binding without proxy support no longer blocks the client: run and
-  // pull fall back to a direct connection, so the check degrades to warn
-  // and the direct-path checks carry the verdict.
   it.effect("warns on proxy-capability when the binding lacks support", () =>
     Effect.gen(function* () {
       const checks = yield* diagnose(
@@ -253,8 +242,6 @@ describe("Iroh environment diagnosis", () => {
     })
   );
 
-  // A client that sees any proxy variable configures the proxy before
-  // connecting, so an unusable proxy configuration blocks run and pull.
   it.effect(
     "fails proxy-capability on variables with no usable proxy URL",
     () =>
@@ -273,9 +260,6 @@ describe("Iroh environment diagnosis", () => {
       })
   );
 
-  // Placeholder exports such as HTTPS_PROXY='' disable proxy mode in the
-  // client transport selection, so the diagnosis must not report them as a
-  // configured proxy.
   it.effect("ignores empty proxy environment variables", () =>
     Effect.gen(function* () {
       const checks = yield* diagnose({}, { ALL_PROXY: "", HTTPS_PROXY: "" });

@@ -83,8 +83,6 @@ export const classifyDialFailure = (observed: {
 
 export interface IrohTransportOptions {
   readonly deadlines?: Partial<BridgeDeadlines>;
-  // The proxy environment the diagnosis inspects, threaded in from the CLI
-  // shell; omitted means no proxy variables are visible to diagnose.
   readonly environment?: ProxyEnvironment;
   readonly proxy?: IrohProxyConfiguration;
   readonly reachability?: IrohReachability;
@@ -316,9 +314,6 @@ const connect = (
       }),
       closeConnection(activeConnection)
     ).pipe(
-      // Every dial that logged "attempting" ends with a terminal outcome
-      // line, even when the peer vanishes between the QUIC handshake and
-      // stream creation.
       Effect.tapError(() =>
         Effect.logDebug("bridge dial: failed", {
           reason: "byte-session-open",

@@ -10,9 +10,6 @@ import {
   type ProxyEnvironment,
 } from "./proxy";
 
-// Network and binding effects stay behind this seam so the diagnosis
-// composition never touches a real socket in tests. Each probe owns its own
-// timeout and settles either way; a rejection is the "unreachable" signal.
 export interface IrohDiagnosticProbes {
   readonly makeEndpointBuilder: () => object;
   readonly openTcp: (host: string, port: number) => Promise<void>;

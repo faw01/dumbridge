@@ -245,9 +245,6 @@ describe("dumbridge CLI", () => {
   });
 
   test("falls back to a direct-capable dial when the binding cannot use the proxy", () => {
-    // No proxy is requested and no reachability is forced, so the locator in
-    // the bridge key keeps deciding the relay policy: a direct-only key stays
-    // a direct-only attempt, and a relay-carrying key keeps its fallback.
     expect(
       resolveClientTransportOptions(
         { HTTPS_PROXY: "http://user:proxy-secret@proxy.example:3128" },
@@ -288,9 +285,6 @@ describe("dumbridge CLI", () => {
         "No viable network path to the bridge: the direct connection failed (this network may block UDP) and the bridge locator allows no relay fallback.",
     });
 
-    // The proxy note fires only when a proxy fallback happened AND the
-    // connection then actually failed; a non-connect failure or a proxyless
-    // environment keeps the plain cause message.
     expect(connectFailureMessage(directFailure, true)).toBe(
       `${directFailure.message}${proxyUnusableConnectNotice}`
     );

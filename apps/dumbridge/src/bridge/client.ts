@@ -139,9 +139,6 @@ const transientConnectFailure = (error: unknown) =>
     error
   );
 
-// A classified dial failure already carries its cause-specific message from
-// the transport seam; wrapping it as a connect failure keeps the one-retry
-// contract every pre-request connection failure has.
 const classifiedConnectFailure = (error: BridgeDialError) =>
   clientError("connect", error.message, error);
 
@@ -231,9 +228,6 @@ const responseEndedEarlyMessage =
 const connectionFailedMessage =
   "The bridge connection failed while reading the response. Check that dumbridge serve is still running on the local machine.";
 
-// One user string per response read failure; the compiler keeps the table
-// exhaustive. A stream the bridge ended early and a lost connection are
-// reported as such instead of masquerading as a malformed response.
 const responseReadMessages: Record<ResponseReadError["_tag"], string> = {
   AuthenticationError: invalidResponseMessage,
   BridgeDeadlineExceededError: connectionFailedMessage,
@@ -248,10 +242,6 @@ const responseReadMessages: Record<ResponseReadError["_tag"], string> = {
   WireLimitExceededError: invalidResponseMessage,
 };
 
-// Pull reads flatten wire and transport failures into a PullIOError so they
-// can travel through materializePull's PullError channel; the attached cause
-// carries the original failure back out, where the same message table
-// reports it with run-response fidelity.
 const pullReadClientError = (error: unknown): BridgeClientError | undefined => {
   if (!(error instanceof PullIOError) || error.cause === undefined) {
     return;
@@ -342,8 +332,6 @@ export const runRemote = Effect.fn("BridgeClient.run")(
   (options: {
     readonly deadline?: Duration.Input;
     readonly link: string;
-    // Reports the connect-time path as soon as the session opens, so the
-    // caller still learns it when the request fails after connecting.
     readonly onConnected?: (path: ConnectionPath) => Effect.Effect<void>;
     readonly script: string;
     readonly transport: BridgeTransport;
@@ -416,8 +404,6 @@ export const pullRemote = Effect.fn("BridgeClient.pull")(
     readonly deadline?: Duration.Input;
     readonly destination?: string;
     readonly link: string;
-    // Reports the connect-time path as soon as the session opens, so the
-    // caller still learns it when the request fails after connecting.
     readonly onConnected?: (path: ConnectionPath) => Effect.Effect<void>;
     readonly remotePath: string;
     readonly transport: BridgeTransport;

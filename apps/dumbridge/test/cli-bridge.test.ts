@@ -13,8 +13,6 @@ import { Result } from "effect";
 
 const cli = fileURLToPath(new URL("../src/cli.ts", import.meta.url));
 const bridgeKeyLine = /^DUMBRIDGE_KEY=(\S+)\r?\n/m;
-// The loopback path is real, so most assertions pin only the wording; the
-// direct-only test asserts the exact "connected directly" line.
 const pathLine = /^dumbridge: connected (directly|via relay)\n/m;
 const keyExpiryLine =
   /^The key expires at \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z\./m;
@@ -158,9 +156,6 @@ describe("dumbridge CLI bridge", () => {
       );
       expect(outside.stderr).not.toContain("serving");
 
-      // The broad-read repro from the cloud-agent evaluation: a recursive
-      // grep across more bytes than the cumulative read budget must name the
-      // ceiling and a recovery, not a bare limit name.
       await Promise.all(
         Array.from({ length: 5 }, (_, index) =>
           writeFile(
@@ -199,7 +194,6 @@ describe("dumbridge CLI bridge", () => {
         "not in git\n"
       );
 
-      // A pull that fails after connecting still reports its path first.
       const missing = await runCli(["pull", "missing.txt"], environment);
       expect(missing).toMatchObject({ exitCode: 1, stdout: "" });
       expect(missing.stderr).toMatch(pathLine);
@@ -220,8 +214,6 @@ describe("dumbridge CLI bridge", () => {
       if (Result.isFailure(wrongKey)) {
         throw wrongKey.failure;
       }
-      // The wrong-capability caller still connected, so the path line
-      // precedes the rejection; it reveals nothing beyond the reject itself.
       const rejected = await runCli(
         ["run", "true"],
         cleanEnvironment({ DUMBRIDGE_KEY: wrongKey.success })
@@ -238,8 +230,6 @@ describe("dumbridge CLI bridge", () => {
   }, 40_000);
 
   test("reports an unreachable direct-only bridge by cause with the proxy noted", async () => {
-    // No serve runs here: the key's locator names a TEST-NET-1 (RFC 5737)
-    // address that can never answer, and carries no relay to fall back to.
     const id = EndpointId.fromBytes(new Array<number>(32).fill(1));
     const unreachable = new EndpointAddr(id, null, ["192.0.2.1:1"]);
     const key = encodeBridgeKey({
@@ -262,9 +252,6 @@ describe("dumbridge CLI bridge", () => {
     );
     expect(run.exitCode).toBe(1);
     expect(run.stdout).toBe("");
-    // The failure names its cause, and because the unusable-proxy fallback
-    // preceded a dial that then actually failed, the proxy is named as the
-    // likely cause — exactly the #67-consistent ordering.
     expect(run.stderr).toContain(
       "dumbridge: No viable network path to the bridge: the direct connection failed (this network may block UDP) and the bridge locator allows no relay fallback. This environment sets a proxy that the installed iroh binding cannot use, so the connection was attempted without it; if this network allows egress only through that proxy, no direct or relay path can succeed.\n"
     );
@@ -287,9 +274,6 @@ describe("dumbridge CLI bridge", () => {
         5000
       );
       await writeFile(join(servedRoot, "debugged.txt"), "debug run\n");
-      // The proxy variable makes this the worst case for leakage: the dial
-      // sequence must name paths and outcomes while the proxy credential and
-      // the bridge key stay out of the log.
       const environment = cleanEnvironment({
         DUMBRIDGE_KEY: link,
         HTTPS_PROXY: "http://user:proxy-secret@proxy.example:3128",
@@ -300,8 +284,6 @@ describe("dumbridge CLI bridge", () => {
         environment
       );
       expect(run.exitCode).toBe(0);
-      // Debug logging shares stderr with the branded notices; piped stdout
-      // stays exactly the script's own output.
       expect(run.stdout).toBe("debug run\n");
       expect(run.stderr).toContain("bridge dial: attempting");
       expect(run.stderr).toContain("bridge dial: connected");
@@ -331,9 +313,6 @@ describe("dumbridge CLI bridge", () => {
         5000
       );
       await writeFile(join(servedRoot, "proxied.txt"), "despite the proxy\n");
-      // Claude Code cloud "Full Network" sets a proxy the installed binding
-      // cannot route through, while a direct path still works. The run must
-      // warn once and connect anyway instead of dying on configuration.
       const environment = cleanEnvironment({
         DUMBRIDGE_KEY: link,
         HTTPS_PROXY: "http://user:proxy-secret@proxy.example:3128",
@@ -389,9 +368,6 @@ describe("dumbridge CLI bridge", () => {
       expect(pull).toMatchObject({ exitCode: 0 });
       expect(pull.stderr).toContain("dumbridge: connected directly\n");
 
-      // An unusable proxy must not override the path policy baked into the
-      // key: the fallback dials direct, exactly what a direct-only key
-      // demands, instead of re-enabling a relay the locator forbids.
       const proxied = await runCli(
         ["run", "cat direct.txt"],
         cleanEnvironment({
