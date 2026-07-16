@@ -13,7 +13,7 @@ The local process that owns access to a served root, foreground by default. Stop
 _Avoid_: Daemon, server account
 
 **Detached serve**:
-A bridge process started with `serve --detach` that runs without a terminal until `serve --stop`. Its death still revokes the bridge key.
+A bridge process started with `serve --detach` that runs without a terminal until `serve --stop`. Several may run at once, at most one per served root. Its death still revokes the bridge key.
 _Avoid_: Daemon, background service
 
 **Bridge key**:
