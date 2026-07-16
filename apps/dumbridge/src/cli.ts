@@ -237,20 +237,34 @@ interface ServeInvocation {
   readonly ttl: Option.Option<string>;
 }
 
+// serve starts a bridge unless --detach, --stop, or --status selects another
+// request; the three selectors are mutually exclusive.
+const serveModes = ["detach", "stop", "status"] as const;
+
+// --stop and --status take none of the start-shaped flags; --status also
+// takes no root because it always lists every detached serve.
+const serveSelectorFlagError = (
+  mode: "status" | "stop",
+  flags: ServeInvocation
+): CliError | undefined => {
+  if (mode === "status" && Option.isSome(flags.root)) {
+    return new CliError({ message: "serve --status does not take a root." });
+  }
+  if (Option.isSome(flags.ttl)) {
+    return new CliError({ message: `serve --${mode} does not take a --ttl.` });
+  }
+  if (flags.directOnly || flags.relayOnly) {
+    return new CliError({
+      message: `serve --${mode} does not take --direct-only or --relay-only.`,
+    });
+  }
+};
+
 const serveInvocationError = (flags: ServeInvocation): CliError | undefined => {
-  if (flags.detach && flags.stop) {
+  const [mode, extra] = serveModes.filter((name) => flags[name]);
+  if (mode !== undefined && extra !== undefined) {
     return new CliError({
-      message: "Use either --detach or --stop, not both.",
-    });
-  }
-  if (flags.status && flags.detach) {
-    return new CliError({
-      message: "Use either --status or --detach, not both.",
-    });
-  }
-  if (flags.status && flags.stop) {
-    return new CliError({
-      message: "Use either --status or --stop, not both.",
+      message: `Use either --${mode} or --${extra}, not both.`,
     });
   }
   if (flags.directOnly && flags.relayOnly) {
@@ -258,22 +272,8 @@ const serveInvocationError = (flags: ServeInvocation): CliError | undefined => {
       message: "Use either --direct-only or --relay-only, not both.",
     });
   }
-  if (flags.status && Option.isSome(flags.root)) {
-    return new CliError({ message: "serve --status does not take a root." });
-  }
-  if (!(flags.stop || flags.status)) {
-    return;
-  }
-  const selector = flags.stop ? "--stop" : "--status";
-  if (Option.isSome(flags.ttl)) {
-    return new CliError({
-      message: `serve ${selector} does not take a --ttl.`,
-    });
-  }
-  if (flags.directOnly || flags.relayOnly) {
-    return new CliError({
-      message: `serve ${selector} does not take --direct-only or --relay-only.`,
-    });
+  if (mode === "stop" || mode === "status") {
+    return serveSelectorFlagError(mode, flags);
   }
 };
 

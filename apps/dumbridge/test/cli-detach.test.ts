@@ -181,12 +181,12 @@ describe("dumbridge serve flags", () => {
 
     expect(withDetach).toEqual({
       exitCode: 1,
-      stderr: "dumbridge: Use either --status or --detach, not both.\n",
+      stderr: "dumbridge: Use either --detach or --status, not both.\n",
       stdout: "",
     });
     expect(withStop).toEqual({
       exitCode: 1,
-      stderr: "dumbridge: Use either --status or --stop, not both.\n",
+      stderr: "dumbridge: Use either --stop or --status, not both.\n",
       stdout: "",
     });
     expect(withRoot).toEqual({
