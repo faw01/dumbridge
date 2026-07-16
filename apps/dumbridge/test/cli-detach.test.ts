@@ -4,6 +4,7 @@ import {
   mkdtemp,
   readdir,
   readFile,
+  realpath,
   rm,
   writeFile,
 } from "node:fs/promises";
@@ -34,8 +35,12 @@ let servedRoot = "";
 let stateDirectory = "";
 let spawnedServePids: number[] = [];
 
+// The fixture is realpath'd so the roots the tests pass are already
+// canonical and error messages naming the root can be compared literally.
 beforeEach(async () => {
-  fixture = await mkdtemp(join(tmpdir(), "dumbridge-detach-cli-"));
+  fixture = await realpath(
+    await mkdtemp(join(tmpdir(), "dumbridge-detach-cli-"))
+  );
   servedRoot = join(fixture, "served");
   stateDirectory = join(fixture, "state");
   spawnedServePids = [];

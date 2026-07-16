@@ -1,18 +1,21 @@
 import {
+  mkdir,
   mkdtemp,
   readdir,
   readFile,
+  realpath,
   rm,
   symlink,
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "@effect/vitest";
 import { Effect, Fiber } from "effect";
 import { TestClock } from "effect/testing";
 import {
   DetachedServeError,
+  type DetachedServeRecord,
   type DetachedSpawnRequest,
   detachServe,
   listDetachedServes,
@@ -22,17 +25,27 @@ import {
 
 let stateDirectory = "";
 
+// The fixture is realpath'd so the absolute roots built from it are already
+// canonical and can be compared literally against persisted roots.
 beforeEach(async () => {
-  stateDirectory = await mkdtemp(join(tmpdir(), "dumbridge-detach-"));
+  stateDirectory = await realpath(
+    await mkdtemp(join(tmpdir(), "dumbridge-detach-"))
+  );
 });
 
 afterEach(async () => {
   await rm(stateDirectory, { force: true, recursive: true });
 });
 
-// The tests never derive record file names themselves: records are seeded
-// through detachServe and inspected by reading whatever the state directory
-// holds, so they survive changes to the on-disk naming scheme.
+const rootPath = (name: string) => join(stateDirectory, name);
+
+// The tests never derive hashed record file names themselves: records are
+// seeded through detachServe and inspected by reading whatever the state
+// directory holds, so they survive changes to the on-disk naming scheme. The
+// one literal name is `detached-serve.json`, the compatibility contract with
+// records written before they were keyed by root.
+const legacyRecordFileName = "detached-serve.json";
+
 const recordTexts = Effect.promise(async (): Promise<readonly string[]> => {
   let names: readonly string[];
   try {
@@ -41,7 +54,9 @@ const recordTexts = Effect.promise(async (): Promise<readonly string[]> => {
     return [];
   }
   return await Promise.all(
-    names.map((name) => readFile(join(stateDirectory, name), "utf8"))
+    names
+      .filter((name) => name.startsWith("detached-serve"))
+      .map((name) => readFile(join(stateDirectory, name), "utf8"))
   );
 });
 
@@ -52,9 +67,23 @@ const storedPids = Effect.map(recordTexts, (texts) =>
 const corruptStoredRecords = Effect.promise(async () => {
   const names = await readdir(stateDirectory);
   await Promise.all(
-    names.map((name) => writeFile(join(stateDirectory, name), "not json"))
+    names
+      .filter((name) => name.startsWith("detached-serve"))
+      .map((name) => writeFile(join(stateDirectory, name), "not json"))
   );
 });
+
+const writeLegacyRecord = (record: {
+  readonly pid: number;
+  readonly root: string;
+  readonly startedAtEpochMs: number;
+}) =>
+  Effect.promise(() =>
+    writeFile(
+      join(stateDirectory, legacyRecordFileName),
+      JSON.stringify(record)
+    )
+  );
 
 const makeControl = (overrides: {
   readonly alivePids?: ReadonlySet<number>;
@@ -126,19 +155,19 @@ describe("detachServe", () => {
 
       const startup = yield* detachServe({
         control,
-        root: "some-root",
+        root: rootPath("some-root"),
         stateDirectory,
       });
 
       expect(startup).toEqual({ key: "dumbridge1_secret", pid: 5150 });
-      expect(calls.spawns).toEqual(["some-root"]);
-      expect(calls.requests).toEqual([{ root: "some-root" }]);
+      expect(calls.spawns).toEqual([rootPath("some-root")]);
+      expect(calls.requests).toEqual([{ root: rootPath("some-root") }]);
       const [text] = yield* recordTexts;
       expect(text).toBeDefined();
       expect(text).not.toContain("dumbridge1_secret");
       const record = JSON.parse(text ?? "");
       expect(record.pid).toBe(5150);
-      expect(record.root).toBe(resolve("some-root"));
+      expect(record.root).toBe(rootPath("some-root"));
       expect(record.startedAtEpochMs).toBeGreaterThan(0);
       expect(record).not.toHaveProperty("expiresAtEpochMs");
     })
@@ -150,7 +179,11 @@ describe("detachServe", () => {
         spawnedExpiresAtIso: "2026-01-01T00:00:00.000Z",
       });
 
-      yield* detachServe({ control, root: "some-root", stateDirectory });
+      yield* detachServe({
+        control,
+        root: rootPath("some-root"),
+        stateDirectory,
+      });
 
       const [text] = yield* recordTexts;
       expect(JSON.parse(text ?? "").expiresAtEpochMs).toBe(1_767_225_600_000);
@@ -164,13 +197,17 @@ describe("detachServe", () => {
       yield* detachServe({
         control,
         reachability: "relay-only",
-        root: "some-root",
+        root: rootPath("some-root"),
         stateDirectory,
         ttl: "1 hour",
       });
 
       expect(calls.requests).toEqual([
-        { reachability: "relay-only", root: "some-root", ttl: "1 hour" },
+        {
+          reachability: "relay-only",
+          root: rootPath("some-root"),
+          ttl: "1 hour",
+        },
       ]);
     })
   );
@@ -243,35 +280,35 @@ describe("detachServe", () => {
 
       yield* detachServe({
         control: first.control,
-        root: "root-a",
+        root: rootPath("root-a"),
         stateDirectory,
       });
       const startup = yield* detachServe({
         control: second.control,
-        root: "root-b",
+        root: rootPath("root-b"),
         stateDirectory,
       });
 
       expect(startup.pid).toBe(222);
-      expect(second.calls.spawns).toEqual(["root-b"]);
+      expect(second.calls.spawns).toEqual([rootPath("root-b")]);
       expect(yield* storedPids).toEqual([111, 222]);
     })
   );
 
   it.effect("refuses a second detach of an already-served root", () =>
     Effect.gen(function* () {
-      yield* seedDetachedServe("same-root", 77);
+      yield* seedDetachedServe(rootPath("same-root"), 77);
       const { calls, control } = makeControl({ alivePids: new Set([77]) });
 
       const error = yield* detachServe({
         control,
-        root: "same-root",
+        root: rootPath("same-root"),
         stateDirectory,
       }).pipe(Effect.flip);
 
       expect(error).toMatchObject({
         _tag: "DetachedServeError",
-        message: `A detached serve is already running for ${resolve("same-root")}. Stop it with dumbridge serve --stop ${resolve("same-root")}.`,
+        message: `A detached serve is already running for ${rootPath("same-root")}. Stop it with dumbridge serve --stop ${rootPath("same-root")}.`,
         reason: "already-running",
       });
       expect(calls.spawns).toEqual([]);
@@ -279,14 +316,63 @@ describe("detachServe", () => {
     })
   );
 
+  it.effect.skipIf(process.platform === "win32")(
+    "refuses a second detach of the same root reached through a symlink",
+    () =>
+      Effect.gen(function* () {
+        yield* Effect.promise(() => mkdir(rootPath("real-root")));
+        yield* Effect.promise(() =>
+          symlink(rootPath("real-root"), rootPath("alias-root"))
+        );
+        yield* seedDetachedServe(rootPath("real-root"), 77);
+        const { calls, control } = makeControl({ alivePids: new Set([77]) });
+
+        const error = yield* detachServe({
+          control,
+          root: rootPath("alias-root"),
+          stateDirectory,
+        }).pipe(Effect.flip);
+
+        expect(error).toMatchObject({
+          _tag: "DetachedServeError",
+          message: `A detached serve is already running for ${rootPath("real-root")}. Stop it with dumbridge serve --stop ${rootPath("real-root")}.`,
+          reason: "already-running",
+        });
+        expect(calls.spawns).toEqual([]);
+      })
+  );
+
+  it.effect("refuses a root already served by a pre-upgrade record", () =>
+    Effect.gen(function* () {
+      yield* writeLegacyRecord({
+        pid: 77,
+        root: rootPath("legacy-root"),
+        startedAtEpochMs: Date.now(),
+      });
+      const { calls, control } = makeControl({ alivePids: new Set([77]) });
+
+      const error = yield* detachServe({
+        control,
+        root: rootPath("legacy-root"),
+        stateDirectory,
+      }).pipe(Effect.flip);
+
+      expect(error).toMatchObject({
+        _tag: "DetachedServeError",
+        reason: "already-running",
+      });
+      expect(calls.spawns).toEqual([]);
+    })
+  );
+
   it.effect("replaces a record whose process is gone", () =>
     Effect.gen(function* () {
-      yield* seedDetachedServe("fresh-root", 77);
+      yield* seedDetachedServe(rootPath("fresh-root"), 77);
       const { calls, control } = makeControl({ spawnedPid: 88 });
 
       const startup = yield* detachServe({
         control,
-        root: "fresh-root",
+        root: rootPath("fresh-root"),
         stateDirectory,
       });
 
@@ -300,7 +386,7 @@ describe("detachServe", () => {
     "treats a live pid recorded before the current boot as recycled",
     () =>
       Effect.gen(function* () {
-        yield* seedDetachedServe("fresh-root", 77);
+        yield* seedDetachedServe(rootPath("fresh-root"), 77);
         const { calls, control } = makeControl({
           alivePids: new Set([77]),
           bootTimeMs: Date.now() + 86_400_000,
@@ -309,7 +395,7 @@ describe("detachServe", () => {
 
         const startup = yield* detachServe({
           control,
-          root: "fresh-root",
+          root: rootPath("fresh-root"),
           stateDirectory,
         });
 
@@ -343,7 +429,7 @@ describe("detachServe", () => {
 
       const error = yield* detachServe({
         control,
-        root: "some-root",
+        root: rootPath("some-root"),
         stateDirectory,
       }).pipe(Effect.flip);
 
@@ -351,7 +437,7 @@ describe("detachServe", () => {
         _tag: "DetachedServeError",
         reason: "already-running",
       });
-      expect(error.message).toContain(resolve("some-root"));
+      expect(error.message).toContain(rootPath("some-root"));
       expect(calls.terminated).toEqual([301]);
       expect(yield* storedPids).toEqual([300]);
     })
@@ -369,7 +455,7 @@ describe("detachServe", () => {
 
         const error = yield* detachServe({
           control,
-          root: "some-root",
+          root: rootPath("some-root"),
           stateDirectory: fileBlockingDirectory,
         }).pipe(Effect.flip);
 
@@ -387,24 +473,47 @@ describe("listDetachedServes", () => {
     "lists live serves by root and skips stale records and foreign files",
     () =>
       Effect.gen(function* () {
-        yield* seedDetachedServe("root-b", 222);
-        yield* seedDetachedServe("root-a", 111);
-        yield* seedDetachedServe("root-c", 333);
+        yield* seedDetachedServe(rootPath("root-b"), 222);
+        yield* seedDetachedServe(rootPath("root-a"), 111);
+        yield* seedDetachedServe(rootPath("root-c"), 333);
         yield* Effect.promise(() =>
-          writeFile(join(stateDirectory, "detached-serve.json"), "{}")
+          writeFile(join(stateDirectory, "notes.txt"), "not a record")
         );
         const { control } = makeControl({ alivePids: new Set([111, 222]) });
 
-        const records = yield* listDetachedServes({ control, stateDirectory });
+        const records: readonly DetachedServeRecord[] =
+          yield* listDetachedServes({ control, stateDirectory });
 
         expect(
           records.map((record) => ({ pid: record.pid, root: record.root }))
         ).toEqual([
-          { pid: 111, root: resolve("root-a") },
-          { pid: 222, root: resolve("root-b") },
+          { pid: 111, root: rootPath("root-a") },
+          { pid: 222, root: rootPath("root-b") },
         ]);
-        expect((yield* recordTexts).length).toBe(4);
+        expect((yield* recordTexts).length).toBe(3);
+        expect(
+          yield* Effect.promise(() =>
+            readFile(join(stateDirectory, "notes.txt"), "utf8")
+          )
+        ).toBe("not a record");
       })
+  );
+
+  it.effect("lists a live serve recorded before the upgrade", () =>
+    Effect.gen(function* () {
+      yield* writeLegacyRecord({
+        pid: 77,
+        root: rootPath("legacy-root"),
+        startedAtEpochMs: Date.now(),
+      });
+      const { control } = makeControl({ alivePids: new Set([77]) });
+
+      const records = yield* listDetachedServes({ control, stateDirectory });
+
+      expect(
+        records.map((record) => ({ pid: record.pid, root: record.root }))
+      ).toEqual([{ pid: 77, root: rootPath("legacy-root") }]);
+    })
   );
 
   it.effect("lists nothing when the state directory does not exist", () =>
@@ -440,7 +549,7 @@ describe("stopDetachedServe", () => {
 
   it.effect("removes an unreadable record without signaling anything", () =>
     Effect.gen(function* () {
-      yield* seedDetachedServe("/served", 77);
+      yield* seedDetachedServe(rootPath("served"), 77);
       yield* corruptStoredRecords;
       const { calls, control } = makeControl({});
 
@@ -454,7 +563,7 @@ describe("stopDetachedServe", () => {
 
   it.effect("removes a record whose process is gone", () =>
     Effect.gen(function* () {
-      yield* seedDetachedServe("/served", 77);
+      yield* seedDetachedServe(rootPath("served"), 77);
       const { calls, control } = makeControl({});
 
       const result = yield* stopDetachedServe({ control, stateDirectory });
@@ -467,7 +576,7 @@ describe("stopDetachedServe", () => {
 
   it.effect("does not signal a live pid recorded before the current boot", () =>
     Effect.gen(function* () {
-      yield* seedDetachedServe("/served", 77);
+      yield* seedDetachedServe(rootPath("served"), 77);
       const { calls, control } = makeControl({
         alivePids: new Set([77]),
         bootTimeMs: Date.now() + 86_400_000,
@@ -483,7 +592,7 @@ describe("stopDetachedServe", () => {
 
   it.effect("terminates a live detached serve and removes the record", () =>
     Effect.gen(function* () {
-      yield* seedDetachedServe("/served", 77);
+      yield* seedDetachedServe(rootPath("served"), 77);
       const { calls, control } = makeControl({ alivePids: new Set([77]) });
 
       const result = yield* stopDetachedServe({ control, stateDirectory });
@@ -496,15 +605,15 @@ describe("stopDetachedServe", () => {
 
   it.effect("stops only the serve for the given root", () =>
     Effect.gen(function* () {
-      yield* seedDetachedServe("root-a", 111);
-      yield* seedDetachedServe("root-b", 222);
+      yield* seedDetachedServe(rootPath("root-a"), 111);
+      yield* seedDetachedServe(rootPath("root-b"), 222);
       const { calls, control } = makeControl({
         alivePids: new Set([111, 222]),
       });
 
       const result = yield* stopDetachedServe({
         control,
-        root: "root-a",
+        root: rootPath("root-a"),
         stateDirectory,
       });
 
@@ -514,20 +623,60 @@ describe("stopDetachedServe", () => {
     })
   );
 
+  it.effect.skipIf(process.platform === "win32")(
+    "stops a serve selected through a symlink to its root",
+    () =>
+      Effect.gen(function* () {
+        yield* Effect.promise(() => mkdir(rootPath("real-root")));
+        yield* Effect.promise(() =>
+          symlink(rootPath("real-root"), rootPath("alias-root"))
+        );
+        yield* seedDetachedServe(rootPath("real-root"), 77);
+        const { calls, control } = makeControl({ alivePids: new Set([77]) });
+
+        const result = yield* stopDetachedServe({
+          control,
+          root: rootPath("alias-root"),
+          stateDirectory,
+        });
+
+        expect(result).toEqual({ pid: 77, type: "stopped" });
+        expect(calls.terminated).toEqual([77]);
+        expect(yield* recordTexts).toEqual([]);
+      })
+  );
+
+  it.effect("stops a live serve recorded before the upgrade", () =>
+    Effect.gen(function* () {
+      yield* writeLegacyRecord({
+        pid: 77,
+        root: rootPath("legacy-root"),
+        startedAtEpochMs: Date.now(),
+      });
+      const { calls, control } = makeControl({ alivePids: new Set([77]) });
+
+      const result = yield* stopDetachedServe({ control, stateDirectory });
+
+      expect(result).toEqual({ pid: 77, type: "stopped" });
+      expect(calls.terminated).toEqual([77]);
+      expect(yield* recordTexts).toEqual([]);
+    })
+  );
+
   it.effect("fails when the given root has no detached serve", () =>
     Effect.gen(function* () {
-      yield* seedDetachedServe("root-a", 111);
+      yield* seedDetachedServe(rootPath("root-a"), 111);
       const { calls, control } = makeControl({ alivePids: new Set([111]) });
 
       const error = yield* stopDetachedServe({
         control,
-        root: "root-b",
+        root: rootPath("root-b"),
         stateDirectory,
       }).pipe(Effect.flip);
 
       expect(error).toMatchObject({
         _tag: "DetachedServeError",
-        message: `No detached serve is running for ${resolve("root-b")}.`,
+        message: `No detached serve is running for ${rootPath("root-b")}.`,
         reason: "not-running",
       });
       expect(calls.terminated).toEqual([]);
@@ -537,8 +686,8 @@ describe("stopDetachedServe", () => {
 
   it.effect("refuses an unselected stop while several serves run", () =>
     Effect.gen(function* () {
-      yield* seedDetachedServe("root-a", 111);
-      yield* seedDetachedServe("root-b", 222);
+      yield* seedDetachedServe(rootPath("root-a"), 111);
+      yield* seedDetachedServe(rootPath("root-b"), 222);
       const { calls, control } = makeControl({
         alivePids: new Set([111, 222]),
       });
@@ -549,7 +698,7 @@ describe("stopDetachedServe", () => {
 
       expect(error).toMatchObject({
         _tag: "DetachedServeError",
-        message: `Multiple detached serves are running (${resolve("root-a")}, ${resolve("root-b")}). Stop one with dumbridge serve --stop <root>.`,
+        message: `Multiple detached serves are running (${rootPath("root-a")}, ${rootPath("root-b")}). Stop one with dumbridge serve --stop <root>.`,
         reason: "multiple-running",
       });
       expect(calls.terminated).toEqual([]);
@@ -561,8 +710,8 @@ describe("stopDetachedServe", () => {
     "reclaims stale records and stops the one remaining live serve",
     () =>
       Effect.gen(function* () {
-        yield* seedDetachedServe("root-a", 111);
-        yield* seedDetachedServe("root-b", 222);
+        yield* seedDetachedServe(rootPath("root-a"), 111);
+        yield* seedDetachedServe(rootPath("root-b"), 222);
         const { calls, control } = makeControl({ alivePids: new Set([222]) });
 
         const result = yield* stopDetachedServe({ control, stateDirectory });
@@ -575,7 +724,7 @@ describe("stopDetachedServe", () => {
 
   it.effect("does not remove a record replaced while stopping", () =>
     Effect.gen(function* () {
-      yield* seedDetachedServe("/served", 77);
+      yield* seedDetachedServe(rootPath("served"), 77);
       const replacer = makeControl({ spawnedPid: 400 });
       const alive = new Set([77]);
       const calls = { terminated: [] as number[] };
@@ -590,7 +739,7 @@ describe("stopDetachedServe", () => {
             alive.delete(pid);
             yield* detachServe({
               control: replacer.control,
-              root: "/served",
+              root: rootPath("served"),
               stateDirectory,
             });
           }),
@@ -606,7 +755,7 @@ describe("stopDetachedServe", () => {
 
   it.effect("keeps the record and fails when the process does not exit", () =>
     Effect.gen(function* () {
-      yield* seedDetachedServe("/served", 77);
+      yield* seedDetachedServe(rootPath("served"), 77);
       const { calls, control, firstTermination } = makeControl({
         alivePids: new Set([77]),
         terminateKills: false,
@@ -633,7 +782,7 @@ describe("stopDetachedServe", () => {
 
   it.effect("keeps the record when the process cannot be signaled", () =>
     Effect.gen(function* () {
-      yield* seedDetachedServe("/served", 77);
+      yield* seedDetachedServe(rootPath("served"), 77);
       const { calls, control } = makeControl({
         alivePids: new Set([77]),
         terminateFails: true,

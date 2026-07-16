@@ -20,12 +20,18 @@ import {
 } from "node:path";
 import { type Duration, Effect, Result, Schema } from "effect";
 
-// One record file per served root: the name hashes the resolved root so
-// serves of different roots coexist while a duplicate root collides on the
-// same exclusive-create target.
+// One record file per served root: the name hashes the canonical root
+// (callers canonicalize before keying) so serves of different roots coexist
+// while a duplicate root collides on the same exclusive-create target.
 const recordFileName = (root: string) =>
-  `detached-serve-${createHash("sha256").update(resolve(root)).digest("hex")}.json`;
+  `detached-serve-${createHash("sha256").update(root).digest("hex")}.json`;
 const recordFilePattern = /^detached-serve-[0-9a-f]{64}\.json$/;
+// Releases before records were keyed by root stored their single detached
+// serve here; a record under this name is still honored until it is stopped
+// or reclaimed, but never written.
+const legacyRecordFileName = "detached-serve.json";
+const isRecordFileName = (name: string) =>
+  recordFilePattern.test(name) || name === legacyRecordFileName;
 const startupDeadlineMs = 30_000;
 const terminationDeadline: Duration.Input = "10 seconds";
 const terminationPollInterval: Duration.Input = "50 millis";
@@ -181,7 +187,7 @@ const readRecordEntries = (
       }
       const entries = await Promise.all(
         names
-          .filter((name) => recordFilePattern.test(name))
+          .filter(isRecordFileName)
           .sort(byCodeUnit)
           .map(async (fileName) => ({
             fileName,
@@ -192,6 +198,27 @@ const readRecordEntries = (
       // concurrent stop reclaims it; a vanished record is simply not listed.
       return entries.filter(isPresent);
     },
+  });
+
+// The entries that may hold the given canonical root's serve: its hashed
+// record file, plus the fixed-name file a pre-upgrade release wrote when its
+// record names the same root.
+const recordEntriesForRoot = (
+  stateDirectory: string,
+  root: string
+): Effect.Effect<readonly StoredRecordEntry[], DetachedServeError> =>
+  Effect.gen(function* () {
+    const fileName = recordFileName(root);
+    const keyed = yield* readRecord(stateDirectory, fileName);
+    const legacy = yield* readRecord(stateDirectory, legacyRecordFileName);
+    const entries: StoredRecordEntry[] = [];
+    if (keyed.type !== "absent") {
+      entries.push({ fileName, stored: keyed });
+    }
+    if (legacy.type === "record" && legacy.record.root === root) {
+      entries.push({ fileName: legacyRecordFileName, stored: legacy });
+    }
+    return entries;
   });
 
 class RecordTakenError {
@@ -295,13 +322,19 @@ const canonicalizeExisting = async (path: string) => {
   }
 };
 
+// The record key must match however the root is spelled — via a symlink, a
+// relative path, or its real path — because the serve process itself
+// canonicalizes the root it shares.
+const canonicalRoot = (root: string) =>
+  Effect.promise(() => canonicalizeExisting(root));
+
 const stateDirectoryInsideRoot = (root: string, stateDirectory: string) =>
   Effect.promise(async () => {
-    const [canonicalRoot, canonicalState] = await Promise.all([
+    const [rootReal, stateReal] = await Promise.all([
       canonicalizeExisting(root),
       canonicalizeExisting(stateDirectory),
     ]);
-    const separation = relative(canonicalRoot, canonicalState);
+    const separation = relative(rootReal, stateReal);
     const escapesRoot =
       separation === ".." ||
       separation.startsWith(`..${sep}`) ||
@@ -326,16 +359,18 @@ export const detachServe = Effect.fn("DetachedServe.detach")(
           "The detached serve record would land inside the served root. Set DUMBRIDGE_STATE_DIR to a directory outside it."
         );
       }
-      const root = resolve(options.root);
-      const fileName = recordFileName(root);
-      const stored = yield* readRecord(options.stateDirectory, fileName);
-      if (stored.type === "record") {
-        const live = yield* recordIsLive(stored.record, options.control);
-        if (live) {
+      const root = yield* canonicalRoot(options.root);
+      const existing = yield* recordEntriesForRoot(
+        options.stateDirectory,
+        root
+      );
+      for (const { fileName, stored } of existing) {
+        if (
+          stored.type === "record" &&
+          (yield* recordIsLive(stored.record, options.control))
+        ) {
           return yield* alreadyServingError(root);
         }
-      }
-      if (stored.type !== "absent") {
         yield* removeRecordIfUnchanged(
           options.stateDirectory,
           fileName,
@@ -390,19 +425,6 @@ const waitForExit = (pid: number, control: ServeProcessControl) => {
   );
 };
 
-const recordEntriesForStop = (
-  stateDirectory: string,
-  root: string | undefined
-): Effect.Effect<readonly StoredRecordEntry[], DetachedServeError> => {
-  if (root === undefined) {
-    return readRecordEntries(stateDirectory);
-  }
-  const fileName = recordFileName(root);
-  return Effect.map(readRecord(stateDirectory, fileName), (stored) =>
-    stored.type === "absent" ? [] : [{ fileName, stored }]
-  );
-};
-
 interface LiveRecordEntry {
   readonly fileName: string;
   readonly record: DetachedServeRecord;
@@ -416,16 +438,20 @@ export const stopDetachedServe = Effect.fn("DetachedServe.stop")(
     readonly stateDirectory: string;
   }): Effect.Effect<StopDetachedServeResult, DetachedServeError> =>
     Effect.gen(function* () {
-      const entries = yield* recordEntriesForStop(
-        options.stateDirectory,
-        options.root
-      );
+      const root =
+        options.root === undefined
+          ? undefined
+          : yield* canonicalRoot(options.root);
+      const entries =
+        root === undefined
+          ? yield* readRecordEntries(options.stateDirectory)
+          : yield* recordEntriesForRoot(options.stateDirectory, root);
       if (entries.length === 0) {
         return yield* detachedServeError(
           "not-running",
-          options.root === undefined
+          root === undefined
             ? "No detached serve is running."
-            : `No detached serve is running for ${resolve(options.root)}.`
+            : `No detached serve is running for ${root}.`
         );
       }
 
