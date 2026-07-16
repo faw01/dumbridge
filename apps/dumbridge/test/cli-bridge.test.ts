@@ -8,6 +8,7 @@ import {
   mintCapability,
   parseBridgeKey,
 } from "@dumbridge/bridge-key";
+import { EndpointAddr, EndpointId, EndpointTicket } from "@number0/iroh";
 import { Result } from "effect";
 
 const cli = fileURLToPath(new URL("../src/cli.ts", import.meta.url));
@@ -234,6 +235,43 @@ describe("dumbridge CLI bridge", () => {
       server.kill();
       await server.exited;
     }
+  }, 40_000);
+
+  test("reports an unreachable direct-only bridge by cause with the proxy noted", async () => {
+    // No serve runs here: the key's locator names a TEST-NET-1 (RFC 5737)
+    // address that can never answer, and carries no relay to fall back to.
+    const id = EndpointId.fromBytes(new Array<number>(32).fill(1));
+    const unreachable = new EndpointAddr(id, null, ["192.0.2.1:1"]);
+    const key = encodeBridgeKey({
+      capability: mintCapability(),
+      expiresAt: Number.MAX_SAFE_INTEGER,
+      locator: EndpointTicket.fromAddr(unreachable).toString(),
+      transport: "iroh",
+    });
+    if (Result.isFailure(key)) {
+      throw key.failure;
+    }
+    const environment = cleanEnvironment({
+      DUMBRIDGE_KEY: key.success,
+      HTTPS_PROXY: "http://user:proxy-secret@proxy.example:3128",
+    });
+
+    const run = await runCli(
+      ["run", "--log-level", "debug", "true"],
+      environment
+    );
+    expect(run.exitCode).toBe(1);
+    expect(run.stdout).toBe("");
+    // The failure names its cause, and because the unusable-proxy fallback
+    // preceded a dial that then actually failed, the proxy is named as the
+    // likely cause — exactly the #67-consistent ordering.
+    expect(run.stderr).toContain(
+      "dumbridge: No viable network path to the bridge: the direct connection failed (this network may block UDP) and the bridge locator allows no relay fallback. This environment sets a proxy that the installed iroh binding cannot use, so the connection was attempted without it; if this network allows egress only through that proxy, no direct or relay path can succeed.\n"
+    );
+    expect(run.stderr).toContain("bridge dial: failed");
+    expect(run.stderr).not.toContain(key.success);
+    expect(run.stderr).not.toContain("proxy-secret");
+    expect(run.stderr).not.toContain("proxy.example");
   }, 40_000);
 
   test("logs the dial sequence at debug level without leaking secrets", async () => {

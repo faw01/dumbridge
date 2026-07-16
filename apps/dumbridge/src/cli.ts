@@ -143,7 +143,9 @@ const withProxyConnectCause =
     effect.pipe(
       Effect.mapError((error) =>
         proxyFallback && isConnectFailure(error)
-          ? new CliError({ message: connectFailureMessage(error, true) })
+          ? new CliError({
+              message: connectFailureMessage(error, proxyFallback),
+            })
           : error
       )
     );
