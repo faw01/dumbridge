@@ -45,8 +45,12 @@ const partitionHosts = (
     { concurrency: "unbounded" }
   ).pipe(
     Effect.map((results) => ({
-      reached: results.filter((result) => result.reached).map((r) => r.host),
-      unreached: results.filter((result) => !result.reached).map((r) => r.host),
+      reached: results
+        .filter((result) => result.reached)
+        .map((result) => result.host),
+      unreached: results
+        .filter((result) => !result.reached)
+        .map((result) => result.host),
     }))
   );
 
