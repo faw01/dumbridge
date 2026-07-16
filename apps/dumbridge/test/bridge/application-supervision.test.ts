@@ -1149,7 +1149,7 @@ describe("bridge application supervision", () => {
         // failing fast beats a second slow attempt.
         new BridgeDirectConnectError({
           message:
-            "Could not establish a direct connection to the bridge, and the bridge locator allows no relay fallback.",
+            "No viable network path to the bridge: the direct connection failed (this network may block UDP) and the bridge locator allows no relay fallback.",
         }),
       ] as const;
 
