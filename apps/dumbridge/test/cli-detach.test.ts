@@ -169,6 +169,44 @@ describe("dumbridge serve flags", () => {
     });
   });
 
+  test("rejects --status combined with any other serve request", async () => {
+    const [withDetach, withStop, withRoot, withTtl, withPath] =
+      await Promise.all([
+        runCli(["serve", "--status", "--detach"]),
+        runCli(["serve", "--status", "--stop"]),
+        runCli(["serve", "--status", servedRoot]),
+        runCli(["serve", "--status", "--ttl", "1 hour"]),
+        runCli(["serve", "--status", "--relay-only"]),
+      ]);
+
+    expect(withDetach).toEqual({
+      exitCode: 1,
+      stderr: "dumbridge: Use either --status or --detach, not both.\n",
+      stdout: "",
+    });
+    expect(withStop).toEqual({
+      exitCode: 1,
+      stderr: "dumbridge: Use either --status or --stop, not both.\n",
+      stdout: "",
+    });
+    expect(withRoot).toEqual({
+      exitCode: 1,
+      stderr: "dumbridge: serve --status does not take a root.\n",
+      stdout: "",
+    });
+    expect(withTtl).toEqual({
+      exitCode: 1,
+      stderr: "dumbridge: serve --status does not take a --ttl.\n",
+      stdout: "",
+    });
+    expect(withPath).toEqual({
+      exitCode: 1,
+      stderr:
+        "dumbridge: serve --status does not take --direct-only or --relay-only.\n",
+      stdout: "",
+    });
+  });
+
   test("stopping without a detached serve fails", async () => {
     const [bare, withRoot] = await Promise.all([
       runCli(["serve", "--stop"]),

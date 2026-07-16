@@ -211,6 +211,7 @@ interface ServeInvocation {
   readonly directOnly: boolean;
   readonly relayOnly: boolean;
   readonly root: Option.Option<string>;
+  readonly status: boolean;
   readonly stop: boolean;
   readonly ttl: Option.Option<string>;
 }
@@ -221,20 +222,36 @@ const serveInvocationError = (flags: ServeInvocation): CliError | undefined => {
       message: "Use either --detach or --stop, not both.",
     });
   }
+  if (flags.status && flags.detach) {
+    return new CliError({
+      message: "Use either --status or --detach, not both.",
+    });
+  }
+  if (flags.status && flags.stop) {
+    return new CliError({
+      message: "Use either --status or --stop, not both.",
+    });
+  }
   if (flags.directOnly && flags.relayOnly) {
     return new CliError({
       message: "Use either --direct-only or --relay-only, not both.",
     });
   }
-  if (!flags.stop) {
+  if (flags.status && Option.isSome(flags.root)) {
+    return new CliError({ message: "serve --status does not take a root." });
+  }
+  if (!(flags.stop || flags.status)) {
     return;
   }
+  const selector = flags.stop ? "--stop" : "--status";
   if (Option.isSome(flags.ttl)) {
-    return new CliError({ message: "serve --stop does not take a --ttl." });
+    return new CliError({
+      message: `serve ${selector} does not take a --ttl.`,
+    });
   }
   if (flags.directOnly || flags.relayOnly) {
     return new CliError({
-      message: "serve --stop does not take --direct-only or --relay-only.",
+      message: `serve ${selector} does not take --direct-only or --relay-only.`,
     });
   }
 };
@@ -267,6 +284,11 @@ const serve = Command.make(
       )
     ),
     root: Argument.string("root").pipe(Argument.optional),
+    status: Flag.boolean("status").pipe(
+      Flag.withDescription(
+        "List each active detached serve with its root, pid, start time, and key expiry."
+      )
+    ),
     stop: Flag.boolean("stop").pipe(
       Flag.withDescription(
         "Stop a detached server, revoking its key. Pass its root when several are running."
