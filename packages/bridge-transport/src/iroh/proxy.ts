@@ -40,9 +40,10 @@ const proxyEnvironmentKeys = [
   "all_proxy",
 ] as const;
 
-export const hasProxyEnvironment = (
-  environment: ProxyEnvironment = process.env
-) => proxyEnvironmentKeys.some((key) => environment[key] !== undefined);
+// Truthiness, not presence: the client transport selection ignores empty
+// proxy variables (common placeholder exports), so the diagnosis must too.
+export const hasProxyEnvironment = (environment: ProxyEnvironment) =>
+  proxyEnvironmentKeys.some((key) => Boolean(environment[key]));
 
 const proxyUrlFromEnvironment = (
   environment: ProxyEnvironment

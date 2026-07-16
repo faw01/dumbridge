@@ -408,7 +408,9 @@ export const runDoctor = (
 
 const doctor = Command.make("doctor", {}, () =>
   Effect.gen(function* () {
-    const result = yield* runDoctor(makeIrohTransport());
+    const result = yield* runDoctor(
+      makeIrohTransport({ environment: process.env })
+    );
     yield* write(process.stdout, result.report);
     process.exitCode = result.exitCode;
   })

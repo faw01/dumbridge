@@ -218,6 +218,41 @@ describe("Iroh environment diagnosis", () => {
       })
   );
 
+  // Placeholder exports such as HTTPS_PROXY='' disable proxy mode in the
+  // client transport selection, so the diagnosis must not report them as a
+  // configured proxy.
+  it.effect("ignores empty proxy environment variables", () =>
+    Effect.gen(function* () {
+      const checks = yield* diagnose({}, { ALL_PROXY: "", HTTPS_PROXY: "" });
+
+      expect(checks[3]).toEqual({
+        detail: "No HTTP(S) proxy is configured in the environment.",
+        name: "proxy-capability",
+        status: "ok",
+      });
+    })
+  );
+
+  it.effect("keeps a builder construction crash as check data", () =>
+    Effect.gen(function* () {
+      const checks = yield* diagnose(
+        {
+          makeEndpointBuilder: () => {
+            throw new Error("native binding failed to load");
+          },
+        },
+        { HTTPS_PROXY: "http://proxy.example:8080" }
+      );
+
+      expect(checks[3]).toEqual({
+        detail:
+          "The installed @number0/iroh binding could not construct an endpoint builder; run and pull cannot open a connection.",
+        name: "proxy-capability",
+        status: "fail",
+      });
+    })
+  );
+
   it.effect("never leaks proxy credentials into any check detail", () =>
     Effect.gen(function* () {
       const secret = "proxy-secret-credential";

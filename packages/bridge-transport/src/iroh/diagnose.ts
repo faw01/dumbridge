@@ -20,8 +20,10 @@ export interface IrohDiagnosticProbes {
   readonly sendUdpProbe: () => Promise<void>;
 }
 
+// The environment is a value threaded in from the CLI shell; this module
+// never reads the ambient process environment itself.
 export interface IrohDiagnosisRequest {
-  readonly environment?: ProxyEnvironment;
+  readonly environment: ProxyEnvironment;
   readonly probes: IrohDiagnosticProbes;
   readonly relayHosts: readonly string[];
 }
@@ -145,7 +147,7 @@ const relayCheck = (request: {
   );
 
 const proxyCheck = (request: {
-  readonly environment: ProxyEnvironment | undefined;
+  readonly environment: ProxyEnvironment;
   readonly probes: IrohDiagnosticProbes;
 }): Effect.Effect<DiagnosisCheck> => {
   const name = "proxy-capability";
@@ -159,43 +161,59 @@ const proxyCheck = (request: {
   // The capability probe is the existing proxy configuration path run
   // against a throwaway endpoint builder; its typed failures already carry
   // self-descriptive, credential-free messages.
-  return configureIrohProxy(
-    request.probes.makeEndpointBuilder(),
-    { _tag: "FromEnvironment" },
-    request.environment
-  ).pipe(
-    Effect.as({
-      detail:
-        "An HTTP(S) proxy is configured and the installed iroh binding can use it.",
-      name,
-      status: "ok" as const,
-    }),
-    // The statuses mirror what run and pull actually do. A binding without
-    // proxy support makes them fall back to a direct connection ("warn": the
-    // udp-egress and relay-reachability checks cover that path). A capable
-    // binding commits to the environment's proxy, so proxy variables holding
-    // no usable URL block the dial outright ("fail").
-    Effect.catchTags({
-      BridgeProxyConfigurationError: (error) =>
-        Effect.succeed({
-          detail: error.message,
+  return Effect.try({
+    catch: () => undefined,
+    try: () => request.probes.makeEndpointBuilder(),
+  }).pipe(
+    Effect.flatMap((builder) =>
+      configureIrohProxy(
+        builder,
+        { _tag: "FromEnvironment" },
+        request.environment
+      ).pipe(
+        Effect.as({
+          detail:
+            "An HTTP(S) proxy is configured and the installed iroh binding can use it.",
           name,
-          status: "fail" as const,
+          status: "ok" as const,
         }),
-      BridgeProxyUnsupportedError: (error) =>
-        Effect.succeed({
-          detail: `${error.message} run and pull fall back to a direct connection.`,
-          name,
-          status: "warn" as const,
-        }),
-    })
+        // The statuses mirror what run and pull actually do. A binding
+        // without proxy support makes them fall back to a direct connection
+        // ("warn": the udp-egress and relay-reachability checks cover that
+        // path). A capable binding commits to the environment's proxy, so
+        // proxy variables holding no usable URL block the dial ("fail").
+        Effect.catchTags({
+          BridgeProxyConfigurationError: (error) =>
+            Effect.succeed({
+              detail: error.message,
+              name,
+              status: "fail" as const,
+            }),
+          BridgeProxyUnsupportedError: (error) =>
+            Effect.succeed({
+              detail: `${error.message} run and pull fall back to a direct connection.`,
+              name,
+              status: "warn" as const,
+            }),
+        })
+      )
+    ),
+    // A binding too broken to construct a builder cannot open any
+    // connection; the failure stays check data instead of aborting the
+    // report before it prints.
+    Effect.catch(() =>
+      Effect.succeed({
+        detail:
+          "The installed @number0/iroh binding could not construct an endpoint builder; run and pull cannot open a connection.",
+        name,
+        status: "fail" as const,
+      })
+    )
   );
 };
 
-// An omitted environment falls back to the ambient proxy environment the
-// existing proxy configuration path already reads. The proxy check runs
-// first (it touches no network) because the relay check's proxy escape
-// hatch only applies when the proxy is actually usable.
+// The proxy check runs first (it touches no network) because the relay
+// check's proxy escape hatch only applies when the proxy is actually usable.
 export const diagnoseIrohEnvironment = (
   request: IrohDiagnosisRequest
 ): Effect.Effect<readonly DiagnosisCheck[]> =>
@@ -331,11 +349,13 @@ const defaultRelayHosts = (): readonly string[] =>
     .urls()
     .map((url) => new URL(url).hostname.replace(trailingDot, ""));
 
-export const diagnoseHostIrohEnvironment: Effect.Effect<
-  readonly DiagnosisCheck[]
-> = Effect.suspend(() =>
-  diagnoseIrohEnvironment({
-    probes: hostDiagnosticProbes,
-    relayHosts: defaultRelayHosts(),
-  })
-);
+export const diagnoseHostIrohEnvironment = (
+  environment: ProxyEnvironment
+): Effect.Effect<readonly DiagnosisCheck[]> =>
+  Effect.suspend(() =>
+    diagnoseIrohEnvironment({
+      environment,
+      probes: hostDiagnosticProbes,
+      relayHosts: defaultRelayHosts(),
+    })
+  );
