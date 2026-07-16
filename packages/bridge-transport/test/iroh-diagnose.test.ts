@@ -133,6 +133,28 @@ describe("Iroh environment diagnosis", () => {
     })
   );
 
+  // The escape hatch requires a proxy the binding can actually route
+  // through; a proxy the client must fall back from leaves the direct 443
+  // path as the only relay route, so its blockage stays a failure.
+  it.effect("keeps blocked 443 a failure when the proxy is unusable", () =>
+    Effect.gen(function* () {
+      const [, , relay] = yield* diagnose(
+        {
+          makeEndpointBuilder: () => ({}),
+          openTcp: () => Promise.reject(new Error("connection refused")),
+        },
+        { HTTPS_PROXY: "http://proxy.example:8080" }
+      );
+
+      expect(relay).toEqual({
+        detail:
+          "No iroh relay host accepted a TCP connection on port 443: relay-a.example, relay-b.example.",
+        name: "relay-reachability",
+        status: "fail",
+      });
+    })
+  );
+
   it.effect(
     "reports a usable proxy through the existing capability check",
     () =>
@@ -157,7 +179,10 @@ describe("Iroh environment diagnosis", () => {
       })
   );
 
-  it.effect("fails proxy-capability when the binding lacks proxy support", () =>
+  // A binding without proxy support no longer blocks the client: run and
+  // pull fall back to a direct connection, so the check degrades to warn
+  // and the direct-path checks carry the verdict.
+  it.effect("warns on proxy-capability when the binding lacks support", () =>
     Effect.gen(function* () {
       const checks = yield* diagnose(
         { makeEndpointBuilder: () => ({}) },
@@ -166,9 +191,9 @@ describe("Iroh environment diagnosis", () => {
 
       expect(checks[3]).toEqual({
         detail:
-          "The installed @number0/iroh binding does not expose proxy configuration.",
+          "The installed @number0/iroh binding does not expose proxy configuration. run and pull fall back to a direct connection.",
         name: "proxy-capability",
-        status: "fail",
+        status: "warn",
       });
     })
   );

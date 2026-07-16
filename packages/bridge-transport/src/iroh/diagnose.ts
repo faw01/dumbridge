@@ -101,7 +101,7 @@ const relayPort = 443;
 
 const relayCheck = (request: {
   readonly probes: IrohDiagnosticProbes;
-  readonly proxyConfigured: boolean;
+  readonly proxyUsable: boolean;
   readonly relayHosts: readonly string[];
 }): Effect.Effect<DiagnosisCheck> =>
   partitionHosts(request.relayHosts, (host) =>
@@ -125,10 +125,11 @@ const relayCheck = (request: {
         };
       }
       // In a proxy-only sandbox a direct TCP connection is expected to be
-      // refused; relay bytes can still travel through the HTTP(S) proxy.
-      // Probing through the proxy would mean speaking HTTP CONNECT here — a
-      // parallel probing stack — so the detail names the untested path.
-      if (request.proxyConfigured) {
+      // refused; relay bytes can still travel through the HTTP(S) proxy, but
+      // only when the installed binding can actually use that proxy. Probing
+      // through the proxy would mean speaking HTTP CONNECT here — a parallel
+      // probing stack — so the detail names the untested path instead.
+      if (request.proxyUsable) {
         return {
           detail: `No iroh relay host accepted a direct TCP connection on port ${relayPort}; with an HTTP(S) proxy configured, relay traffic must travel through the proxy, a path this probe does not test.`,
           name,
@@ -169,9 +170,11 @@ const proxyCheck = (request: {
       name,
       status: "ok" as const,
     }),
-    // Both failures are "fail", not "warn": a client that sees any proxy
-    // variable configures the proxy from the environment before connecting,
-    // so an unusable proxy configuration blocks run and pull outright.
+    // The statuses mirror what run and pull actually do. A binding without
+    // proxy support makes them fall back to a direct connection ("warn": the
+    // udp-egress and relay-reachability checks cover that path). A capable
+    // binding commits to the environment's proxy, so proxy variables holding
+    // no usable URL block the dial outright ("fail").
     Effect.catchTags({
       BridgeProxyConfigurationError: (error) =>
         Effect.succeed({
@@ -181,37 +184,42 @@ const proxyCheck = (request: {
         }),
       BridgeProxyUnsupportedError: (error) =>
         Effect.succeed({
-          detail: error.message,
+          detail: `${error.message} run and pull fall back to a direct connection.`,
           name,
-          status: "fail" as const,
+          status: "warn" as const,
         }),
     })
   );
 };
 
 // An omitted environment falls back to the ambient proxy environment the
-// existing proxy configuration path already reads.
+// existing proxy configuration path already reads. The proxy check runs
+// first (it touches no network) because the relay check's proxy escape
+// hatch only applies when the proxy is actually usable.
 export const diagnoseIrohEnvironment = (
   request: IrohDiagnosisRequest
 ): Effect.Effect<readonly DiagnosisCheck[]> =>
-  Effect.suspend(() =>
-    Effect.all(
+  Effect.gen(function* () {
+    const proxy = yield* proxyCheck({
+      environment: request.environment,
+      probes: request.probes,
+    });
+    const proxyUsable =
+      hasProxyEnvironment(request.environment) && proxy.status === "ok";
+    const networkChecks = yield* Effect.all(
       [
         dnsCheck(request),
         udpCheck(request.probes),
         relayCheck({
           probes: request.probes,
-          proxyConfigured: hasProxyEnvironment(request.environment),
+          proxyUsable,
           relayHosts: request.relayHosts,
-        }),
-        proxyCheck({
-          environment: request.environment,
-          probes: request.probes,
         }),
       ],
       { concurrency: "unbounded" }
-    )
-  );
+    );
+    return [...networkChecks, proxy];
+  });
 
 const probeTimeoutMilliseconds = 4000;
 const udpReplyTimeoutMilliseconds = 2000;
