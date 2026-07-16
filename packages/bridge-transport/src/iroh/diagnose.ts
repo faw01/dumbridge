@@ -56,6 +56,12 @@ const partitionHosts = (
     }))
   );
 
+// An empty host list means the binding exposed no default relay
+// configuration (or reading it crashed); reporting "all 0 ok" would let
+// doctor exit clean without probing anything.
+const emptyRelayHostsDetail =
+  "No iroh relay hosts could be read from the installed binding's default relay configuration.";
+
 const dnsCheck = (request: {
   readonly probes: IrohDiagnosticProbes;
   readonly relayHosts: readonly string[];
@@ -64,6 +70,13 @@ const dnsCheck = (request: {
     Effect.map(({ reached, unreached }) => {
       const name = "dns-resolution";
       const total = request.relayHosts.length;
+      if (total === 0) {
+        return {
+          detail: emptyRelayHostsDetail,
+          name,
+          status: "fail" as const,
+        };
+      }
       if (unreached.length === 0) {
         return {
           detail: `Resolved all ${total} iroh relay hosts: ${reached.join(", ")}.`,
@@ -92,7 +105,7 @@ const udpCheck = (
   succeeds(probes.sendUdpProbe).pipe(
     Effect.map((answered) => ({
       detail: answered
-        ? "A UDP datagram to a public DNS resolver was answered; direct peer-to-peer connections are possible."
+        ? "A UDP datagram to a public DNS resolver was answered; UDP egress and a return path are available, so direct peer-to-peer connections may be possible."
         : "No reply to a UDP datagram sent to a public DNS resolver; UDP egress looks blocked, so sessions will depend on the relay path.",
       name: "udp-egress",
       status: answered ? ("ok" as const) : ("warn" as const),
@@ -112,6 +125,13 @@ const relayCheck = (request: {
     Effect.map(({ reached, unreached }) => {
       const name = "relay-reachability";
       const total = request.relayHosts.length;
+      if (total === 0) {
+        return {
+          detail: emptyRelayHostsDetail,
+          name,
+          status: "fail" as const,
+        };
+      }
       if (unreached.length === 0) {
         return {
           detail: `All ${total} iroh relay hosts accepted a TCP connection on port ${relayPort}.`,
@@ -352,10 +372,19 @@ const defaultRelayHosts = (): readonly string[] =>
 export const diagnoseHostIrohEnvironment = (
   environment: ProxyEnvironment
 ): Effect.Effect<readonly DiagnosisCheck[]> =>
-  Effect.suspend(() =>
-    diagnoseIrohEnvironment({
+  Effect.suspend(() => {
+    // A binding that cannot yield its relay map must still produce a
+    // report: the empty list becomes failing dns and relay checks instead
+    // of a crashed effect that prints nothing.
+    let relayHosts: readonly string[];
+    try {
+      relayHosts = defaultRelayHosts();
+    } catch {
+      relayHosts = [];
+    }
+    return diagnoseIrohEnvironment({
       environment,
       probes: hostDiagnosticProbes,
-      relayHosts: defaultRelayHosts(),
-    })
-  );
+      relayHosts,
+    });
+  });

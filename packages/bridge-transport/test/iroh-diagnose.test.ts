@@ -38,7 +38,7 @@ describe("Iroh environment diagnosis", () => {
         },
         {
           detail:
-            "A UDP datagram to a public DNS resolver was answered; direct peer-to-peer connections are possible.",
+            "A UDP datagram to a public DNS resolver was answered; UDP egress and a return path are available, so direct peer-to-peer connections may be possible.",
           name: "udp-egress",
           status: "ok",
         },
@@ -54,6 +54,31 @@ describe("Iroh environment diagnosis", () => {
           status: "ok",
         },
       ]);
+    })
+  );
+
+  // A binding that yields no relay hosts leaves nothing to probe; both
+  // host-based checks must fail rather than report an "all 0 ok" pass.
+  it.effect("fails the host checks when no relay hosts are configured", () =>
+    Effect.gen(function* () {
+      const checks = yield* diagnoseIrohEnvironment({
+        environment: {},
+        probes: healthyProbes,
+        relayHosts: [],
+      });
+
+      expect(checks[0]).toEqual({
+        detail:
+          "No iroh relay hosts could be read from the installed binding's default relay configuration.",
+        name: "dns-resolution",
+        status: "fail",
+      });
+      expect(checks[2]).toEqual({
+        detail:
+          "No iroh relay hosts could be read from the installed binding's default relay configuration.",
+        name: "relay-reachability",
+        status: "fail",
+      });
     })
   );
 
