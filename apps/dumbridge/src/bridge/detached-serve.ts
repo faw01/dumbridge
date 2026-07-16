@@ -216,10 +216,13 @@ const recordEntriesForRoot = (
       entries.push({ fileName, stored: keyed });
     }
     if (
-      legacy.type === "record" &&
-      // A pre-upgrade record resolved but did not realpath its root, so a
-      // symlink spelling must be canonicalized before it can match.
-      (yield* canonicalRoot(legacy.record.root)) === root
+      // An unreadable legacy file belongs to no root and can only be
+      // reclaimed, so every root-scoped lookup surfaces it.
+      legacy.type === "unreadable" ||
+      (legacy.type === "record" &&
+        // A pre-upgrade record resolved but did not realpath its root, so a
+        // symlink spelling must be canonicalized before it can match.
+        (yield* canonicalRoot(legacy.record.root)) === root)
     ) {
       entries.push({ fileName: legacyRecordFileName, stored: legacy });
     }

@@ -692,6 +692,27 @@ describe("stopDetachedServe", () => {
     })
   );
 
+  it.effect(
+    "reclaims an unreadable pre-upgrade record on a selected stop",
+    () =>
+      Effect.gen(function* () {
+        yield* Effect.promise(() =>
+          writeFile(join(stateDirectory, legacyRecordFileName), "not json")
+        );
+        const { calls, control } = makeControl({});
+
+        const result = yield* stopDetachedServe({
+          control,
+          root: rootPath("any-root"),
+          stateDirectory,
+        });
+
+        expect(result).toEqual({ type: "stale-record-removed" });
+        expect(calls.terminated).toEqual([]);
+        expect(yield* recordTexts).toEqual([]);
+      })
+  );
+
   it.effect("fails when the given root has no detached serve", () =>
     Effect.gen(function* () {
       yield* seedDetachedServe(rootPath("root-a"), 111);
