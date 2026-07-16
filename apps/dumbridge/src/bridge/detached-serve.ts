@@ -1,5 +1,13 @@
 import { spawn } from "node:child_process";
-import { mkdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import {
+  mkdir,
+  readdir,
+  readFile,
+  realpath,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { uptime } from "node:os";
 import {
   basename,
@@ -12,7 +20,12 @@ import {
 } from "node:path";
 import { type Duration, Effect, Result, Schema } from "effect";
 
-const recordFileName = "detached-serve.json";
+// One record file per served root: the name hashes the resolved root so
+// serves of different roots coexist while a duplicate root collides on the
+// same exclusive-create target.
+const recordFileName = (root: string) =>
+  `detached-serve-${createHash("sha256").update(resolve(root)).digest("hex")}.json`;
+const recordFilePattern = /^detached-serve-[0-9a-f]{64}\.json$/;
 const startupDeadlineMs = 30_000;
 const terminationDeadline: Duration.Input = "10 seconds";
 const terminationPollInterval: Duration.Input = "50 millis";
@@ -22,8 +35,12 @@ const cliStderrPrefix = /^dumbridge: /;
 const maximumStartupStderrLength = 512;
 
 // The record deliberately excludes the bridge key: the key must never land in
-// any file, and process death alone revokes it.
+// any file, and process death alone revokes it. The key's expiry deadline is
+// not the key and is persisted for status surfaces.
 const DetachedServeRecordSchema = Schema.Struct({
+  expiresAtEpochMs: Schema.optionalKey(
+    Schema.Number.check(Schema.isInt(), Schema.isGreaterThan(0))
+  ),
   pid: Schema.Number.check(Schema.isInt(), Schema.isGreaterThan(0)),
   root: Schema.String,
   startedAtEpochMs: Schema.Number.check(
@@ -36,10 +53,11 @@ const DetachedServeRecordJson = Schema.fromJsonString(
   DetachedServeRecordSchema
 );
 
-type DetachedServeRecord = typeof DetachedServeRecordSchema.Type;
+export type DetachedServeRecord = typeof DetachedServeRecordSchema.Type;
 
 const DetachedServeReason = Schema.Literals([
   "already-running",
+  "multiple-running",
   "not-running",
   "startup-failed",
   "state-io",
@@ -97,8 +115,8 @@ const stateIOError = (cause: unknown) =>
     cause
   );
 
-const recordPath = (stateDirectory: string) =>
-  join(stateDirectory, recordFileName);
+const byCodeUnit = (left: string, right: string) =>
+  left < right ? -1 : Number(left > right);
 
 const hasCode = (cause: unknown, code: string) =>
   typeof cause === "object" &&
@@ -111,31 +129,80 @@ type StoredRecord =
   | { readonly type: "unreadable" }
   | { readonly record: DetachedServeRecord; readonly type: "record" };
 
+interface StoredRecordEntry {
+  readonly fileName: string;
+  readonly stored: Exclude<StoredRecord, { readonly type: "absent" }>;
+}
+
+const readStoredRecord = async (path: string): Promise<StoredRecord> => {
+  let text: string;
+  try {
+    text = await readFile(path, "utf8");
+  } catch (cause) {
+    if (hasCode(cause, "ENOENT") || hasCode(cause, "ENOTDIR")) {
+      return { type: "absent" };
+    }
+    throw cause;
+  }
+  const decoded = Schema.decodeUnknownResult(DetachedServeRecordJson)(text);
+  return Result.isFailure(decoded)
+    ? { type: "unreadable" }
+    : { record: decoded.success, type: "record" };
+};
+
 const readRecord = (
-  stateDirectory: string
+  stateDirectory: string,
+  fileName: string
 ): Effect.Effect<StoredRecord, DetachedServeError> =>
   Effect.tryPromise({
     catch: (cause) => stateIOError(cause),
-    try: async (): Promise<StoredRecord> => {
-      let text: string;
+    try: () => readStoredRecord(join(stateDirectory, fileName)),
+  });
+
+const isPresent = (entry: {
+  readonly fileName: string;
+  readonly stored: StoredRecord;
+}): entry is StoredRecordEntry => entry.stored.type !== "absent";
+
+const readRecordEntries = (
+  stateDirectory: string
+): Effect.Effect<readonly StoredRecordEntry[], DetachedServeError> =>
+  Effect.tryPromise({
+    catch: (cause) => stateIOError(cause),
+    try: async () => {
+      let names: readonly string[];
       try {
-        text = await readFile(recordPath(stateDirectory), "utf8");
+        names = await readdir(stateDirectory);
       } catch (cause) {
         if (hasCode(cause, "ENOENT") || hasCode(cause, "ENOTDIR")) {
-          return { type: "absent" };
+          return [];
         }
         throw cause;
       }
-      const decoded = Schema.decodeUnknownResult(DetachedServeRecordJson)(text);
-      return Result.isFailure(decoded)
-        ? { type: "unreadable" }
-        : { record: decoded.success, type: "record" };
+      const entries = await Promise.all(
+        names
+          .filter((name) => recordFilePattern.test(name))
+          .sort(byCodeUnit)
+          .map(async (fileName) => ({
+            fileName,
+            stored: await readStoredRecord(join(stateDirectory, fileName)),
+          }))
+      );
+      // A record can vanish between the directory scan and its read when a
+      // concurrent stop reclaims it; a vanished record is simply not listed.
+      return entries.filter(isPresent);
     },
   });
 
 class RecordTakenError {
   readonly _tag = "RecordTakenError";
 }
+
+const alreadyServingError = (root: string) =>
+  detachedServeError(
+    "already-running",
+    `A detached serve is already running for ${root}. Stop it with dumbridge serve --stop ${root}.`
+  );
 
 const writeRecord = (stateDirectory: string, record: DetachedServeRecord) =>
   Effect.fromResult(Schema.encodeResult(DetachedServeRecordJson)(record)).pipe(
@@ -144,17 +211,16 @@ const writeRecord = (stateDirectory: string, record: DetachedServeRecord) =>
       Effect.tryPromise({
         catch: (cause) =>
           cause instanceof RecordTakenError
-            ? detachedServeError(
-                "already-running",
-                "A detached serve is already running. Stop it with dumbridge serve --stop."
-              )
+            ? alreadyServingError(record.root)
             : stateIOError(cause),
         try: async () => {
           await mkdir(stateDirectory, { recursive: true });
           try {
-            await writeFile(recordPath(stateDirectory), `${text}\n`, {
-              flag: "wx",
-            });
+            await writeFile(
+              join(stateDirectory, recordFileName(record.root)),
+              `${text}\n`,
+              { flag: "wx" }
+            );
           } catch (cause) {
             throw hasCode(cause, "EEXIST") ? new RecordTakenError() : cause;
           }
@@ -163,25 +229,29 @@ const writeRecord = (stateDirectory: string, record: DetachedServeRecord) =>
     )
   );
 
-const removeRecord = (stateDirectory: string) =>
+const removeRecord = (stateDirectory: string, fileName: string) =>
   Effect.tryPromise({
     catch: (cause) => stateIOError(cause),
-    try: () => rm(recordPath(stateDirectory), { force: true }),
+    try: () => rm(join(stateDirectory, fileName), { force: true }),
   });
 
 const sameRecord = (left: DetachedServeRecord, right: DetachedServeRecord) =>
   left.pid === right.pid && left.startedAtEpochMs === right.startedAtEpochMs;
 
-const removeRecordIfUnchanged = (stateDirectory: string, seen: StoredRecord) =>
+const removeRecordIfUnchanged = (
+  stateDirectory: string,
+  fileName: string,
+  seen: StoredRecord
+) =>
   Effect.gen(function* () {
-    const current = yield* readRecord(stateDirectory);
+    const current = yield* readRecord(stateDirectory, fileName);
     const unchanged =
       (current.type === "unreadable" && seen.type === "unreadable") ||
       (current.type === "record" &&
         seen.type === "record" &&
         sameRecord(current.record, seen.record));
     if (unchanged) {
-      yield* removeRecord(stateDirectory);
+      yield* removeRecord(stateDirectory, fileName);
     }
   });
 
@@ -256,18 +326,21 @@ export const detachServe = Effect.fn("DetachedServe.detach")(
           "The detached serve record would land inside the served root. Set DUMBRIDGE_STATE_DIR to a directory outside it."
         );
       }
-      const stored = yield* readRecord(options.stateDirectory);
+      const root = resolve(options.root);
+      const fileName = recordFileName(root);
+      const stored = yield* readRecord(options.stateDirectory, fileName);
       if (stored.type === "record") {
         const live = yield* recordIsLive(stored.record, options.control);
         if (live) {
-          return yield* detachedServeError(
-            "already-running",
-            "A detached serve is already running. Stop it with dumbridge serve --stop."
-          );
+          return yield* alreadyServingError(root);
         }
       }
       if (stored.type !== "absent") {
-        yield* removeRecordIfUnchanged(options.stateDirectory, stored);
+        yield* removeRecordIfUnchanged(
+          options.stateDirectory,
+          fileName,
+          stored
+        );
       }
 
       const startup = yield* options.control.spawnDetachedServe({
@@ -277,9 +350,14 @@ export const detachServe = Effect.fn("DetachedServe.detach")(
           : { reachability: options.reachability }),
         ...(options.ttl === undefined ? {} : { ttl: options.ttl }),
       });
+      const expiresAtEpochMs =
+        startup.expiresAtIso === undefined
+          ? Number.NaN
+          : Date.parse(startup.expiresAtIso);
       yield* writeRecord(options.stateDirectory, {
+        ...(Number.isFinite(expiresAtEpochMs) ? { expiresAtEpochMs } : {}),
         pid: startup.pid,
-        root: resolve(options.root),
+        root,
         startedAtEpochMs: Date.now(),
       }).pipe(
         Effect.tapError(() =>
@@ -312,31 +390,102 @@ const waitForExit = (pid: number, control: ServeProcessControl) => {
   );
 };
 
+const recordEntriesForStop = (
+  stateDirectory: string,
+  root: string | undefined
+): Effect.Effect<readonly StoredRecordEntry[], DetachedServeError> => {
+  if (root === undefined) {
+    return readRecordEntries(stateDirectory);
+  }
+  const fileName = recordFileName(root);
+  return Effect.map(readRecord(stateDirectory, fileName), (stored) =>
+    stored.type === "absent" ? [] : [{ fileName, stored }]
+  );
+};
+
+interface LiveRecordEntry {
+  readonly fileName: string;
+  readonly record: DetachedServeRecord;
+  readonly stored: StoredRecord;
+}
+
 export const stopDetachedServe = Effect.fn("DetachedServe.stop")(
   (options: {
     readonly control: ServeProcessControl;
+    readonly root?: string;
     readonly stateDirectory: string;
   }): Effect.Effect<StopDetachedServeResult, DetachedServeError> =>
     Effect.gen(function* () {
-      const stored = yield* readRecord(options.stateDirectory);
-      if (stored.type === "absent") {
+      const entries = yield* recordEntriesForStop(
+        options.stateDirectory,
+        options.root
+      );
+      if (entries.length === 0) {
         return yield* detachedServeError(
           "not-running",
-          "No detached serve is running."
+          options.root === undefined
+            ? "No detached serve is running."
+            : `No detached serve is running for ${resolve(options.root)}.`
         );
       }
-      if (
-        stored.type === "unreadable" ||
-        !(yield* recordIsLive(stored.record, options.control))
-      ) {
-        yield* removeRecordIfUnchanged(options.stateDirectory, stored);
-        return { type: "stale-record-removed" } as const;
+
+      const live: LiveRecordEntry[] = [];
+      for (const { fileName, stored } of entries) {
+        if (
+          stored.type === "record" &&
+          (yield* recordIsLive(stored.record, options.control))
+        ) {
+          live.push({ fileName, record: stored.record, stored });
+          continue;
+        }
+        yield* removeRecordIfUnchanged(
+          options.stateDirectory,
+          fileName,
+          stored
+        );
       }
 
-      yield* options.control.terminate(stored.record.pid);
-      yield* waitForExit(stored.record.pid, options.control);
-      yield* removeRecordIfUnchanged(options.stateDirectory, stored);
-      return { pid: stored.record.pid, type: "stopped" } as const;
+      const [only, ...others] = live;
+      if (only === undefined) {
+        return { type: "stale-record-removed" } as const;
+      }
+      if (others.length > 0) {
+        const roots = live.map((entry) => entry.record.root).sort(byCodeUnit);
+        return yield* detachedServeError(
+          "multiple-running",
+          `Multiple detached serves are running (${roots.join(", ")}). Stop one with dumbridge serve --stop <root>.`
+        );
+      }
+
+      yield* options.control.terminate(only.record.pid);
+      yield* waitForExit(only.record.pid, options.control);
+      yield* removeRecordIfUnchanged(
+        options.stateDirectory,
+        only.fileName,
+        only.stored
+      );
+      return { pid: only.record.pid, type: "stopped" } as const;
+    })
+);
+
+// The status surface (serve --status) is expected to consume this listing.
+export const listDetachedServes = Effect.fn("DetachedServe.list")(
+  (options: {
+    readonly control: ServeProcessControl;
+    readonly stateDirectory: string;
+  }): Effect.Effect<readonly DetachedServeRecord[], DetachedServeError> =>
+    Effect.gen(function* () {
+      const entries = yield* readRecordEntries(options.stateDirectory);
+      const live: DetachedServeRecord[] = [];
+      for (const { stored } of entries) {
+        if (
+          stored.type === "record" &&
+          (yield* recordIsLive(stored.record, options.control))
+        ) {
+          live.push(stored.record);
+        }
+      }
+      return live.sort((left, right) => byCodeUnit(left.root, right.root));
     })
 );
 
