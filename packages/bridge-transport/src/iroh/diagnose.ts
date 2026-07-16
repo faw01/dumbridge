@@ -64,6 +64,7 @@ const emptyRelayHostsDetail =
 
 const dnsCheck = (request: {
   readonly probes: IrohDiagnosticProbes;
+  readonly proxyUsable: boolean;
   readonly relayHosts: readonly string[];
 }): Effect.Effect<DiagnosisCheck> =>
   partitionHosts(request.relayHosts, request.probes.resolveHost).pipe(
@@ -85,6 +86,16 @@ const dnsCheck = (request: {
         };
       }
       if (reached.length === 0) {
+        // A proxied relay dial resolves only the proxy host locally; the
+        // relay hostname travels inside the HTTP CONNECT request for the
+        // proxy to resolve, so blocked local DNS stays workable there.
+        if (request.proxyUsable) {
+          return {
+            detail: `Could not resolve any of the ${total} iroh relay hosts locally; with an HTTP(S) proxy configured, the proxy resolves relay hostnames itself, a path this probe does not test.`,
+            name,
+            status: "warn" as const,
+          };
+        }
         return {
           detail: `Could not resolve any of the ${total} iroh relay hosts: ${unreached.join(", ")}.`,
           name,
@@ -246,7 +257,11 @@ export const diagnoseIrohEnvironment = (
       hasProxyEnvironment(request.environment) && proxy.status === "ok";
     const networkChecks = yield* Effect.all(
       [
-        dnsCheck(request),
+        dnsCheck({
+          probes: request.probes,
+          proxyUsable,
+          relayHosts: request.relayHosts,
+        }),
         udpCheck(request.probes),
         relayCheck({
           probes: request.probes,

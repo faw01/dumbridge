@@ -108,6 +108,36 @@ describe("Iroh environment diagnosis", () => {
     })
   );
 
+  // A proxied relay dial sends the relay hostname inside HTTP CONNECT for
+  // the proxy to resolve, so blocked local DNS is workable with a usable
+  // proxy but stays fatal when the proxy is unusable.
+  it.effect("downgrades blocked local DNS only behind a usable proxy", () =>
+    Effect.gen(function* () {
+      const noResolver = () => Promise.reject(new Error("blocked"));
+      const [usable] = yield* diagnose(
+        { resolveHost: noResolver },
+        { HTTPS_PROXY: "http://proxy.example:8080" }
+      );
+      const [unusable] = yield* diagnose(
+        { makeEndpointBuilder: () => ({}), resolveHost: noResolver },
+        { HTTPS_PROXY: "http://proxy.example:8080" }
+      );
+
+      expect(usable).toEqual({
+        detail:
+          "Could not resolve any of the 2 iroh relay hosts locally; with an HTTP(S) proxy configured, the proxy resolves relay hostnames itself, a path this probe does not test.",
+        name: "dns-resolution",
+        status: "warn",
+      });
+      expect(unusable).toEqual({
+        detail:
+          "Could not resolve any of the 2 iroh relay hosts: relay-a.example, relay-b.example.",
+        name: "dns-resolution",
+        status: "fail",
+      });
+    })
+  );
+
   it.effect("marks blocked UDP egress as a warn, not a failure", () =>
     Effect.gen(function* () {
       const checks = yield* diagnose({
