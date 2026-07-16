@@ -75,13 +75,13 @@ export interface ClientTransportResolution {
 // holepunching cannot traverse an HTTP proxy.
 export const resolveClientTransportOptions = (
   environment: Readonly<Record<string, string | undefined>> = process.env,
-  bindingSupportsProxy: boolean = irohBindingSupportsProxy()
+  bindingSupportsProxy: () => boolean = irohBindingSupportsProxy
 ): ClientTransportResolution => {
   const usesProxy = proxyEnvironmentNames.some((name) => environment[name]);
   if (!usesProxy) {
     return { options: { proxy: { _tag: "Disabled" } }, proxyFallback: false };
   }
-  return bindingSupportsProxy
+  return bindingSupportsProxy()
     ? {
         options: {
           proxy: { _tag: "FromEnvironment" },

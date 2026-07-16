@@ -294,6 +294,18 @@ describe("Iroh bridge transport", () => {
     // The published @number0/iroh binding omits the proxy builder methods;
     // this pins the gap that makes the client's proxy fallback necessary.
     expect(irohBindingSupportsProxy()).toBe(false);
+    // A binding too broken to inspect cannot proxy either; the probe reports
+    // the gap instead of throwing, and the dial's own builder creation
+    // surfaces the branded construction failure.
+    const broken = new Proxy(
+      {},
+      {
+        get: () => {
+          throw new Error("native binding failed to load");
+        },
+      }
+    );
+    expect(irohBindingSupportsProxy(broken)).toBe(false);
   });
 
   it.live(

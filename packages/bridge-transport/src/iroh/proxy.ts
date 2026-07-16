@@ -19,10 +19,17 @@ export type ProxyEnvironment = Readonly<Record<string, string | undefined>>;
 // The published @number0/iroh binding omits the proxy builder methods; only
 // the patched binding exposes proxyUrl. Callers probe this before committing
 // a dial to a proxy the adapter would otherwise have to reject as a
-// configuration dead-end.
-export const irohBindingSupportsProxy = (
-  builder: object = Endpoint.builder()
-): boolean => (builder as ProxyAwareEndpointBuilder).proxyUrl !== undefined;
+// configuration dead-end. A binding too broken to construct a builder cannot
+// proxy either; the dial's own builder creation then surfaces the branded
+// construction failure, so the probe stays total instead of throwing.
+export const irohBindingSupportsProxy = (builder?: object): boolean => {
+  try {
+    const probe = builder ?? Endpoint.builder();
+    return (probe as ProxyAwareEndpointBuilder).proxyUrl !== undefined;
+  } catch {
+    return false;
+  }
+};
 
 const proxyEnvironmentKeys = [
   "HTTP_PROXY",

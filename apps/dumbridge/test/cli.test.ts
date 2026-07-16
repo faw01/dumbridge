@@ -192,8 +192,13 @@ describe("dumbridge CLI", () => {
   });
 
   test("commits to the relay only when the binding can use the proxy", () => {
+    const proxyCapable = () => true;
+    const proxyIncapable = () => false;
     expect(
-      resolveClientTransportOptions({ HTTPS_PROXY: "http://proxy" }, true)
+      resolveClientTransportOptions(
+        { HTTPS_PROXY: "http://proxy" },
+        proxyCapable
+      )
     ).toEqual({
       options: {
         proxy: { _tag: "FromEnvironment" },
@@ -201,14 +206,30 @@ describe("dumbridge CLI", () => {
       },
       proxyFallback: false,
     });
-    expect(resolveClientTransportOptions({}, true)).toEqual({
+    expect(resolveClientTransportOptions({}, proxyCapable)).toEqual({
       options: { proxy: { _tag: "Disabled" } },
       proxyFallback: false,
     });
-    expect(resolveClientTransportOptions({}, false)).toEqual({
+    expect(resolveClientTransportOptions({}, proxyIncapable)).toEqual({
       options: { proxy: { _tag: "Disabled" } },
       proxyFallback: false,
     });
+  });
+
+  test("probes the binding only when a proxy variable is present", () => {
+    let probes = 0;
+    const countingProbe = () => {
+      probes += 1;
+      return false;
+    };
+
+    resolveClientTransportOptions({}, countingProbe);
+    expect(probes).toBe(0);
+    resolveClientTransportOptions(
+      { HTTPS_PROXY: "http://proxy" },
+      countingProbe
+    );
+    expect(probes).toBe(1);
   });
 
   test("falls back to a direct-capable dial when the binding cannot use the proxy", () => {
@@ -218,7 +239,7 @@ describe("dumbridge CLI", () => {
     expect(
       resolveClientTransportOptions(
         { HTTPS_PROXY: "http://user:proxy-secret@proxy.example:3128" },
-        false
+        () => false
       )
     ).toEqual({
       options: { proxy: { _tag: "Disabled" } },
