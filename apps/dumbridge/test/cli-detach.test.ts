@@ -169,6 +169,44 @@ describe("dumbridge serve flags", () => {
     });
   });
 
+  test("rejects --status combined with any other serve request", async () => {
+    const [withDetach, withStop, withRoot, withTtl, withPath] =
+      await Promise.all([
+        runCli(["serve", "--status", "--detach"]),
+        runCli(["serve", "--status", "--stop"]),
+        runCli(["serve", "--status", servedRoot]),
+        runCli(["serve", "--status", "--ttl", "1 hour"]),
+        runCli(["serve", "--status", "--relay-only"]),
+      ]);
+
+    expect(withDetach).toEqual({
+      exitCode: 1,
+      stderr: "dumbridge: Use either --detach or --status, not both.\n",
+      stdout: "",
+    });
+    expect(withStop).toEqual({
+      exitCode: 1,
+      stderr: "dumbridge: Use either --stop or --status, not both.\n",
+      stdout: "",
+    });
+    expect(withRoot).toEqual({
+      exitCode: 1,
+      stderr: "dumbridge: serve --status does not take a root.\n",
+      stdout: "",
+    });
+    expect(withTtl).toEqual({
+      exitCode: 1,
+      stderr: "dumbridge: serve --status does not take a --ttl.\n",
+      stdout: "",
+    });
+    expect(withPath).toEqual({
+      exitCode: 1,
+      stderr:
+        "dumbridge: serve --status does not take --direct-only or --relay-only.\n",
+      stdout: "",
+    });
+  });
+
   test("stopping without a detached serve fails", async () => {
     const [bare, withRoot] = await Promise.all([
       runCli(["serve", "--stop"]),
@@ -185,6 +223,66 @@ describe("dumbridge serve flags", () => {
       stderr: `dumbridge: No detached serve is running for ${servedRoot}.\n`,
       stdout: "",
     });
+  });
+
+  test("status with no detached serves prints one line and exits zero", async () => {
+    const result = await runCli(["serve", "--status"]);
+
+    expect(result).toEqual({
+      exitCode: 0,
+      stderr: "",
+      stdout: "No detached serves are running.\n",
+    });
+  });
+
+  test("status lists live serves one per line and prunes stale records", async () => {
+    await mkdir(stateDirectory, { recursive: true });
+    // Seeded records stand in for serves detached earlier: the test runner's
+    // own pid is live in this boot, so its records list; the impossible pid
+    // is dead, so its record must be pruned. Status discovers records by
+    // file name shape, so the hashes need not match the roots.
+    const startedAtEpochMs = Date.now();
+    const startedAtIso = new Date(startedAtEpochMs).toISOString();
+    const rootA = join(fixture, "served-a");
+    const rootB = join(fixture, "served-b");
+    await Promise.all([
+      writeFile(
+        join(stateDirectory, `detached-serve-${"a".repeat(64)}.json`),
+        JSON.stringify({
+          expiresAtEpochMs: 1_798_761_600_000,
+          pid: process.pid,
+          root: rootA,
+          startedAtEpochMs,
+        })
+      ),
+      writeFile(
+        join(stateDirectory, `detached-serve-${"b".repeat(64)}.json`),
+        JSON.stringify({
+          pid: process.pid,
+          root: rootB,
+          startedAtEpochMs,
+        })
+      ),
+      writeFile(
+        join(stateDirectory, `detached-serve-${"c".repeat(64)}.json`),
+        JSON.stringify({
+          pid: 2 ** 22 - 1,
+          root: join(fixture, "served-c"),
+          startedAtEpochMs,
+        })
+      ),
+    ]);
+
+    const result = await runCli(["serve", "--status"]);
+
+    expect(result).toEqual({
+      exitCode: 0,
+      stderr: "",
+      stdout:
+        `${rootA}\tpid ${process.pid}\tstarted ${startedAtIso}\tkey expires 2027-01-01T00:00:00.000Z\n` +
+        `${rootB}\tpid ${process.pid}\tstarted ${startedAtIso}\tkey expiry unknown\n`,
+    });
+    expect((await readRecordTexts()).length).toBe(2);
   });
 
   test("stopping a stale record cleans it up without failing", async () => {
@@ -249,6 +347,13 @@ describe.skipIf(process.platform === "win32")(
       expect(duplicate.exitCode).toBe(1);
       expect(duplicate.stderr).toContain(`already running for ${servedRoot}`);
 
+      const status = await runCli(["serve", "--status"]);
+      expect(status.exitCode).toBe(0);
+      expect(status.stderr).toBe("");
+      expect(status.stdout).toBe(
+        `${servedRoot}\tpid ${record.pid}\tstarted ${new Date(record.startedAtEpochMs).toISOString()}\tkey expires ${new Date(record.expiresAtEpochMs).toISOString()}\n`
+      );
+
       const stop = await runCli(["serve", "--stop", servedRoot]);
       expect(stop).toEqual({
         exitCode: 0,
@@ -257,6 +362,13 @@ describe.skipIf(process.platform === "win32")(
       });
       expect(isAlive(record.pid)).toBe(false);
       expect(await readRecords()).toEqual([]);
+
+      const afterStop = await runCli(["serve", "--status"]);
+      expect(afterStop).toEqual({
+        exitCode: 0,
+        stderr: "",
+        stdout: "No detached serves are running.\n",
+      });
     }, 60_000);
 
     test("survives a session warning logged after its pipes close", async () => {

@@ -492,7 +492,7 @@ describe("detachServe", () => {
 
 describe("listDetachedServes", () => {
   it.effect(
-    "lists live serves by root and skips stale records and foreign files",
+    "lists live serves by root, prunes stale records, and leaves foreign files",
     () =>
       Effect.gen(function* () {
         yield* seedDetachedServe(rootPath("root-b"), 222);
@@ -512,12 +512,61 @@ describe("listDetachedServes", () => {
           { pid: 111, root: rootPath("root-a") },
           { pid: 222, root: rootPath("root-b") },
         ]);
-        expect((yield* recordTexts).length).toBe(3);
+        expect(yield* storedPids).toEqual([111, 222]);
         expect(
           yield* Effect.promise(() =>
             readFile(join(stateDirectory, "notes.txt"), "utf8")
           )
         ).toBe("not a record");
+      })
+  );
+
+  it.effect("prunes a live-pid record written before the current boot", () =>
+    Effect.gen(function* () {
+      yield* seedDetachedServe(rootPath("pre-boot-root"), 77);
+      const { control } = makeControl({
+        alivePids: new Set([77]),
+        bootTimeMs: Date.now() + 86_400_000,
+      });
+
+      const records = yield* listDetachedServes({ control, stateDirectory });
+
+      expect(records).toEqual([]);
+      expect(yield* recordTexts).toEqual([]);
+    })
+  );
+
+  it.effect("leaves an unreadable file alone for stop to reclaim", () =>
+    Effect.gen(function* () {
+      yield* seedDetachedServe(rootPath("served"), 77);
+      yield* corruptStoredRecords;
+      const { control } = makeControl({});
+
+      const records = yield* listDetachedServes({ control, stateDirectory });
+
+      expect(records).toEqual([]);
+      expect((yield* recordTexts).length).toBe(1);
+    })
+  );
+
+  it.effect(
+    "treats a record whose timestamp no Date can represent as unreadable",
+    () =>
+      Effect.gen(function* () {
+        // One millisecond past the JavaScript Date range: a status surface
+        // could not render it, so the record must decode as unreadable and
+        // stay unlisted rather than poison the whole listing.
+        yield* writeLegacyRecord({
+          pid: 77,
+          root: rootPath("served"),
+          startedAtEpochMs: 8_640_000_000_000_001,
+        });
+        const { control } = makeControl({ alivePids: new Set([77]) });
+
+        const records = yield* listDetachedServes({ control, stateDirectory });
+
+        expect(records).toEqual([]);
+        expect((yield* recordTexts).length).toBe(1);
       })
   );
 

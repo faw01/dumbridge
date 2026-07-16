@@ -40,19 +40,24 @@ const keyExpiryLine = /^The key expires at (\S+)\./m;
 const cliStderrPrefix = /^dumbridge: /;
 const maximumStartupStderrLength = 512;
 
+// Timestamps must fit the JavaScript Date range: the status surface renders
+// them with toISOString, so a value outside it would make one tampered record
+// poison the whole listing instead of decoding as unreadable and being
+// reclaimed like any other corrupt record.
+const EpochMilliseconds = Schema.Number.check(
+  Schema.isInt(),
+  Schema.isGreaterThan(0),
+  Schema.isLessThanOrEqualTo(8_640_000_000_000_000)
+);
+
 // The record deliberately excludes the bridge key: the key must never land in
 // any file, and process death alone revokes it. The key's expiry deadline is
 // not the key and is persisted for status surfaces.
 const DetachedServeRecordSchema = Schema.Struct({
-  expiresAtEpochMs: Schema.optionalKey(
-    Schema.Number.check(Schema.isInt(), Schema.isGreaterThan(0))
-  ),
+  expiresAtEpochMs: Schema.optionalKey(EpochMilliseconds),
   pid: Schema.Number.check(Schema.isInt(), Schema.isGreaterThan(0)),
   root: Schema.String,
-  startedAtEpochMs: Schema.Number.check(
-    Schema.isInt(),
-    Schema.isGreaterThan(0)
-  ),
+  startedAtEpochMs: EpochMilliseconds,
 });
 
 const DetachedServeRecordJson = Schema.fromJsonString(
@@ -504,7 +509,12 @@ export const stopDetachedServe = Effect.fn("DetachedServe.stop")(
     })
 );
 
-// The status surface (serve --status) is expected to consume this listing.
+// The status surface (serve --status) consumes this listing. Stale records
+// whose process is provably gone (dead pid, prior boot) are reclaimed as
+// they are encountered, matching the stop path. An unreadable file is only
+// skipped, never reclaimed here: it may be a record a concurrent detach has
+// created but not yet finished writing, and unlinking it would orphan that
+// serve. An explicit stop still reclaims a genuinely corrupt file.
 export const listDetachedServes = Effect.fn("DetachedServe.list")(
   (options: {
     readonly control: ServeProcessControl;
@@ -513,13 +523,19 @@ export const listDetachedServes = Effect.fn("DetachedServe.list")(
     Effect.gen(function* () {
       const entries = yield* readRecordEntries(options.stateDirectory);
       const live: DetachedServeRecord[] = [];
-      for (const { stored } of entries) {
-        if (
-          stored.type === "record" &&
-          (yield* recordIsLive(stored.record, options.control))
-        ) {
-          live.push(stored.record);
+      for (const { fileName, stored } of entries) {
+        if (stored.type !== "record") {
+          continue;
         }
+        if (yield* recordIsLive(stored.record, options.control)) {
+          live.push(stored.record);
+          continue;
+        }
+        yield* removeRecordIfUnchanged(
+          options.stateDirectory,
+          fileName,
+          stored
+        );
       }
       return live.sort((left, right) => byCodeUnit(left.root, right.root));
     })

@@ -34,6 +34,7 @@ import { pullRemote, runRemote } from "./bridge/client";
 import {
   detachServe,
   hostServeProcessControl,
+  listDetachedServes,
   type ServeReachability,
   stopDetachedServe,
 } from "./bridge/detached-serve";
@@ -191,6 +192,26 @@ const serveDetached = (
     );
   });
 
+// One serve per line, tab-separated so a root containing spaces still parses.
+const serveStatus = Effect.gen(function* () {
+  const records = yield* listDetachedServes({
+    control: hostServeProcessControl,
+    stateDirectory: yield* stateDirectory,
+  });
+  if (records.length === 0) {
+    return yield* write(process.stdout, "No detached serves are running.\n");
+  }
+  const lines = records.map(
+    (record) =>
+      `${record.root}\tpid ${record.pid}\tstarted ${new Date(record.startedAtEpochMs).toISOString()}\t${
+        record.expiresAtEpochMs === undefined
+          ? "key expiry unknown"
+          : `key expires ${new Date(record.expiresAtEpochMs).toISOString()}`
+      }\n`
+  );
+  yield* write(process.stdout, lines.join(""));
+});
+
 const serveStop = (root: Option.Option<string>) =>
   Effect.gen(function* () {
     const result = yield* stopDetachedServe({
@@ -211,14 +232,39 @@ interface ServeInvocation {
   readonly directOnly: boolean;
   readonly relayOnly: boolean;
   readonly root: Option.Option<string>;
+  readonly status: boolean;
   readonly stop: boolean;
   readonly ttl: Option.Option<string>;
 }
 
-const serveInvocationError = (flags: ServeInvocation): CliError | undefined => {
-  if (flags.detach && flags.stop) {
+// serve starts a bridge unless --detach, --stop, or --status selects another
+// request; the three selectors are mutually exclusive.
+const serveModes = ["detach", "stop", "status"] as const;
+
+// --stop and --status take none of the start-shaped flags; --status also
+// takes no root because it always lists every detached serve.
+const serveSelectorFlagError = (
+  mode: "status" | "stop",
+  flags: ServeInvocation
+): CliError | undefined => {
+  if (mode === "status" && Option.isSome(flags.root)) {
+    return new CliError({ message: "serve --status does not take a root." });
+  }
+  if (Option.isSome(flags.ttl)) {
+    return new CliError({ message: `serve --${mode} does not take a --ttl.` });
+  }
+  if (flags.directOnly || flags.relayOnly) {
     return new CliError({
-      message: "Use either --detach or --stop, not both.",
+      message: `serve --${mode} does not take --direct-only or --relay-only.`,
+    });
+  }
+};
+
+const serveInvocationError = (flags: ServeInvocation): CliError | undefined => {
+  const [mode, extra] = serveModes.filter((name) => flags[name]);
+  if (mode !== undefined && extra !== undefined) {
+    return new CliError({
+      message: `Use either --${mode} or --${extra}, not both.`,
     });
   }
   if (flags.directOnly && flags.relayOnly) {
@@ -226,16 +272,8 @@ const serveInvocationError = (flags: ServeInvocation): CliError | undefined => {
       message: "Use either --direct-only or --relay-only, not both.",
     });
   }
-  if (!flags.stop) {
-    return;
-  }
-  if (Option.isSome(flags.ttl)) {
-    return new CliError({ message: "serve --stop does not take a --ttl." });
-  }
-  if (flags.directOnly || flags.relayOnly) {
-    return new CliError({
-      message: "serve --stop does not take --direct-only or --relay-only.",
-    });
+  if (mode === "stop" || mode === "status") {
+    return serveSelectorFlagError(mode, flags);
   }
 };
 
@@ -267,6 +305,11 @@ const serve = Command.make(
       )
     ),
     root: Argument.string("root").pipe(Argument.optional),
+    status: Flag.boolean("status").pipe(
+      Flag.withDescription(
+        "List each active detached serve with its root, pid, start time, and key expiry."
+      )
+    ),
     stop: Flag.boolean("stop").pipe(
       Flag.withDescription(
         "Stop a detached server, revoking its key. Pass its root when several are running."
@@ -284,6 +327,9 @@ const serve = Command.make(
       const invalid = serveInvocationError(flags);
       if (invalid !== undefined) {
         return yield* invalid;
+      }
+      if (flags.status) {
+        return yield* serveStatus;
       }
       if (flags.stop) {
         return yield* serveStop(flags.root);

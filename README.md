@@ -24,7 +24,7 @@ npx --yes dumbridge pull .agents/skills/wayfinder .agents/skills/wayfinder
 
 ## Commands
 
-- `dumbridge serve <root>` shares one directory read-only until Ctrl-C and prints the `DUMBRIDGE_KEY` bearer secret, valid for a configurable TTL (default 8 hours, `--ttl '90 minutes'`). `serve --detach <root>` starts the same server detached from the terminal — several may run at once, at most one per root — and `serve --stop [<root>]` terminates one, which revokes its key; the root is required only when several are running.
+- `dumbridge serve <root>` shares one directory read-only until Ctrl-C and prints the `DUMBRIDGE_KEY` bearer secret, valid for a configurable TTL (default 8 hours, `--ttl '90 minutes'`). `serve --detach <root>` starts the same server detached from the terminal — several may run at once, at most one per root — and `serve --stop [<root>]` terminates one, which revokes its key; the root is required only when several are running. `serve --status` lists each active detached serve with its served root, pid, start time, and key expiry, pruning stale records as it goes.
 - `dumbridge run '<script>'` evaluates one Bash-shaped script against the live served root in a bounded Just Bash sandbox, never the host shell. Its writes are discarded.
 - `dumbridge pull <remote-path> [destination]` copies one exact file or directory, verifies content, refuses symlinks, and never overwrites an existing destination.
 - `run` and `pull` read the bridge key from `--key-file <path>` when given (`-` reads stdin), otherwise from `DUMBRIDGE_KEY`; the key is never accepted as a command argument.
