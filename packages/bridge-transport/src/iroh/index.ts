@@ -281,6 +281,7 @@ const connect = (
           // relay, and both shapes surface as the branded failure so
           // callers do not retry.
           return new BridgeDirectConnectError({
+            cause: error,
             message:
               "No viable network path to the bridge: the direct connection failed (this network may block UDP) and the bridge locator allows no relay fallback.",
           });

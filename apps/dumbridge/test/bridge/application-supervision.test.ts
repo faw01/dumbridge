@@ -50,7 +50,7 @@ import {
 } from "effect";
 import { TestClock } from "effect/testing";
 import { Bash } from "just-bash";
-import { pullRemote, runRemote } from "../../src/bridge/client";
+import { isDialFailure, pullRemote, runRemote } from "../../src/bridge/client";
 import { openBridge } from "../../src/bridge/server";
 
 let fixture = "";
@@ -1232,6 +1232,9 @@ describe("bridge application supervision", () => {
                 operation: "connect",
               });
               expect(error.cause).toBe(failure.error);
+              // The dial itself failed, so the CLI may name an unusable
+              // proxy as the likely cause.
+              expect(isDialFailure(error)).toBe(true);
               // A classified dial failure keeps the one-retry contract that
               // every pre-request connection failure has.
               expect(connectCalls).toBe(2);
@@ -1278,6 +1281,9 @@ describe("bridge application supervision", () => {
         operation: "connect",
       });
       expect(error.cause).toBeInstanceOf(BridgeConnectError);
+      // A generic connect failure carries no dial classification, so the
+      // CLI must not blame an unusable proxy for it.
+      expect(isDialFailure(error)).toBe(false);
       expect(connectCalls).toBe(2);
     })
   );

@@ -35,7 +35,7 @@ import skillGuide from "../../../skills/dumbridge/SKILL.md" with {
   type: "text",
 };
 import packageJson from "../package.json" with { type: "json" };
-import { isConnectFailure, pullRemote, runRemote } from "./bridge/client";
+import { isDialFailure, pullRemote, runRemote } from "./bridge/client";
 import {
   detachServe,
   hostServeProcessControl,
@@ -130,7 +130,7 @@ export const connectFailureMessage = (
   proxyFallback: boolean
 ): string => {
   const message = publicErrorMessage(error);
-  return proxyFallback && isConnectFailure(error)
+  return proxyFallback && isDialFailure(error)
     ? `${message}${proxyUnusableConnectNotice}`
     : message;
 };
@@ -142,7 +142,7 @@ const withProxyConnectCause =
   ): Effect.Effect<A, E | CliError, R> =>
     effect.pipe(
       Effect.mapError((error) =>
-        proxyFallback && isConnectFailure(error)
+        proxyFallback && isDialFailure(error)
           ? new CliError({
               message: connectFailureMessage(error, proxyFallback),
             })

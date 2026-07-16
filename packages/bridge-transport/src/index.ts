@@ -60,6 +60,7 @@ export class BridgeDialError extends Schema.TaggedErrorClass<BridgeDialError>()(
 export class BridgeDirectConnectError extends Schema.TaggedErrorClass<BridgeDirectConnectError>()(
   "BridgeDirectConnectError",
   {
+    cause: Schema.optionalKey(Schema.Defect()),
     message: Schema.String,
   }
 ) {}

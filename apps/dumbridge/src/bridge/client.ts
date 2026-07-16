@@ -7,7 +7,7 @@ import {
 } from "@dumbridge/bridge-key";
 import {
   type BridgeDeadlineExceededError,
-  type BridgeDialError,
+  BridgeDialError,
   BridgeDirectConnectError,
   BridgeLocator,
   type BridgeLocatorInvalidError,
@@ -146,11 +146,15 @@ const classifiedConnectFailure = (error: BridgeDialError) =>
   clientError("connect", error.message, error);
 
 // An unusable proxy only becomes the likely cause once the fallback dial has
-// actually failed, so the CLI asks whether a failure happened while
-// connecting rather than pattern-matching the client's private error class.
-export const isConnectFailure = (error: unknown): boolean =>
+// actually failed, so the CLI asks whether the dial itself failed rather than
+// pattern-matching the client's private error class. Local configuration and
+// byte-session failures stay out: they happen before or after the network
+// path was exercised, so the proxy is no explanation for them.
+export const isDialFailure = (error: unknown): boolean =>
   error instanceof BridgeDirectConnectError ||
-  (error instanceof BridgeClientError && error.operation === "connect");
+  (error instanceof BridgeClientError &&
+    error.operation === "connect" &&
+    error.cause instanceof BridgeDialError);
 
 const rejectMessages: Record<RejectCode, string> = {
   "expired-key":
