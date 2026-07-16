@@ -195,11 +195,12 @@ const listen = (options: ResolvedOptions): BridgeTransport["listen"] =>
   });
 
 // addr() includes the home relay only once its link is actually up, so the
-// snapshot distinguishes a blocked relay from a silent peer. It is a plain
+// snapshot distinguishes a blocked relay from a silent peer, and it survives
+// the endpoint close that a timed-out dial performs first. It is a plain
 // native read: endpoint.online() would answer the same question but its
 // pending promise keeps the runtime's event loop alive after the dial, and a
-// watcher callback needs the same teardown care. A closed or broken endpoint
-// reads as "the link never came up".
+// watcher callback needs the same teardown care. A native read failure is
+// reported as "the link never came up".
 const relayLinkObserved = (endpoint: Endpoint) => {
   try {
     return endpoint.addr().relayUrl() !== null;
