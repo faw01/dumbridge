@@ -347,6 +347,13 @@ describe.skipIf(process.platform === "win32")(
       expect(duplicate.exitCode).toBe(1);
       expect(duplicate.stderr).toContain(`already running for ${servedRoot}`);
 
+      const status = await runCli(["serve", "--status"]);
+      expect(status.exitCode).toBe(0);
+      expect(status.stderr).toBe("");
+      expect(status.stdout).toBe(
+        `${servedRoot}\tpid ${record.pid}\tstarted ${new Date(record.startedAtEpochMs).toISOString()}\tkey expires ${new Date(record.expiresAtEpochMs).toISOString()}\n`
+      );
+
       const stop = await runCli(["serve", "--stop", servedRoot]);
       expect(stop).toEqual({
         exitCode: 0,
@@ -355,6 +362,13 @@ describe.skipIf(process.platform === "win32")(
       });
       expect(isAlive(record.pid)).toBe(false);
       expect(await readRecords()).toEqual([]);
+
+      const afterStop = await runCli(["serve", "--status"]);
+      expect(afterStop).toEqual({
+        exitCode: 0,
+        stderr: "",
+        stdout: "No detached serves are running.\n",
+      });
     }, 60_000);
 
     test("survives a session warning logged after its pipes close", async () => {
