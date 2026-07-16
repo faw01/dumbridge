@@ -11,6 +11,7 @@ import {
 } from "@dumbridge/bridge-transport";
 import {
   configureIrohProxy,
+  irohBindingSupportsProxy,
   makeIrohTransport,
   normalizeIrohAddress,
 } from "@dumbridge/bridge-transport/iroh";
@@ -285,6 +286,64 @@ describe("Iroh bridge transport", () => {
         expect(error.requested).toBe("environment");
       }
     })
+  );
+
+  it("answers whether a binding can route through a proxy", () => {
+    expect(irohBindingSupportsProxy({})).toBe(false);
+    expect(irohBindingSupportsProxy({ proxyUrl: () => undefined })).toBe(true);
+    // The published @number0/iroh binding omits the proxy builder methods;
+    // this pins the gap that makes the client's proxy fallback necessary.
+    expect(irohBindingSupportsProxy()).toBe(false);
+    // A binding too broken to inspect cannot proxy either; the probe reports
+    // the gap instead of throwing, and the dial's own builder creation
+    // surfaces the branded construction failure.
+    const broken = new Proxy(
+      {},
+      {
+        get: () => {
+          throw new Error("native binding failed to load");
+        },
+      }
+    );
+    expect(irohBindingSupportsProxy(broken)).toBe(false);
+  });
+
+  it.live(
+    "fails a proxied environment without a direct path as a genuine connection failure",
+    () =>
+      Effect.gen(function* () {
+        // The Codex-like case after the proxy fallback: the client no longer
+        // requests the unusable proxy, so a dial with no working direct or
+        // relay route must spend its connect deadline and fail like any
+        // other unreachable peer — never as the pre-network
+        // BridgeProxyUnsupportedError configuration dead-end.
+        const transport = makeIrohTransport({
+          deadlines: {
+            accept: "1 second",
+            connect: "500 millis",
+            io: "1 second",
+            listen: "1 second",
+          },
+        });
+        // TEST-NET-1 (RFC 5737) direct address and a reserved .invalid relay
+        // host: neither route can ever succeed.
+        const id = EndpointId.fromBytes(new Array<number>(32).fill(1));
+        const unreachable = new EndpointAddr(id, "https://relay.invalid/", [
+          "192.0.2.1:1",
+        ]);
+        const locator = BridgeLocator.fromString(
+          EndpointTicket.fromAddr(unreachable).toString()
+        );
+
+        const error = yield* Effect.scoped(transport.connect(locator)).pipe(
+          Effect.flip
+        );
+
+        expect(error).not.toBeInstanceOf(BridgeProxyUnsupportedError);
+        expect(["BridgeConnectError", "BridgeDeadlineExceededError"]).toContain(
+          error._tag
+        );
+      })
   );
 
   it.effect(

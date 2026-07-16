@@ -236,6 +236,44 @@ describe("dumbridge CLI bridge", () => {
     }
   }, 40_000);
 
+  test("run succeeds under an unusable proxy by warning and dialing direct", async () => {
+    const server = Bun.spawn([process.execPath, cli, "serve", servedRoot], {
+      env: cleanEnvironment(),
+      stderr: "pipe",
+      stdout: "pipe",
+    });
+
+    try {
+      const { link } = await withTimeout(
+        readBridgeStartup(server.stdout),
+        5000
+      );
+      await writeFile(join(servedRoot, "proxied.txt"), "despite the proxy\n");
+      // Claude Code cloud "Full Network" sets a proxy the installed binding
+      // cannot route through, while a direct path still works. The run must
+      // warn once and connect anyway instead of dying on configuration.
+      const environment = cleanEnvironment({
+        DUMBRIDGE_KEY: link,
+        HTTPS_PROXY: "http://user:proxy-secret@proxy.example:3128",
+      });
+
+      const run = await runCli(["run", "cat proxied.txt"], environment);
+      expect(run).toMatchObject({
+        exitCode: 0,
+        stdout: "despite the proxy\n",
+      });
+      expect(run.stderr).toContain(
+        "dumbridge: this environment sets a proxy, but the installed iroh binding cannot route through it; attempting a direct connection instead\n"
+      );
+      expect(run.stderr).toMatch(pathLine);
+      expect(run.stderr).not.toContain("proxy-secret");
+      expect(run.stderr).not.toContain("proxy.example");
+    } finally {
+      server.kill();
+      await server.exited;
+    }
+  }, 40_000);
+
   test("serve --direct-only reports a direct connection on run and pull", async () => {
     const server = Bun.spawn(
       [process.execPath, cli, "serve", "--direct-only", servedRoot],
@@ -268,6 +306,25 @@ describe("dumbridge CLI bridge", () => {
       );
       expect(pull).toMatchObject({ exitCode: 0 });
       expect(pull.stderr).toContain("dumbridge: connected directly\n");
+
+      // An unusable proxy must not override the path policy baked into the
+      // key: the fallback dials direct, exactly what a direct-only key
+      // demands, instead of re-enabling a relay the locator forbids.
+      const proxied = await runCli(
+        ["run", "cat direct.txt"],
+        cleanEnvironment({
+          DUMBRIDGE_KEY: link,
+          HTTPS_PROXY: "http://user:proxy-secret@proxy.example:3128",
+        })
+      );
+      expect(proxied).toMatchObject({
+        exitCode: 0,
+        stdout: "over a direct path\n",
+      });
+      expect(proxied.stderr).toContain(
+        "dumbridge: this environment sets a proxy, but the installed iroh binding cannot route through it; attempting a direct connection instead\n"
+      );
+      expect(proxied.stderr).toContain("dumbridge: connected directly\n");
     } finally {
       server.kill();
       await server.exited;

@@ -6,6 +6,7 @@ import { redactBridgeKey } from "@dumbridge/bridge-key";
 import type { ConnectionPath } from "@dumbridge/bridge-transport";
 import {
   type IrohTransportOptions,
+  irohBindingSupportsProxy,
   makeIrohTransport,
 } from "@dumbridge/bridge-transport/iroh";
 import { type PullErrorTag, PullLimitError } from "@dumbridge/pull-transfer";
@@ -59,25 +60,54 @@ const proxyEnvironmentNames = [
   "http_proxy",
 ] as const;
 
-export const resolveClientTransportOptions = (
-  environment: Readonly<Record<string, string | undefined>> = process.env
-): IrohTransportOptions => {
-  const usesProxy = proxyEnvironmentNames.some((name) => environment[name]);
-  return usesProxy
-    ? {
-        proxy: { _tag: "FromEnvironment" },
-        reachability: "relay-only",
-      }
-    : { proxy: { _tag: "Disabled" } };
-};
+export interface ClientTransportResolution {
+  readonly options: IrohTransportOptions;
+  readonly proxyFallback: boolean;
+}
 
-const clientTransport = () =>
-  makeIrohTransport(resolveClientTransportOptions());
+// Cloud sandboxes such as Claude Code "Full Network" set a proxy variable the
+// published iroh binding cannot route through. Committing to that proxy would
+// fail before any network attempt, so the client degrades to the ordinary
+// direct-capable dial: no proxy is requested and no reachability is forced,
+// leaving the relay policy to the locator inside the bridge key — a
+// direct-only key stays a direct-only attempt, a relay-carrying key keeps its
+// fallback. A proxy-capable binding still commits to the proxy, because UDP
+// holepunching cannot traverse an HTTP proxy.
+export const resolveClientTransportOptions = (
+  environment: Readonly<Record<string, string | undefined>> = process.env,
+  bindingSupportsProxy: () => boolean = irohBindingSupportsProxy
+): ClientTransportResolution => {
+  const usesProxy = proxyEnvironmentNames.some((name) => environment[name]);
+  if (!usesProxy) {
+    return { options: { proxy: { _tag: "Disabled" } }, proxyFallback: false };
+  }
+  return bindingSupportsProxy()
+    ? {
+        options: {
+          proxy: { _tag: "FromEnvironment" },
+          reachability: "relay-only",
+        },
+        proxyFallback: false,
+      }
+    : { options: { proxy: { _tag: "Disabled" } }, proxyFallback: true };
+};
 
 const write = (stream: NodeJS.WriteStream, value: string) =>
   Effect.sync(() => {
     stream.write(value);
   });
+
+// Stderr only and never the proxy URL itself, which may carry credentials.
+export const proxyFallbackNotice =
+  "dumbridge: this environment sets a proxy, but the installed iroh binding cannot route through it; attempting a direct connection instead\n";
+
+const clientTransport = Effect.gen(function* () {
+  const resolution = resolveClientTransportOptions();
+  if (resolution.proxyFallback) {
+    yield* write(process.stderr, proxyFallbackNotice);
+  }
+  return makeIrohTransport(resolution.options);
+});
 
 // One line per invocation, stderr only: piped stdout stays exactly the
 // script's or pull's own output. The line names the path selected at connect
@@ -287,11 +317,12 @@ const run = Command.make(
   ({ keyFile, script }) =>
     Effect.gen(function* () {
       const key = yield* resolveBridgeKey(keyFile);
+      const transport = yield* clientTransport;
       const result = yield* runRemote({
         link: Redacted.value(key),
         onConnected: reportConnectionPath,
         script,
-        transport: clientTransport(),
+        transport,
       });
       if (result.served !== undefined) {
         yield* write(
@@ -320,11 +351,12 @@ const pull = Command.make(
   ({ destination, keyFile, remotePath }) =>
     Effect.gen(function* () {
       const key = yield* resolveBridgeKey(keyFile);
+      const transport = yield* clientTransport;
       const request = {
         link: Redacted.value(key),
         onConnected: reportConnectionPath,
         remotePath,
-        transport: clientTransport(),
+        transport,
       };
       const result = yield* pullRemote(
         Option.isSome(destination)
