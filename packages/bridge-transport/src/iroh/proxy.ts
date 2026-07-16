@@ -40,6 +40,10 @@ const proxyEnvironmentKeys = [
   "all_proxy",
 ] as const;
 
+export const hasProxyEnvironment = (
+  environment: ProxyEnvironment = process.env
+) => proxyEnvironmentKeys.some((key) => environment[key] !== undefined);
+
 const proxyUrlFromEnvironment = (
   environment: ProxyEnvironment
 ): Effect.Effect<string, BridgeProxyConfigurationError> => {

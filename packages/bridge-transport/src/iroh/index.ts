@@ -9,6 +9,7 @@ import {
   BridgeLocatorInvalidError,
   type BridgeTransport,
 } from "../index";
+import { diagnoseHostIrohEnvironment } from "./diagnose";
 import {
   acquireEndpoint,
   closeConnection,
@@ -28,6 +29,8 @@ const defaultDeadlines: BridgeDeadlines = {
   listen: "15 seconds",
 };
 
+export type { IrohDiagnosticProbes } from "./diagnose";
+export { diagnoseIrohEnvironment } from "./diagnose";
 export type { IrohReachability } from "./endpoint";
 export { normalizeIrohAddress } from "./endpoint";
 export type { IrohProxyConfiguration } from "./proxy";
@@ -246,6 +249,7 @@ export const makeIrohTransport = (
 
   return {
     connect: (locator) => connect(locator, resolved),
+    diagnose: diagnoseHostIrohEnvironment,
     listen: listen(resolved),
   };
 };
