@@ -1218,6 +1218,7 @@ describe("bridge application supervision", () => {
             connectCalls += 1;
             return Effect.fail(failure.error);
           },
+          diagnose: unusedDiagnose,
           listen: Effect.die("listener is not used in this test"),
         };
 
