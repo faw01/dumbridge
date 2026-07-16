@@ -13,7 +13,7 @@ The local process that owns access to a served root, foreground by default. Stop
 _Avoid_: Daemon, server account
 
 **Detached serve**:
-A bridge process started with `serve --detach` that runs without a terminal until `serve --stop`. Its death still revokes the bridge key.
+A bridge process started with `serve --detach` that runs without a terminal until `serve --stop`. Several may run at once, at most one per served root. Its death still revokes the bridge key.
 _Avoid_: Daemon, background service
 
 **Bridge key**:
@@ -45,7 +45,7 @@ The canonical, Windows-safe relative path that selects one file or directory bel
 _Avoid_: Safe relative path, source path, virtual path
 
 **Sanitized root display**:
-The bounded, control-character-free final component of the served root's path; the only fragment of the host path any message may show.
+The bounded, control-character-free final component of the served root's path; the only fragment of the host path any message crossing the bridge may show. Local serve messages may name full roots: they are the stop selectors.
 _Avoid_: Root name, host path, display path
 
 **Root banner**:

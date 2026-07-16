@@ -60,7 +60,7 @@ The bridge runs on the user's machine; it cannot be started from the workspace. 
 
 - `dumbridge serve <root>` shares one directory read-only in the foreground until Ctrl-C and prints a fresh `DUMBRIDGE_KEY`.
 - `--ttl '90 minutes'` sets how long the key stays valid (default 8 hours). The bridge process enforces the deadline even if it keeps running past it.
-- `dumbridge serve --detach <root>` runs the same bridge without holding a terminal; `dumbridge serve --stop` ends it, which revokes the key immediately.
+- `dumbridge serve --detach <root>` runs the same bridge without holding a terminal; several may run at once, at most one per root. `dumbridge serve --stop [<root>]` ends one, which revokes its key immediately; the root is required only when several are running.
 - `--direct-only` mints a key with no relay fallback: sessions connect peer-to-peer or fail fast. `--relay-only` makes the initial dial go through the relay, best effort only - an established session may still upgrade to a direct path. The two flags are mutually exclusive; without either, connections prefer direct and fall back to the relay.
 
 Ask the user to place the new key in the cloud environment as a secret file or environment variable; never ask them to paste it into the conversation.
