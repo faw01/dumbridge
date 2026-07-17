@@ -1,5 +1,23 @@
 # dumbridge
 
+## 0.3.0
+
+### Minor Changes
+
+- ddd99ea: Split the connect-failure error by observed cause and log the dial sequence at debug level. A failed dial is classified at the transport seam: the bridge not answering while the relay is reachable (serve stopped or the machine is offline), the relay host unreachable or blocked (naming the exact host to allowlist), no viable network path for a direct-only key, and — after the unusable-proxy fallback — the proxy named as the likely cause once the connection actually fails. `--log-level debug` on run or pull logs the dial sequence (paths attempted, relay used, outcomes) on stderr without exposing the bridge key or proxy credentials.
+- 0797ea6: Report the connection path selected at connect time as one stderr line on every run and pull, and add mutually exclusive `serve --direct-only` / `serve --relay-only` path-forcing flags. A direct-only key allows no relay fallback and fails fast with a branded error when holepunching fails; relay-only constrains the initial dial best effort only, and the session may still upgrade to a direct path.
+- 39dc7c4: Add `dumbridge doctor`: a no-key, no-session environment diagnosis that prints one self-descriptive check per line — DNS resolution of the iroh relay hosts, UDP egress, relay reachability on port 443, and HTTP(S) proxy capability — and exits non-zero when any check fails. The transport seam gains an iroh-agnostic `diagnose` returning the check results, so proxy-only or UDP-blocked sandboxes can be told apart from a stopped bridge before minting a key.
+- 142babb: Allow multiple detached serves to run at once, at most one per served root: records are keyed by the resolved root, a second `serve --detach` on an already-served root is rejected naming that root, and `serve --stop` accepts a root to pick which serve to stop (a bare stop still works when exactly one is running and lists the served roots when several are). The record now also persists the key's expiry deadline; the key itself is still never written to any file.
+- f05d372: Fall back to a direct-capable connection when a proxy environment variable is set but the installed iroh binding cannot route through it, instead of failing before any network attempt. The client prints one stderr warning (never the proxy URL), leaves the relay policy to the locator in the bridge key — a direct-only key stays a direct-only attempt — and a proxied environment with no working direct or relay route now fails as a genuine connection failure rather than the pre-network configuration dead-end.
+- 56b59f5: Add `serve --status`: it lists each active detached serve with its served root, pid, start time, and key expiry, one per line, and prints `No detached serves are running.` (exit 0) when none are. Stale records — a dead pid or a record from a prior boot — are pruned as they are listed. Only the key's expiry deadline is shown; the key itself is never written or printed.
+
+### Patch Changes
+
+- 38b9cf9: Brand the remote read shell limit and traversal-budget failures: every limit message now states the configured ceiling, whether it is per-file or cumulative, and a recovery; a run exceeding the bridge's time budget is answered with a branded time-budget failure instead of a torn-down session; and a response the bridge ends early is reported as the bridge closing early rather than "The bridge returned an invalid response."
+- 18660cd: Brand the pull-side failures: a pull response the bridge ends early and a lost connection are reported as such with causes attached instead of "The pull could not be completed.", and the pull limit messages state their ceilings and a recovery instead of a bare "exceeded a safety limit".
+- aa85aae: Strip narrating comments across the codebase while keeping the constraint-explaining notes (TOCTOU guards, expiry ordering, PID-reuse liveness, wire sanitization, and similar). No behavior changes.
+- b14e59d: Strip narrating comments added by the reliability wave while keeping constraint-explaining notes (proxy fallback ordering, relay-link snapshot teardown, root-keyed detach records, probe assumptions, and similar). No behavior changes.
+
 ## 0.2.0
 
 ### Breaking Changes
