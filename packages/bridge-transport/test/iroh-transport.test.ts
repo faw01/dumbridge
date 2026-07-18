@@ -1,5 +1,7 @@
 import { fileURLToPath } from "node:url";
 import {
+  BridgeCaTrustConfigurationError,
+  BridgeCaTrustUnsupportedError,
   BridgeDeadlineExceededError,
   BridgeDialError,
   BridgeDirectConnectError,
@@ -11,8 +13,11 @@ import {
   type BridgeSession,
 } from "@dumbridge/bridge-transport";
 import {
+  caTrustSourceFromEnvironment,
   classifyDialFailure,
+  configureIrohCaTrust,
   configureIrohProxy,
+  irohBindingSupportsCaTrust,
   irohBindingSupportsProxy,
   makeIrohTransport,
   normalizeIrohAddress,
@@ -125,6 +130,11 @@ interface ConnectionPathProbe {
 
 interface ProxyEnvironmentProbe {
   readonly configured: readonly string[];
+}
+
+interface CaTrustProbe {
+  readonly configuredCaPems: readonly string[];
+  readonly configuredProxyUrls: readonly string[];
 }
 
 describe("Iroh bridge transport", () => {
@@ -296,6 +306,115 @@ describe("Iroh bridge transport", () => {
     const result = await runProbe<ProxyEnvironmentProbe>("proxy-environment");
 
     expect(result.configured).toEqual(["http://threaded.example:8080/"]);
+  });
+
+  it.effect("reports the current CA trust binding gap explicitly", () =>
+    Effect.gen(function* () {
+      const error = yield* configureIrohCaTrust({}, {
+        _tag: "ExtraRootsPem",
+        pem: "-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----\n",
+      }).pipe(Effect.flip);
+
+      expect(error).toBeInstanceOf(BridgeCaTrustUnsupportedError);
+    })
+  );
+
+  it("answers whether a binding can trust extra CA roots", () => {
+    expect(irohBindingSupportsCaTrust({})).toBe(false);
+    expect(
+      irohBindingSupportsCaTrust({ caExtraRootsPem: () => undefined })
+    ).toBe(true);
+    // The published @number0/iroh binding omits the CA trust builder method;
+    // this pins the gap that keeps the client's CA trust disabled on stock.
+    expect(irohBindingSupportsCaTrust()).toBe(false);
+    const broken = new Proxy(
+      {},
+      {
+        get: () => {
+          throw new Error("native binding failed to load");
+        },
+      }
+    );
+    expect(irohBindingSupportsCaTrust(broken)).toBe(false);
+  });
+
+  it.effect("passes the PEM contents to a CA-trust-capable binding", () =>
+    Effect.gen(function* () {
+      const configured: string[] = [];
+      const pem =
+        "-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----\n";
+
+      yield* configureIrohCaTrust(
+        { caExtraRootsPem: (contents: string) => configured.push(contents) },
+        { _tag: "ExtraRootsPem", pem }
+      );
+      yield* configureIrohCaTrust(
+        {
+          caExtraRootsPem: () => {
+            throw new Error("must not be called when disabled");
+          },
+        },
+        { _tag: "Disabled" }
+      );
+
+      expect(configured).toEqual([pem]);
+    })
+  );
+
+  it.effect(
+    "does not expose PEM contents when native CA configuration fails",
+    () =>
+      Effect.gen(function* () {
+        const marker = "private-mitm-ca-certificate";
+        const error = yield* configureIrohCaTrust(
+          {
+            caExtraRootsPem: () => {
+              throw new Error(`failed to parse CA PEM: ${marker}`);
+            },
+          },
+          {
+            _tag: "ExtraRootsPem",
+            pem: `-----BEGIN CERTIFICATE-----\n${marker}\n-----END CERTIFICATE-----\n`,
+          }
+        ).pipe(Effect.flip);
+
+        expect(error).toBeInstanceOf(BridgeCaTrustConfigurationError);
+        expect(JSON.stringify(error)).not.toContain(marker);
+        expect(String(error)).not.toContain(marker);
+      })
+  );
+
+  it("selects the CA trust source by documented precedence", () => {
+    expect(
+      caTrustSourceFromEnvironment({
+        CODEX_PROXY_CERT: "/etc/certs/envoy.crt",
+        DUMBRIDGE_CA_FILE: "/etc/certs/override.crt",
+        SSL_CERT_FILE: "/etc/certs/bundle.pem",
+      })
+    ).toEqual({ name: "DUMBRIDGE_CA_FILE", path: "/etc/certs/override.crt" });
+    expect(
+      caTrustSourceFromEnvironment({
+        CODEX_PROXY_CERT: "/etc/certs/envoy.crt",
+        SSL_CERT_FILE: "/etc/certs/bundle.pem",
+      })
+    ).toEqual({ name: "CODEX_PROXY_CERT", path: "/etc/certs/envoy.crt" });
+    expect(
+      caTrustSourceFromEnvironment({ SSL_CERT_FILE: "/etc/certs/bundle.pem" })
+    ).toEqual({ name: "SSL_CERT_FILE", path: "/etc/certs/bundle.pem" });
+    expect(caTrustSourceFromEnvironment({})).toBeUndefined();
+    // Truthiness, not presence, mirroring the proxy environment predicate.
+    expect(caTrustSourceFromEnvironment({ SSL_CERT_FILE: "" })).toBeUndefined();
+  });
+
+  it("configures CA trust on the dial right after the proxy", async () => {
+    const result = await runProbe<CaTrustProbe>("ca-trust");
+
+    expect(result.configuredProxyUrls).toEqual([
+      "http://threaded.example:8080/",
+    ]);
+    expect(result.configuredCaPems).toEqual([
+      "-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----\n",
+    ]);
   });
 
   it("answers whether a binding can route through a proxy", () => {

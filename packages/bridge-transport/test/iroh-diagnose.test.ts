@@ -7,9 +7,16 @@ import { Effect } from "effect";
 
 const relayHosts = ["relay-a.example", "relay-b.example"];
 
+const certificatePem =
+  "-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----\n";
+
 const healthyProbes: IrohDiagnosticProbes = {
-  makeEndpointBuilder: () => ({ proxyUrl: () => undefined }),
+  makeEndpointBuilder: () => ({
+    caExtraRootsPem: () => undefined,
+    proxyUrl: () => undefined,
+  }),
   openTcp: () => Promise.resolve(),
+  readTextFile: () => Promise.resolve(certificatePem),
   resolveHost: () => Promise.resolve(),
   sendUdpProbe: () => Promise.resolve(),
 };
@@ -25,7 +32,7 @@ const diagnose = (
   });
 
 describe("Iroh environment diagnosis", () => {
-  it.effect("reports four ok checks in a healthy direct network", () =>
+  it.effect("reports five ok checks in a healthy direct network", () =>
     Effect.gen(function* () {
       const checks = yield* diagnose({});
 
@@ -51,6 +58,12 @@ describe("Iroh environment diagnosis", () => {
         {
           detail: "No HTTP(S) proxy is configured in the environment.",
           name: "proxy-capability",
+          status: "ok",
+        },
+        {
+          detail:
+            "Extra CA trust applies only when run and pull tunnel through a usable HTTP(S) proxy; this environment does not.",
+          name: "ca-trust",
           status: "ok",
         },
       ]);
@@ -287,6 +300,113 @@ describe("Iroh environment diagnosis", () => {
         detail:
           "The installed @number0/iroh binding could not construct an endpoint builder; run and pull cannot open a connection.",
         name: "proxy-capability",
+        status: "fail",
+      });
+    })
+  );
+
+  it.effect("evaluates ca-trust only behind a usable proxy", () =>
+    Effect.gen(function* () {
+      const proxiedEnvironment = {
+        CODEX_PROXY_CERT: "/etc/certs/envoy.crt",
+        HTTPS_PROXY: "http://proxy.example:8080",
+      };
+      const [, , , , trusted] = yield* diagnose({}, proxiedEnvironment);
+      const [, , , , withoutProxy] = yield* diagnose(
+        {},
+        { CODEX_PROXY_CERT: "/etc/certs/envoy.crt" }
+      );
+      const [, , , , proxyUnusable] = yield* diagnose(
+        { makeEndpointBuilder: () => ({}) },
+        proxiedEnvironment
+      );
+
+      expect(trusted).toEqual({
+        detail:
+          "An extra CA certificate from CODEX_PROXY_CERT is configured and the installed iroh binding trusts it.",
+        name: "ca-trust",
+        status: "ok",
+      });
+      expect(withoutProxy?.status).toBe("ok");
+      expect(withoutProxy?.detail).toContain("applies only");
+      expect(proxyUnusable?.status).toBe("ok");
+      expect(proxyUnusable?.detail).toContain("applies only");
+    })
+  );
+
+  it.effect("reports no CA source behind a usable proxy as ok", () =>
+    Effect.gen(function* () {
+      const [, , , , check] = yield* diagnose(
+        {},
+        { HTTPS_PROXY: "http://proxy.example:8080" }
+      );
+
+      expect(check).toEqual({
+        detail: "No extra CA trust source is set in the environment.",
+        name: "ca-trust",
+        status: "ok",
+      });
+    })
+  );
+
+  it.effect("warns on ca-trust when the binding lacks support", () =>
+    Effect.gen(function* () {
+      const [, , , , check] = yield* diagnose(
+        { makeEndpointBuilder: () => ({ proxyUrl: () => undefined }) },
+        {
+          HTTPS_PROXY: "http://proxy.example:8080",
+          SSL_CERT_FILE: "/etc/certs/bundle.pem",
+        }
+      );
+
+      expect(check).toEqual({
+        detail:
+          "The installed @number0/iroh binding does not expose extra CA root configuration. run and pull continue without the extra CA roots.",
+        name: "ca-trust",
+        status: "warn",
+      });
+    })
+  );
+
+  it.effect("warns on ca-trust when the named file cannot be read", () =>
+    Effect.gen(function* () {
+      const [, , , , check] = yield* diagnose(
+        { readTextFile: () => Promise.reject(new Error("EACCES")) },
+        {
+          DUMBRIDGE_CA_FILE: "/etc/certs/override.crt",
+          HTTPS_PROXY: "http://proxy.example:8080",
+        }
+      );
+
+      expect(check).toEqual({
+        detail:
+          "DUMBRIDGE_CA_FILE names an extra CA certificate file that could not be read; run and pull continue without it.",
+        name: "ca-trust",
+        status: "warn",
+      });
+    })
+  );
+
+  it.effect("fails ca-trust when the binding rejects the certificate", () =>
+    Effect.gen(function* () {
+      const [, , , , check] = yield* diagnose(
+        {
+          makeEndpointBuilder: () => ({
+            caExtraRootsPem: () => {
+              throw new Error("failed to parse CA PEM");
+            },
+            proxyUrl: () => undefined,
+          }),
+        },
+        {
+          DUMBRIDGE_CA_FILE: "/etc/certs/override.crt",
+          HTTPS_PROXY: "http://proxy.example:8080",
+        }
+      );
+
+      expect(check).toEqual({
+        detail: "Could not configure the extra Iroh CA roots.",
+        name: "ca-trust",
         status: "fail",
       });
     })

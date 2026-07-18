@@ -6,6 +6,8 @@ import {
   parseBridgeKey,
 } from "@dumbridge/bridge-key";
 import {
+  type BridgeCaTrustConfigurationError,
+  type BridgeCaTrustUnsupportedError,
   type BridgeDeadlineExceededError,
   BridgeDialError,
   BridgeDirectConnectError,
@@ -67,7 +69,11 @@ class BridgeClientError extends Schema.TaggedErrorClass<BridgeClientError>()(
 
 // A direct-only dial counts as non-retriable: it already spent its whole
 // connect deadline holepunching, so a second attempt only doubles the wait.
+// The proxy and CA trust configuration failures fire before any network
+// attempt, so retrying them can never change the outcome either.
 type DeterministicConnectError =
+  | BridgeCaTrustConfigurationError
+  | BridgeCaTrustUnsupportedError
   | BridgeDirectConnectError
   | BridgeLocatorInvalidError
   | BridgeProxyConfigurationError
