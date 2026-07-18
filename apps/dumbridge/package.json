@@ -2,6 +2,18 @@
   "name": "dumbridge",
   "version": "0.3.0",
   "description": "A short-lived, read-only bridge from one local directory to a cloud coding agent",
+  "keywords": [
+    "agent",
+    "bridge",
+    "bun",
+    "cli",
+    "cloud-agent",
+    "coding-agent",
+    "iroh",
+    "quic",
+    "read-only",
+    "remote-access"
+  ],
   "type": "module",
   "license": "MIT",
   "repository": {

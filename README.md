@@ -1,47 +1,60 @@
 # dumbridge
 
-dumbridge gives a disposable cloud coding agent temporary, live, read-only access to one local directory.
+dumbridge gives a cloud coding agent temporary, live, read-only access to one local directory.
 
-It is published on npm as [`dumbridge`](https://www.npmjs.com/package/dumbridge); the `serve` / `run` / `pull` flow has been proven end to end from a real Cursor Cloud agent (on 0.1.0, `npx --yes dumbridge@0.1.0`), and 0.2.0 keeps that flow with the credential renamed to `DUMBRIDGE_KEY`. Bun 1.3.14 or newer must be on `PATH`; both `bunx` and `npx` work.
+## Install
 
-## Quick start
+No install step is needed. Run it with `bunx dumbridge` or `npx --yes dumbridge`. Bun 1.3.14 or newer must be on `PATH`.
+
+## Quickstart
 
 On the computer that owns the files:
 
+1. Start the bridge:
+
 ```bash
-bunx dumbridge serve ~/Documents/GitHub
+bunx dumbridge serve ~/projects/my-app
 ```
 
-Keep that process in the foreground; Ctrl-C revokes access. Put the printed `DUMBRIDGE_KEY` value in the cloud agent's environment without logging or committing it.
+2. Copy the printed `DUMBRIDGE_KEY` value.
+3. Put it in the cloud agent's environment as a secret. Do not log it or commit it.
+4. Keep the serve process running. Ctrl-C stops it and revokes access.
 
 In the cloud agent:
 
 ```bash
-npx --yes dumbridge skill
-npx --yes dumbridge run 'find . -path "*/skills/*/SKILL.md" -print | sort'
-npx --yes dumbridge pull .agents/skills/wayfinder .agents/skills/wayfinder
+npx --yes dumbridge run 'ls -la'
+npx --yes dumbridge pull src/config.json
 ```
+
+`run` evaluates one script against the served root and prints its output. `pull` copies one file or directory from the served root into the current directory.
 
 ## Commands
 
-- `dumbridge serve <root>` shares one directory read-only until Ctrl-C and prints the `DUMBRIDGE_KEY` bearer secret, valid for a configurable TTL (default 8 hours, `--ttl '90 minutes'`). `serve --detach <root>` starts the same server detached from the terminal — several may run at once, at most one per root — and `serve --stop [<root>]` terminates one, which revokes its key; the root is required only when several are running. `serve --status` lists each active detached serve with its served root, pid, start time, and key expiry, pruning stale records as it goes.
-- `dumbridge run '<script>'` evaluates one Bash-shaped script against the live served root in a bounded Just Bash sandbox, never the host shell. Its writes are discarded.
-- `dumbridge pull <remote-path> [destination]` copies one exact file or directory, verifies content, refuses symlinks, and never overwrites an existing destination.
-- `run` and `pull` read the bridge key from `--key-file <path>` when given (`-` reads stdin), otherwise from `DUMBRIDGE_KEY`; the key is never accepted as a command argument.
-- `dumbridge doctor` prints a no-key, no-session environment diagnosis — DNS resolution of the iroh relay hosts, UDP egress, relay reachability on port 443, and HTTP(S) proxy capability — and exits non-zero when any check fails.
+- `dumbridge serve <root>` serves one directory read-only and prints the bridge key. The key expires after 8 hours by default; set a different lifetime with `--ttl '90 minutes'`. `--detach` starts the server without a terminal, `--stop` ends a detached serve, and `--status` lists the active ones. `--direct-only` and `--relay-only` force the connection path.
+- `dumbridge run '<script>'` evaluates one Bash-shaped script against the served root in a bounded sandbox. Writes are discarded. It never runs the host shell.
+- `dumbridge pull <remote-path> [destination]` copies one file or directory from the served root. It verifies content, refuses symlinks, and never overwrites an existing destination.
+- `dumbridge doctor` diagnoses the network environment without a key and exits non-zero when a check fails.
 - `dumbridge skill` prints the bundled agent usage guide without contacting a bridge.
 
-The bridge key is a bearer secret: anyone holding it while `serve` is running can read below the served root.
+`run` and `pull` read the bridge key from `DUMBRIDGE_KEY`, or from `--key-file <path>` (`-` reads stdin). The key is never accepted as a command argument. Failures exit non-zero with a plain message that names the cause; `--log-level debug` on `run` or `pull` logs the dial sequence on stderr without exposing the key.
 
-Failures speak the product's language and always exit non-zero: reads outside the served root explain that the share is jailed to it, a failed connection names its observed cause — serve stopped, the relay host unreachable or blocked, no viable network path, or a proxy the installed iroh binding cannot use — and invalid or expired keys are rejected by name. A relay failure names the exact host tried; dumbridge uses iroh's public relays, so allow HTTPS (TCP 443) to `aps1-1.relay.n0.iroh.link`, `euc1-1.relay.n0.iroh.link`, `use1-1.relay.n0.iroh.link`, and `usw1-1.relay.n0.iroh.link` narrowly instead of opening broad egress. `--log-level debug` on `run` or `pull` logs the dial sequence — paths attempted, relay used, outcomes — on stderr without exposing the bridge key or proxy credentials. The first `run` against a bridge prints a one-line banner naming the served root (final path component only, sanitized) so the agent knows what it is exploring.
+## What it can and cannot do
 
-Every key carries an expiry deadline fixed when `serve` mints it, enforced by the serve process itself: after the deadline, sessions are rejected even if the process keeps running. Stopping the bridge process still revokes access immediately. The deadline matters most for a detached bridge (`serve --detach`), where a long-lived server would otherwise mint a never-expiring credential; once the key expires, the detached process keeps running but grants nothing, and rerunning `serve` mints a fresh key.
+- Read-only. The agent can read files below the served root. It cannot write to your machine.
+- One directory. Only the directory you pass to `serve` is visible. Reads outside it are refused.
+- No host shell. `run` uses a sandboxed interpreter, and its writes are discarded.
+- Short-lived key. The bridge key is a bearer secret: anyone holding it can read the served root while `serve` runs. It expires on a deadline fixed when `serve` mints it, and stopping `serve` revokes it immediately.
 
-## Status
+## Using it from a cloud agent
 
-The complete flow works over direct iroh connections and ordinary relay fallback. Proxy-only cloud agents still require the included iroh binding patch to be built and published for each native platform; stock `@number0/iroh` does not expose that proxy configuration yet. See [the proxy patch](docs/patches/iroh-ffi-proxy.md) and [the release gates](docs/design/v1.md#release-gates).
+Put the `DUMBRIDGE_KEY` value in the agent's environment, then use `run` and `pull` as shown above.
 
-CI runs on GitHub-hosted macOS, Linux, and Windows runners. Exact CPU and libc support remains a native release gate.
+- Claude Code on the web: set Network access to Full.
+- Codex Cloud: set the Domain allowlist to All (unrestricted).
+- Cursor: works with no extra setup.
+
+If a connection fails, run `npx --yes dumbridge doctor` in the agent to diagnose the environment.
 
 ## Development
 
@@ -50,6 +63,8 @@ bun install --frozen-lockfile
 bun run verify
 ```
 
-This is a Bun workspace orchestrated by Turborepo. The publishable CLI is in `apps/dumbridge`; the internal seams (`bridge-key`, `bridge-transport`, `wire`, `served-root`, `safe-shell`, `pull-transfer`) are private packages under `packages/*` that get bundled into the published `dist/cli.js`. The optional agent instructions are in `skills/dumbridge`.
+This is a Bun workspace orchestrated by Turborepo. The publishable CLI is in `apps/dumbridge`; the packages under `packages/*` are private and bundled into the published CLI. See [CONTEXT.md](CONTEXT.md) for the domain language and [docs/design/v1.md](docs/design/v1.md) for the design.
 
-See [the v1 design](docs/design/v1.md) for the product and security contract and [CONTEXT.md](CONTEXT.md) for its domain language.
+## License
+
+MIT
