@@ -311,7 +311,7 @@ const proxyEnvironmentThreading = async () =>
         const originalBind = EndpointBuilder.prototype.bind;
         const configured: string[] = [];
         const prototype = EndpointBuilder.prototype as unknown as {
-          proxyUrl?: (url: string) => void;
+          proxyUrl?: ((url: string) => void) | undefined;
         };
         const stream = {
           recv: { read: () => Promise.resolve([]) },
