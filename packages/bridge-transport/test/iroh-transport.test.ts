@@ -310,10 +310,13 @@ describe("Iroh bridge transport", () => {
 
   it.effect("reports the current CA trust binding gap explicitly", () =>
     Effect.gen(function* () {
-      const error = yield* configureIrohCaTrust({}, {
-        _tag: "ExtraRootsPem",
-        pem: "-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----\n",
-      }).pipe(Effect.flip);
+      const error = yield* configureIrohCaTrust(
+        {},
+        {
+          _tag: "ExtraRootsPem",
+          pem: "-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----\n",
+        }
+      ).pipe(Effect.flip);
 
       expect(error).toBeInstanceOf(BridgeCaTrustUnsupportedError);
     })

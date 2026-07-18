@@ -265,7 +265,8 @@ describe("dumbridge CLI", () => {
   });
 
   test("trusts the named CA certificate only when the binding can use it", async () => {
-    const pem = "-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----\n";
+    const pem =
+      "-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----\n";
     const reads: string[] = [];
     const readPem = (path: string) => {
       reads.push(path);
