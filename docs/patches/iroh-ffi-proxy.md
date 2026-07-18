@@ -38,7 +38,13 @@ endpoint builder:
   additive only: the embedded WebPKI roots stay trusted and the given
   certificates are layered on top; there is no replace-roots or verify-off
   form. PEM contents (not a file path) cross the binding so all file I/O stays
-  at dumbridge's edge.
+  at dumbridge's edge. Known limitation of the published build: the method
+  rejects malformed PEM framing and empty input, but a certificate with valid
+  PEM framing and malformed DER inside is silently ignored by rustls's
+  best-effort root loading (`add_parsable_certificates`), so such input can
+  succeed while adding no trust anchor. A stricter per-certificate validation
+  belongs in the next binding build and the upstream iroh-ffi PR; this patch
+  stays byte-identical to `dumbridge-iroh@1.0.0-proxy.0`.
 
 No proxy is implemented in dumbridge, and the patch does not add a network
 service. It only makes Iroh's existing HTTP(S)-proxy and CA-trust

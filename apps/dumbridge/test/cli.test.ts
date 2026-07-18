@@ -329,9 +329,20 @@ describe("dumbridge CLI", () => {
     const link = mintKeyExpiringAt(1);
     const result = await invokeCli({
       args: ["run", "true"],
+      // Empty proxy variables override anything the ambient shell exports
+      // (empty never counts as a configured proxy), so the no-proxy branch
+      // is exercised regardless of the machine running the suite. The CA
+      // resolution runs before the key expiry is checked, so a CA notice
+      // would precede the expiry message if one were ever emitted.
       environment: {
+        ALL_PROXY: "",
+        all_proxy: "",
         DUMBRIDGE_CA_FILE: "/does-not-exist.pem",
         DUMBRIDGE_KEY: link,
+        HTTP_PROXY: "",
+        HTTPS_PROXY: "",
+        http_proxy: "",
+        https_proxy: "",
       },
     });
 

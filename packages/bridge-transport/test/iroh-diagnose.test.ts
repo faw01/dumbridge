@@ -368,6 +368,36 @@ describe("Iroh environment diagnosis", () => {
     })
   );
 
+  it.effect("reports the binding gap without touching the named file", () =>
+    Effect.gen(function* () {
+      // Mirrors run and pull: they probe binding support before reading the
+      // file, so a stock binding is the reported gap even when the named
+      // file is also unreadable.
+      let reads = 0;
+      const [, , , , check] = yield* diagnose(
+        {
+          makeEndpointBuilder: () => ({ proxyUrl: () => undefined }),
+          readTextFile: () => {
+            reads += 1;
+            return Promise.reject(new Error("EACCES"));
+          },
+        },
+        {
+          DUMBRIDGE_CA_FILE: "/etc/certs/override.crt",
+          HTTPS_PROXY: "http://proxy.example:8080",
+        }
+      );
+
+      expect(reads).toBe(0);
+      expect(check).toEqual({
+        detail:
+          "The installed @number0/iroh binding does not expose extra CA root configuration. run and pull continue without the extra CA roots.",
+        name: "ca-trust",
+        status: "warn",
+      });
+    })
+  );
+
   it.effect("warns on ca-trust when the named file cannot be read", () =>
     Effect.gen(function* () {
       const [, , , , check] = yield* diagnose(

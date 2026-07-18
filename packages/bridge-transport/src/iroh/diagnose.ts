@@ -5,7 +5,12 @@ import { connect } from "node:net";
 import { Endpoint, RelayMode } from "@number0/iroh";
 import { Effect } from "effect";
 import type { DiagnosisCheck } from "../index";
-import { caTrustSourceFromEnvironment, configureIrohCaTrust } from "./ca";
+import {
+  caTrustSourceFromEnvironment,
+  caTrustUnsupportedMessage,
+  configureIrohCaTrust,
+  irohBindingSupportsCaTrust,
+} from "./ca";
 import {
   configureIrohProxy,
   hasProxyEnvironment,
@@ -279,8 +284,18 @@ const caTrustCheck = (request: {
       status: "ok" as const,
     });
   }
-  return withThrowawayBuilder(name, request.probes, (builder) =>
-    Effect.tryPromise({
+  return withThrowawayBuilder(name, request.probes, (builder) => {
+    // Support is probed before the file is touched, mirroring run and pull:
+    // a stock binding is the reported gap even when the named file is also
+    // unreadable, and the check never reads a file it would not use.
+    if (!irohBindingSupportsCaTrust(builder)) {
+      return Effect.succeed({
+        detail: `${caTrustUnsupportedMessage} run and pull continue without the extra CA roots.`,
+        name,
+        status: "warn" as const,
+      });
+    }
+    return Effect.tryPromise({
       catch: () => undefined,
       try: () => request.probes.readTextFile(source.path),
     }).pipe(
@@ -298,17 +313,15 @@ const caTrustCheck = (request: {
                 name,
                 status: "fail" as const,
               }),
+            BridgeCaTrustUnsupportedError: (error) =>
+              Effect.succeed({
+                detail: `${error.message} run and pull continue without the extra CA roots.`,
+                name,
+                status: "warn" as const,
+              }),
           })
         )
       ),
-      Effect.catchTags({
-        BridgeCaTrustUnsupportedError: (error) =>
-          Effect.succeed({
-            detail: `${error.message} run and pull continue without the extra CA roots.`,
-            name,
-            status: "warn" as const,
-          }),
-      }),
       Effect.catch(() =>
         Effect.succeed({
           detail: `${source.name} names an extra CA certificate file that could not be read; run and pull continue without it.`,
@@ -316,8 +329,8 @@ const caTrustCheck = (request: {
           status: "warn" as const,
         })
       )
-    )
-  );
+    );
+  });
 };
 
 // The proxy check runs first (it touches no network) because the relay

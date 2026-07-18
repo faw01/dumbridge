@@ -20,6 +20,11 @@ interface CaTrustAwareEndpointBuilder {
   readonly caExtraRootsPem?: (pem: string) => void;
 }
 
+// One string for the dial's branded failure and the doctor's check detail,
+// so the two surfaces can never drift apart.
+export const caTrustUnsupportedMessage =
+  "The installed @number0/iroh binding does not expose extra CA root configuration.";
+
 // The published @number0/iroh binding omits the CA trust builder method
 // (iroh's Rust core has carried it since CaTlsConfig::with_extra_roots, but
 // the Node-API binding does not surface it); only the patched dumbridge-iroh
@@ -77,8 +82,7 @@ export const configureIrohCaTrust = (
   const caTrustAwareBuilder = builder as CaTrustAwareEndpointBuilder;
   if (caTrustAwareBuilder.caExtraRootsPem === undefined) {
     return new BridgeCaTrustUnsupportedError({
-      message:
-        "The installed @number0/iroh binding does not expose extra CA root configuration.",
+      message: caTrustUnsupportedMessage,
     });
   }
 
