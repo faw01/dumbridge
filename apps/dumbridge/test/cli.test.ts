@@ -12,11 +12,14 @@ import { PullLimitError } from "@dumbridge/pull-transfer";
 import { Effect } from "effect";
 import packageJson from "../package.json" with { type: "json" };
 import {
+  caTrustUnreadableNotice,
+  caTrustUnsupportedNotice,
   connectFailureMessage,
   connectionPathNotice,
   proxyFallbackNotice,
   proxyUnusableConnectNotice,
   publicErrorMessage,
+  resolveClientCaTrust,
   resolveClientTransportOptions,
   runDoctor,
 } from "../src/cli";
@@ -206,6 +209,8 @@ describe("dumbridge CLI", () => {
   test("commits to the relay only when the binding can use the proxy", () => {
     const proxyCapable = () => true;
     const proxyIncapable = () => false;
+    // The environment travels inside the options so the dial reads the same
+    // environment the commitment decision was made with.
     expect(
       resolveClientTransportOptions(
         { HTTPS_PROXY: "http://proxy" },
@@ -213,6 +218,7 @@ describe("dumbridge CLI", () => {
       )
     ).toEqual({
       options: {
+        environment: { HTTPS_PROXY: "http://proxy" },
         proxy: { _tag: "FromEnvironment" },
         reachability: "relay-only",
       },
@@ -237,6 +243,8 @@ describe("dumbridge CLI", () => {
 
     resolveClientTransportOptions({}, countingProbe);
     expect(probes).toBe(0);
+    resolveClientTransportOptions({ HTTPS_PROXY: "" }, countingProbe);
+    expect(probes).toBe(0);
     resolveClientTransportOptions(
       { HTTPS_PROXY: "http://proxy" },
       countingProbe
@@ -254,6 +262,92 @@ describe("dumbridge CLI", () => {
       options: { proxy: { _tag: "Disabled" } },
       proxyFallback: true,
     });
+  });
+
+  test("trusts the named CA certificate only when the binding can use it", async () => {
+    const pem =
+      "-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----\n";
+    const reads: string[] = [];
+    const readPem = (path: string) => {
+      reads.push(path);
+      return Promise.resolve(pem);
+    };
+    const neverRead = () => Promise.reject(new Error("must not be read"));
+
+    const trusted = await Effect.runPromise(
+      resolveClientCaTrust(
+        { CODEX_PROXY_CERT: "/etc/certs/envoy.crt" },
+        () => true,
+        readPem
+      )
+    );
+    const unsupported = await Effect.runPromise(
+      resolveClientCaTrust(
+        { CODEX_PROXY_CERT: "/etc/certs/envoy.crt" },
+        () => false,
+        neverRead
+      )
+    );
+    const noSource = await Effect.runPromise(
+      resolveClientCaTrust({}, () => true, neverRead)
+    );
+
+    expect(trusted).toEqual({
+      caTrust: { _tag: "ExtraRootsPem", pem },
+      notice: undefined,
+    });
+    expect(reads).toEqual(["/etc/certs/envoy.crt"]);
+    expect(unsupported).toEqual({
+      caTrust: { _tag: "Disabled" },
+      notice: caTrustUnsupportedNotice,
+    });
+    expect(noSource).toEqual({
+      caTrust: { _tag: "Disabled" },
+      notice: undefined,
+    });
+  });
+
+  test("continues without an unreadable CA file and names the source", async () => {
+    const resolution = await Effect.runPromise(
+      resolveClientCaTrust(
+        { DUMBRIDGE_CA_FILE: "/etc/certs/missing.crt" },
+        () => true,
+        () => Promise.reject(new Error("ENOENT"))
+      )
+    );
+
+    expect(resolution).toEqual({
+      caTrust: { _tag: "Disabled" },
+      notice: caTrustUnreadableNotice("DUMBRIDGE_CA_FILE"),
+    });
+    expect(caTrustUnreadableNotice("DUMBRIDGE_CA_FILE")).not.toContain(
+      "missing.crt"
+    );
+  });
+
+  test("stays silent about CA sources when the dial commits to no proxy", async () => {
+    const link = mintKeyExpiringAt(1);
+    const result = await invokeCli({
+      args: ["run", "true"],
+      // Empty proxy variables override anything the ambient shell exports
+      // (empty never counts as a configured proxy), so the no-proxy branch
+      // is exercised regardless of the machine running the suite. The CA
+      // resolution runs before the key expiry is checked, so a CA notice
+      // would precede the expiry message if one were ever emitted.
+      environment: {
+        ALL_PROXY: "",
+        all_proxy: "",
+        DUMBRIDGE_CA_FILE: "/does-not-exist.pem",
+        DUMBRIDGE_KEY: link,
+        HTTP_PROXY: "",
+        HTTPS_PROXY: "",
+        http_proxy: "",
+        https_proxy: "",
+      },
+    });
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toBe(expiredKeyMessage(1));
   });
 
   test("names the proxy fallback in one branded stderr line", () => {

@@ -147,6 +147,34 @@ const verifyInstalledArchive = async () => {
         "packed executable returned unexpected help or version output"
       );
     }
+
+    // Releases and prerelease tarballs may re-version package.json after
+    // dist/cli.js was bundled; --version must follow the installed manifest,
+    // not a version constant inlined at build time.
+    const installedManifestPath = join(
+      consumerDirectory,
+      "node_modules",
+      "dumbridge",
+      "package.json"
+    );
+    const reVersioned = "0.0.0-verify-tarball";
+    const manifest = JSON.parse(await installedManifest.text()) as {
+      version: string;
+    };
+    await writeFile(
+      installedManifestPath,
+      `${JSON.stringify({ ...manifest, version: reVersioned }, null, 2)}\n`
+    );
+    const reVersionedOutput = spawnChecked(
+      ["bunx", "--no-install", "dumbridge", "--version"],
+      consumerDirectory,
+      packageManagerEnv
+    );
+    if (reVersionedOutput.trim() !== `dumbridge v${reVersioned}`) {
+      throw new Error(
+        `packed executable reports the build-time version, not the installed manifest version: got '${reVersionedOutput.trim()}'`
+      );
+    }
   } finally {
     await rm(temporaryRoot, { force: true, recursive: true });
   }

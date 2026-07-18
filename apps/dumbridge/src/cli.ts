@@ -1,5 +1,7 @@
 #!/usr/bin/env bun
 
+import { readFileSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { redactBridgeKey } from "@dumbridge/bridge-key";
@@ -9,7 +11,12 @@ import type {
   DiagnosisCheck,
 } from "@dumbridge/bridge-transport";
 import {
+  type CaTrustSource,
+  caTrustSourceFromEnvironment,
+  hasProxyEnvironment,
+  type IrohCaTrustConfiguration,
   type IrohTransportOptions,
+  irohBindingSupportsCaTrust,
   irohBindingSupportsProxy,
   makeIrohTransport,
 } from "@dumbridge/bridge-transport/iroh";
@@ -34,7 +41,6 @@ import { Argument, Command, Flag } from "effect/unstable/cli";
 import skillGuide from "../../../skills/dumbridge/SKILL.md" with {
   type: "text",
 };
-import packageJson from "../package.json" with { type: "json" };
 import { isDialFailure, pullRemote, runRemote } from "./bridge/client";
 import {
   detachServe,
@@ -57,15 +63,6 @@ const keyFileFlag = Flag.string("key-file").pipe(
   )
 );
 
-const proxyEnvironmentNames = [
-  "ALL_PROXY",
-  "HTTPS_PROXY",
-  "HTTP_PROXY",
-  "all_proxy",
-  "https_proxy",
-  "http_proxy",
-] as const;
-
 export interface ClientTransportResolution {
   readonly options: IrohTransportOptions;
   readonly proxyFallback: boolean;
@@ -77,19 +74,23 @@ export interface ClientTransportResolution {
 // direct-capable dial: no proxy is requested and no reachability is forced,
 // leaving the relay policy to the locator inside the bridge key — a
 // direct-only key stays a direct-only attempt, a relay-carrying key keeps its
-// fallback. A proxy-capable binding still commits to the proxy, because UDP
-// holepunching cannot traverse an HTTP proxy.
+// fallback. A proxy-capable binding still commits to the proxy and to
+// relay-only reachability: an HTTP CONNECT tunnel carries TCP only, so UDP
+// holepunching can never traverse it — relay-only under a proxy is a
+// constraint of the environment, not a dumbridge policy choice. The inspected
+// environment travels inside the options so the dial reads the same
+// environment this decision was made with.
 export const resolveClientTransportOptions = (
   environment: Readonly<Record<string, string | undefined>> = process.env,
   bindingSupportsProxy: () => boolean = irohBindingSupportsProxy
 ): ClientTransportResolution => {
-  const usesProxy = proxyEnvironmentNames.some((name) => environment[name]);
-  if (!usesProxy) {
+  if (!hasProxyEnvironment(environment)) {
     return { options: { proxy: { _tag: "Disabled" } }, proxyFallback: false };
   }
   return bindingSupportsProxy()
     ? {
         options: {
+          environment,
           proxy: { _tag: "FromEnvironment" },
           reachability: "relay-only",
         },
@@ -97,6 +98,62 @@ export const resolveClientTransportOptions = (
       }
     : { options: { proxy: { _tag: "Disabled" } }, proxyFallback: true };
 };
+
+export interface ClientCaTrustResolution {
+  readonly caTrust: IrohCaTrustConfiguration;
+  readonly notice: string | undefined;
+}
+
+export const caTrustUnsupportedNotice =
+  "dumbridge: this environment names an extra CA certificate, but the installed iroh binding cannot trust extra CA roots; connecting without it\n";
+
+// Names the variable, never its path: a sandbox path is harmless locally but
+// the notice pattern stays free of environment values, like the proxy one.
+export const caTrustUnreadableNotice = (source: CaTrustSource["name"]) =>
+  `dumbridge: ${source} names an extra CA certificate file that could not be read; connecting without it\n`;
+
+// A missing or unusable CA source degrades with a notice instead of failing:
+// the extra roots are additive trust for a TLS-intercepting proxy, and only
+// the dial can tell whether this proxy actually intercepts, so a pre-network
+// dead-end here would refuse environments that would have connected fine.
+export const resolveClientCaTrust = (
+  environment: Readonly<Record<string, string | undefined>> = process.env,
+  bindingSupportsCaTrust: () => boolean = irohBindingSupportsCaTrust,
+  readCaFile: (path: string) => Promise<string> = (path) =>
+    readFile(path, "utf8")
+): Effect.Effect<ClientCaTrustResolution> =>
+  Effect.suspend(() => {
+    const source = caTrustSourceFromEnvironment(environment);
+    if (source === undefined) {
+      return Effect.succeed<ClientCaTrustResolution>({
+        caTrust: { _tag: "Disabled" },
+        notice: undefined,
+      });
+    }
+    if (!bindingSupportsCaTrust()) {
+      return Effect.succeed<ClientCaTrustResolution>({
+        caTrust: { _tag: "Disabled" },
+        notice: caTrustUnsupportedNotice,
+      });
+    }
+    return Effect.tryPromise({
+      catch: () => undefined,
+      try: () => readCaFile(source.path),
+    }).pipe(
+      Effect.map(
+        (pem): ClientCaTrustResolution => ({
+          caTrust: { _tag: "ExtraRootsPem", pem },
+          notice: undefined,
+        })
+      ),
+      Effect.catch(() =>
+        Effect.succeed<ClientCaTrustResolution>({
+          caTrust: { _tag: "Disabled" },
+          notice: caTrustUnreadableNotice(source.name),
+        })
+      )
+    );
+  });
 
 const write = (stream: NodeJS.WriteStream, value: string) =>
   Effect.sync(() => {
@@ -107,14 +164,32 @@ const write = (stream: NodeJS.WriteStream, value: string) =>
 export const proxyFallbackNotice =
   "dumbridge: this environment sets a proxy, but the installed iroh binding cannot route through it; attempting a direct connection instead\n";
 
+const disabledCaTrust: ClientCaTrustResolution = {
+  caTrust: { _tag: "Disabled" },
+  notice: undefined,
+};
+
 const clientTransport = Effect.gen(function* () {
   const resolution = resolveClientTransportOptions();
   if (resolution.proxyFallback) {
     yield* write(process.stderr, proxyFallbackNotice);
   }
+  // Extra CA roots vouch for the TLS inside the proxy's CONNECT tunnel, so
+  // they are resolved only when the dial commits to that proxy; a common
+  // SSL_CERT_FILE export on an unproxied machine stays silent and inert.
+  const caResolution =
+    resolution.options.proxy?._tag === "FromEnvironment"
+      ? yield* resolveClientCaTrust()
+      : disabledCaTrust;
+  if (caResolution.notice !== undefined) {
+    yield* write(process.stderr, caResolution.notice);
+  }
   return {
     proxyFallback: resolution.proxyFallback,
-    transport: makeIrohTransport(resolution.options),
+    transport: makeIrohTransport({
+      ...resolution.options,
+      caTrust: caResolution.caTrust,
+    }),
   };
 });
 
@@ -487,7 +562,7 @@ const doctor = Command.make("doctor", {}, () =>
   })
 ).pipe(
   Command.withDescription(
-    "Diagnose this environment without a bridge key or session: DNS resolution of the iroh relay hosts, UDP egress, relay reachability on port 443, and HTTP(S) proxy capability. Exits non-zero when any check fails."
+    "Diagnose this environment without a bridge key or session: DNS resolution of the iroh relay hosts, UDP egress, relay reachability on port 443, HTTP(S) proxy capability, and extra CA trust for TLS-intercepting proxies. Exits non-zero when any check fails."
   )
 );
 
@@ -498,8 +573,18 @@ const command = Command.make("dumbridge").pipe(
   Command.withSubcommands([serve, run, pull, doctor, skill])
 );
 
+// Read at startup, never inlined at bundle time: a release or prerelease may
+// re-version package.json after dist/cli.js was bundled, and --version must
+// report the installed manifest. src/cli.ts and dist/cli.js both sit one
+// level below the manifest.
+const packageVersion = (
+  JSON.parse(
+    readFileSync(new URL("../package.json", import.meta.url), "utf8")
+  ) as { version: string }
+).version;
+
 const runCli = Command.runWith(command, {
-  version: packageJson.version,
+  version: packageVersion,
 });
 
 const formatPullBytes = (bytes: number) => {

@@ -11,6 +11,8 @@ import {
   BridgeLocatorInvalidError,
   type BridgeTransport,
 } from "../index";
+import type { IrohCaTrustConfiguration } from "./ca";
+import { configureIrohCaTrust } from "./ca";
 import { diagnoseHostIrohEnvironment } from "./diagnose";
 import {
   acquireEndpoint,
@@ -32,12 +34,22 @@ const defaultDeadlines: BridgeDeadlines = {
   listen: "15 seconds",
 };
 
+export type { CaTrustSource, IrohCaTrustConfiguration } from "./ca";
+export {
+  caTrustSourceFromEnvironment,
+  configureIrohCaTrust,
+  irohBindingSupportsCaTrust,
+} from "./ca";
 export type { IrohDiagnosticProbes } from "./diagnose";
 export { diagnoseIrohEnvironment } from "./diagnose";
 export type { IrohReachability } from "./endpoint";
 export { normalizeIrohAddress } from "./endpoint";
 export type { IrohProxyConfiguration } from "./proxy";
-export { configureIrohProxy, irohBindingSupportsProxy } from "./proxy";
+export {
+  configureIrohProxy,
+  hasProxyEnvironment,
+  irohBindingSupportsProxy,
+} from "./proxy";
 
 // Iroh keeps a trailing dot on relay hostnames; the reported host matches
 // what a user would put in an egress allowlist.
@@ -82,6 +94,7 @@ export const classifyDialFailure = (observed: {
 };
 
 export interface IrohTransportOptions {
+  readonly caTrust?: IrohCaTrustConfiguration;
   readonly deadlines?: Partial<BridgeDeadlines>;
   readonly environment?: ProxyEnvironment;
   readonly proxy?: IrohProxyConfiguration;
@@ -89,6 +102,7 @@ export interface IrohTransportOptions {
 }
 
 interface ResolvedOptions {
+  readonly caTrust: IrohCaTrustConfiguration;
   readonly deadlines: BridgeDeadlines;
   readonly environment: ProxyEnvironment;
   readonly proxy: IrohProxyConfiguration;
@@ -114,7 +128,8 @@ const listen = (options: ResolvedOptions): BridgeTransport["listen"] =>
         return configured;
       },
     });
-    yield* configureIrohProxy(builder, options.proxy);
+    yield* configureIrohProxy(builder, options.proxy, options.environment);
+    yield* configureIrohCaTrust(builder, options.caTrust);
 
     const endpoint = yield* acquireEndpoint(
       builder,
@@ -242,7 +257,8 @@ const connect = (
         return configured;
       },
     });
-    yield* configureIrohProxy(builder, options.proxy);
+    yield* configureIrohProxy(builder, options.proxy, options.environment);
+    yield* configureIrohCaTrust(builder, options.caTrust);
 
     const endpoint = yield* acquireEndpoint(
       builder,
@@ -337,6 +353,7 @@ const connect = (
 const resolveOptions = (
   options: IrohTransportOptions | undefined
 ): ResolvedOptions => ({
+  caTrust: options?.caTrust ?? { _tag: "Disabled" },
   deadlines: {
     ...defaultDeadlines,
     ...options?.deadlines,

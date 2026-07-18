@@ -2,7 +2,17 @@
   "$schema": "./node_modules/@biomejs/biome/configuration_schema.json",
   "extends": ["ultracite/biome/core"],
   "files": {
-    "includes": ["!.repos", "!node_modules", "!.turbo", "!dist", "!coverage"]
+    // patches/ mirrors externally published artifacts byte-for-byte
+    // (the iroh-ffi source patch and the dumbridge-iroh npm manifest);
+    // reformatting them would break the provenance pin.
+    "includes": [
+      "!.repos",
+      "!node_modules",
+      "!.turbo",
+      "!dist",
+      "!coverage",
+      "!patches"
+    ]
   },
   "javascript": {
     "globals": ["Bun"]

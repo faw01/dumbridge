@@ -1,9 +1,16 @@
 import { createSocket } from "node:dgram";
 import { lookup } from "node:dns/promises";
+import { readFile } from "node:fs/promises";
 import { connect } from "node:net";
 import { Endpoint, RelayMode } from "@number0/iroh";
 import { Effect } from "effect";
 import type { DiagnosisCheck } from "../index";
+import {
+  caTrustSourceFromEnvironment,
+  caTrustUnsupportedMessage,
+  configureIrohCaTrust,
+  irohBindingSupportsCaTrust,
+} from "./ca";
 import {
   configureIrohProxy,
   hasProxyEnvironment,
@@ -13,6 +20,7 @@ import {
 export interface IrohDiagnosticProbes {
   readonly makeEndpointBuilder: () => object;
   readonly openTcp: (host: string, port: number) => Promise<void>;
+  readonly readTextFile: (path: string) => Promise<string>;
   readonly resolveHost: (host: string) => Promise<void>;
   readonly sendUdpProbe: () => Promise<void>;
 }
@@ -174,6 +182,31 @@ const relayCheck = (request: {
     })
   );
 
+// The capability probes run the real configuration paths against a
+// throwaway endpoint builder; their typed failures already carry
+// self-descriptive, credential-free messages. A binding too broken to
+// construct a builder cannot open any connection; that failure stays check
+// data instead of aborting the report before it prints.
+const withThrowawayBuilder = (
+  name: string,
+  probes: IrohDiagnosticProbes,
+  check: (builder: object) => Effect.Effect<DiagnosisCheck>
+): Effect.Effect<DiagnosisCheck> =>
+  Effect.try({
+    catch: () => undefined,
+    try: () => probes.makeEndpointBuilder(),
+  }).pipe(
+    Effect.flatMap(check),
+    Effect.catch(() =>
+      Effect.succeed({
+        detail:
+          "The installed @number0/iroh binding could not construct an endpoint builder; run and pull cannot open a connection.",
+        name,
+        status: "fail" as const,
+      })
+    )
+  );
+
 const proxyCheck = (request: {
   readonly environment: ProxyEnvironment;
   readonly probes: IrohDiagnosticProbes;
@@ -186,58 +219,118 @@ const proxyCheck = (request: {
       status: "ok" as const,
     });
   }
-  // The capability probe is the existing proxy configuration path run
-  // against a throwaway endpoint builder; its typed failures already carry
-  // self-descriptive, credential-free messages.
-  return Effect.try({
-    catch: () => undefined,
-    try: () => request.probes.makeEndpointBuilder(),
-  }).pipe(
-    Effect.flatMap((builder) =>
-      configureIrohProxy(
-        builder,
-        { _tag: "FromEnvironment" },
-        request.environment
-      ).pipe(
-        Effect.as({
-          detail:
-            "An HTTP(S) proxy is configured and the installed iroh binding can use it.",
-          name,
-          status: "ok" as const,
-        }),
-        // The statuses mirror what run and pull actually do. A binding
-        // without proxy support makes them fall back to a direct connection
-        // ("warn": the udp-egress and relay-reachability checks cover that
-        // path). A capable binding commits to the environment's proxy, so
-        // proxy variables holding no usable URL block the dial ("fail").
-        Effect.catchTags({
-          BridgeProxyConfigurationError: (error) =>
-            Effect.succeed({
-              detail: error.message,
-              name,
-              status: "fail" as const,
-            }),
-          BridgeProxyUnsupportedError: (error) =>
-            Effect.succeed({
-              detail: `${error.message} run and pull fall back to a direct connection.`,
-              name,
-              status: "warn" as const,
-            }),
-        })
-      )
-    ),
-    // A binding too broken to construct a builder cannot open any
-    // connection; the failure stays check data instead of aborting the
-    // report before it prints.
-    Effect.catch(() =>
-      Effect.succeed({
+  return withThrowawayBuilder(name, request.probes, (builder) =>
+    configureIrohProxy(
+      builder,
+      { _tag: "FromEnvironment" },
+      request.environment
+    ).pipe(
+      Effect.as({
         detail:
-          "The installed @number0/iroh binding could not construct an endpoint builder; run and pull cannot open a connection.",
+          "An HTTP(S) proxy is configured and the installed iroh binding can use it.",
         name,
-        status: "fail" as const,
+        status: "ok" as const,
+      }),
+      // The statuses mirror what run and pull actually do. A binding
+      // without proxy support makes them fall back to a direct connection
+      // ("warn": the udp-egress and relay-reachability checks cover that
+      // path). A capable binding commits to the environment's proxy, so
+      // proxy variables holding no usable URL block the dial ("fail").
+      Effect.catchTags({
+        BridgeProxyConfigurationError: (error) =>
+          Effect.succeed({
+            detail: error.message,
+            name,
+            status: "fail" as const,
+          }),
+        BridgeProxyUnsupportedError: (error) =>
+          Effect.succeed({
+            detail: `${error.message} run and pull fall back to a direct connection.`,
+            name,
+            status: "warn" as const,
+          }),
       })
     )
   );
+};
+
+// Extra CA roots matter only when run and pull actually tunnel through the
+// proxy: without a usable proxy there is no CONNECT tunnel whose intercepted
+// TLS the roots could vouch for, so the check reports not-applicable instead
+// of warning about common, harmless SSL_CERT_FILE exports. The statuses
+// mirror what run and pull do with a usable proxy: an unsupported binding or
+// an unreadable file makes them continue without the extra roots ("warn"),
+// while a capable binding that rejects the certificate blocks the dial
+// before any network attempt ("fail").
+const caTrustCheck = (request: {
+  readonly environment: ProxyEnvironment;
+  readonly probes: IrohDiagnosticProbes;
+  readonly proxyUsable: boolean;
+}): Effect.Effect<DiagnosisCheck> => {
+  const name = "ca-trust";
+  if (!request.proxyUsable) {
+    return Effect.succeed({
+      detail:
+        "Extra CA trust applies only when run and pull tunnel through a usable HTTP(S) proxy; this environment does not.",
+      name,
+      status: "ok" as const,
+    });
+  }
+  const source = caTrustSourceFromEnvironment(request.environment);
+  if (source === undefined) {
+    return Effect.succeed({
+      detail: "No extra CA trust source is set in the environment.",
+      name,
+      status: "ok" as const,
+    });
+  }
+  return withThrowawayBuilder(name, request.probes, (builder) => {
+    // Support is probed before the file is touched, mirroring run and pull:
+    // a stock binding is the reported gap even when the named file is also
+    // unreadable, and the check never reads a file it would not use.
+    if (!irohBindingSupportsCaTrust(builder)) {
+      return Effect.succeed({
+        detail: `${caTrustUnsupportedMessage} run and pull continue without the extra CA roots.`,
+        name,
+        status: "warn" as const,
+      });
+    }
+    return Effect.tryPromise({
+      catch: () => undefined,
+      try: () => request.probes.readTextFile(source.path),
+    }).pipe(
+      Effect.flatMap((pem) =>
+        configureIrohCaTrust(builder, { _tag: "ExtraRootsPem", pem }).pipe(
+          Effect.as({
+            detail: `An extra CA certificate from ${source.name} is configured and the installed iroh binding trusts it.`,
+            name,
+            status: "ok" as const,
+          }),
+          Effect.catchTags({
+            BridgeCaTrustConfigurationError: (error) =>
+              Effect.succeed({
+                detail: error.message,
+                name,
+                status: "fail" as const,
+              }),
+            BridgeCaTrustUnsupportedError: (error) =>
+              Effect.succeed({
+                detail: `${error.message} run and pull continue without the extra CA roots.`,
+                name,
+                status: "warn" as const,
+              }),
+          })
+        )
+      ),
+      Effect.catch(() =>
+        Effect.succeed({
+          detail: `${source.name} names an extra CA certificate file that could not be read; run and pull continue without it.`,
+          name,
+          status: "warn" as const,
+        })
+      )
+    );
+  });
 };
 
 // The proxy check runs first (it touches no network) because the relay
@@ -252,6 +345,11 @@ export const diagnoseIrohEnvironment = (
     });
     const proxyUsable =
       hasProxyEnvironment(request.environment) && proxy.status === "ok";
+    const caTrust = yield* caTrustCheck({
+      environment: request.environment,
+      probes: request.probes,
+      proxyUsable,
+    });
     const networkChecks = yield* Effect.all(
       [
         dnsCheck({
@@ -268,7 +366,7 @@ export const diagnoseIrohEnvironment = (
       ],
       { concurrency: "unbounded" }
     );
-    return [...networkChecks, proxy];
+    return [...networkChecks, proxy, caTrust];
   });
 
 const probeTimeoutMilliseconds = 4000;
@@ -373,6 +471,7 @@ const openHostTcp = (host: string, port: number) =>
 const hostDiagnosticProbes: IrohDiagnosticProbes = {
   makeEndpointBuilder: () => Endpoint.builder(),
   openTcp: openHostTcp,
+  readTextFile: (path) => readFile(path, "utf8"),
   resolveHost: (host) =>
     settleWithin(
       lookup(host).then(() => undefined),

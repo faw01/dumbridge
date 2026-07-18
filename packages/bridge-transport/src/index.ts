@@ -17,6 +17,20 @@ export class BridgeAcceptError extends Schema.TaggedErrorClass<BridgeAcceptError
   }
 ) {}
 
+export class BridgeCaTrustConfigurationError extends Schema.TaggedErrorClass<BridgeCaTrustConfigurationError>()(
+  "BridgeCaTrustConfigurationError",
+  {
+    message: Schema.String,
+  }
+) {}
+
+export class BridgeCaTrustUnsupportedError extends Schema.TaggedErrorClass<BridgeCaTrustUnsupportedError>()(
+  "BridgeCaTrustUnsupportedError",
+  {
+    message: Schema.String,
+  }
+) {}
+
 export class BridgeConnectError extends Schema.TaggedErrorClass<BridgeConnectError>()(
   "BridgeConnectError",
   {
@@ -186,6 +200,8 @@ export interface BridgeTransport {
     locator: BridgeLocator
   ) => Effect.Effect<
     BridgeSession,
+    | BridgeCaTrustConfigurationError
+    | BridgeCaTrustUnsupportedError
     | BridgeConnectError
     | BridgeDeadlineExceededError
     | BridgeDialError
@@ -198,6 +214,8 @@ export interface BridgeTransport {
   readonly diagnose: Effect.Effect<readonly DiagnosisCheck[]>;
   readonly listen: Effect.Effect<
     BridgeListener,
+    | BridgeCaTrustConfigurationError
+    | BridgeCaTrustUnsupportedError
     | BridgeDeadlineExceededError
     | BridgeListenError
     | BridgeProxyConfigurationError

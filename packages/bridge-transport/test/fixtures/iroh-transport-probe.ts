@@ -302,6 +302,127 @@ const connectionPathClassification = async () => {
   return { noSelection, relaySelected, snapshotFailure };
 };
 
+// Runs in a child process so mutating the ambient environment cannot leak
+// into other tests: the ambient proxy is a decoy the dial must never read.
+const proxyEnvironmentThreading = async () =>
+  Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const originalBind = EndpointBuilder.prototype.bind;
+        const configured: string[] = [];
+        const prototype = EndpointBuilder.prototype as unknown as {
+          proxyUrl?: ((url: string) => void) | undefined;
+        };
+        const stream = {
+          recv: { read: () => Promise.resolve([]) },
+          send: {
+            finish: () => Promise.resolve(),
+            stopped: () => Promise.resolve(null),
+            writeAll: () => Promise.resolve(),
+          },
+        } as unknown as BiStream;
+        const connection = {
+          close: () => undefined,
+          openBi: () => Promise.resolve(stream),
+        } as unknown as Connection;
+        const endpoint = {
+          close: () => Promise.resolve(),
+          connect: () => Promise.resolve(connection),
+        } as unknown as Endpoint;
+        prototype.proxyUrl = (url) => {
+          configured.push(url);
+        };
+        EndpointBuilder.prototype.bind = () => Promise.resolve(endpoint);
+        process.env.HTTPS_PROXY = "http://ambient.example:8080";
+
+        yield* Effect.addFinalizer(() =>
+          Effect.sync(() => {
+            EndpointBuilder.prototype.bind = originalBind;
+            prototype.proxyUrl = undefined;
+          })
+        );
+
+        yield* makeIrohTransport({
+          deadlines: {
+            accept: "1 second",
+            connect: "1 second",
+            io: "1 second",
+            listen: "1 second",
+          },
+          environment: { HTTPS_PROXY: "http://threaded.example:8080" },
+          proxy: { _tag: "FromEnvironment" },
+          reachability: "direct-only",
+        }).connect(makeDirectLocator());
+
+        return { configured };
+      })
+    )
+  );
+
+const caTrustThreading = async () =>
+  Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const originalBind = EndpointBuilder.prototype.bind;
+        const configuredCaPems: string[] = [];
+        const configuredProxyUrls: string[] = [];
+        const prototype = EndpointBuilder.prototype as unknown as {
+          caExtraRootsPem?: ((pem: string) => void) | undefined;
+          proxyUrl?: ((url: string) => void) | undefined;
+        };
+        const stream = {
+          recv: { read: () => Promise.resolve([]) },
+          send: {
+            finish: () => Promise.resolve(),
+            stopped: () => Promise.resolve(null),
+            writeAll: () => Promise.resolve(),
+          },
+        } as unknown as BiStream;
+        const connection = {
+          close: () => undefined,
+          openBi: () => Promise.resolve(stream),
+        } as unknown as Connection;
+        const endpoint = {
+          close: () => Promise.resolve(),
+          connect: () => Promise.resolve(connection),
+        } as unknown as Endpoint;
+        prototype.proxyUrl = (url) => {
+          configuredProxyUrls.push(url);
+        };
+        prototype.caExtraRootsPem = (pem) => {
+          configuredCaPems.push(pem);
+        };
+        EndpointBuilder.prototype.bind = () => Promise.resolve(endpoint);
+
+        yield* Effect.addFinalizer(() =>
+          Effect.sync(() => {
+            EndpointBuilder.prototype.bind = originalBind;
+            prototype.proxyUrl = undefined;
+            prototype.caExtraRootsPem = undefined;
+          })
+        );
+
+        yield* makeIrohTransport({
+          caTrust: {
+            _tag: "ExtraRootsPem",
+            pem: "-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----\n",
+          },
+          deadlines: {
+            accept: "1 second",
+            connect: "1 second",
+            io: "1 second",
+            listen: "1 second",
+          },
+          environment: { HTTPS_PROXY: "http://threaded.example:8080" },
+          proxy: { _tag: "FromEnvironment" },
+          reachability: "direct-only",
+        }).connect(makeDirectLocator());
+
+        return { configuredCaPems, configuredProxyUrls };
+      })
+    )
+  );
+
 type FinishLifecycleScenario = "peer-stop" | "success" | "timeout";
 
 const finishLifecycle = async (scenario: FinishLifecycleScenario) =>
@@ -394,6 +515,10 @@ const run = (scenario: string | undefined) => {
       return relayReadiness(false);
     case "connection-path":
       return connectionPathClassification();
+    case "proxy-environment":
+      return proxyEnvironmentThreading();
+    case "ca-trust":
+      return caTrustThreading();
     case "session-failures":
       return sessionFailure("read").then(async (read) => {
         const write = await sessionFailure("write");
