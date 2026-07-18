@@ -9,6 +9,7 @@ import type {
   DiagnosisCheck,
 } from "@dumbridge/bridge-transport";
 import {
+  hasProxyEnvironment,
   type IrohTransportOptions,
   irohBindingSupportsProxy,
   makeIrohTransport,
@@ -57,15 +58,6 @@ const keyFileFlag = Flag.string("key-file").pipe(
   )
 );
 
-const proxyEnvironmentNames = [
-  "ALL_PROXY",
-  "HTTPS_PROXY",
-  "HTTP_PROXY",
-  "all_proxy",
-  "https_proxy",
-  "http_proxy",
-] as const;
-
 export interface ClientTransportResolution {
   readonly options: IrohTransportOptions;
   readonly proxyFallback: boolean;
@@ -77,19 +69,23 @@ export interface ClientTransportResolution {
 // direct-capable dial: no proxy is requested and no reachability is forced,
 // leaving the relay policy to the locator inside the bridge key — a
 // direct-only key stays a direct-only attempt, a relay-carrying key keeps its
-// fallback. A proxy-capable binding still commits to the proxy, because UDP
-// holepunching cannot traverse an HTTP proxy.
+// fallback. A proxy-capable binding still commits to the proxy and to
+// relay-only reachability: an HTTP CONNECT tunnel carries TCP only, so UDP
+// holepunching can never traverse it — relay-only under a proxy is a
+// constraint of the environment, not a dumbridge policy choice. The inspected
+// environment travels inside the options so the dial reads the same
+// environment this decision was made with.
 export const resolveClientTransportOptions = (
   environment: Readonly<Record<string, string | undefined>> = process.env,
   bindingSupportsProxy: () => boolean = irohBindingSupportsProxy
 ): ClientTransportResolution => {
-  const usesProxy = proxyEnvironmentNames.some((name) => environment[name]);
-  if (!usesProxy) {
+  if (!hasProxyEnvironment(environment)) {
     return { options: { proxy: { _tag: "Disabled" } }, proxyFallback: false };
   }
   return bindingSupportsProxy()
     ? {
         options: {
+          environment,
           proxy: { _tag: "FromEnvironment" },
           reachability: "relay-only",
         },

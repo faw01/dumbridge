@@ -206,6 +206,8 @@ describe("dumbridge CLI", () => {
   test("commits to the relay only when the binding can use the proxy", () => {
     const proxyCapable = () => true;
     const proxyIncapable = () => false;
+    // The environment travels inside the options so the dial reads the same
+    // environment the commitment decision was made with.
     expect(
       resolveClientTransportOptions(
         { HTTPS_PROXY: "http://proxy" },
@@ -213,6 +215,7 @@ describe("dumbridge CLI", () => {
       )
     ).toEqual({
       options: {
+        environment: { HTTPS_PROXY: "http://proxy" },
         proxy: { _tag: "FromEnvironment" },
         reachability: "relay-only",
       },
@@ -236,6 +239,8 @@ describe("dumbridge CLI", () => {
     };
 
     resolveClientTransportOptions({}, countingProbe);
+    expect(probes).toBe(0);
+    resolveClientTransportOptions({ HTTPS_PROXY: "" }, countingProbe);
     expect(probes).toBe(0);
     resolveClientTransportOptions(
       { HTTPS_PROXY: "http://proxy" },

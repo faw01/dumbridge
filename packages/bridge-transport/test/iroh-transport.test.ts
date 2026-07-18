@@ -123,6 +123,10 @@ interface ConnectionPathProbe {
   readonly snapshotFailure: string;
 }
 
+interface ProxyEnvironmentProbe {
+  readonly configured: readonly string[];
+}
+
 describe("Iroh bridge transport", () => {
   it.live("exchanges bounded binary sessions through a scoped listener", () =>
     Effect.gen(function* () {
@@ -287,6 +291,12 @@ describe("Iroh bridge transport", () => {
       }
     })
   );
+
+  it("dials through the proxy named by the threaded environment, never the ambient one", async () => {
+    const result = await runProbe<ProxyEnvironmentProbe>("proxy-environment");
+
+    expect(result.configured).toEqual(["http://threaded.example:8080/"]);
+  });
 
   it("answers whether a binding can route through a proxy", () => {
     expect(irohBindingSupportsProxy({})).toBe(false);
@@ -526,7 +536,8 @@ describe("Iroh bridge transport", () => {
             throw new Error(`https://${secret}@proxy.example`);
           },
         },
-        { _tag: "Url", url: `https://${secret}@proxy.example` }
+        { _tag: "Url", url: `https://${secret}@proxy.example` },
+        {}
       ).pipe(Effect.flip);
 
       expect(error).toBeInstanceOf(BridgeProxyConfigurationError);

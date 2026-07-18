@@ -40,8 +40,10 @@ const proxyEnvironmentKeys = [
   "all_proxy",
 ] as const;
 
-// Truthiness, not presence: the client transport selection ignores empty
-// proxy variables (common placeholder exports), so the diagnosis must too.
+// Truthiness, not presence: empty proxy variables (common placeholder
+// exports) never count as a configured proxy. The CLI's transport selection
+// and the doctor diagnosis share this one predicate so the two can never
+// disagree about whether an environment is proxied.
 export const hasProxyEnvironment = (environment: ProxyEnvironment) =>
   proxyEnvironmentKeys.some((key) => Boolean(environment[key]));
 
@@ -80,10 +82,14 @@ const proxyUrlFromEnvironment = (
   });
 };
 
+// The environment is a required value threaded from the CLI shell: a
+// process.env default here would smuggle an ambient effect through the
+// BridgeTransport seam and let a dial silently read a different environment
+// than the one the client committed to.
 export const configureIrohProxy = (
   builder: object,
   proxy: IrohProxyConfiguration,
-  environment: ProxyEnvironment = process.env
+  environment: ProxyEnvironment
 ): Effect.Effect<
   void,
   BridgeProxyConfigurationError | BridgeProxyUnsupportedError
