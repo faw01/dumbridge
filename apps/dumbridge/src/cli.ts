@@ -1,5 +1,6 @@
 #!/usr/bin/env bun
 
+import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { redactBridgeKey } from "@dumbridge/bridge-key";
@@ -35,7 +36,6 @@ import { Argument, Command, Flag } from "effect/unstable/cli";
 import skillGuide from "../../../skills/dumbridge/SKILL.md" with {
   type: "text",
 };
-import packageJson from "../package.json" with { type: "json" };
 import { isDialFailure, pullRemote, runRemote } from "./bridge/client";
 import {
   detachServe,
@@ -494,8 +494,18 @@ const command = Command.make("dumbridge").pipe(
   Command.withSubcommands([serve, run, pull, doctor, skill])
 );
 
+// Read at startup, never inlined at bundle time: a release or prerelease may
+// re-version package.json after dist/cli.js was bundled, and --version must
+// report the installed manifest. src/cli.ts and dist/cli.js both sit one
+// level below the manifest.
+const packageVersion = (
+  JSON.parse(
+    readFileSync(new URL("../package.json", import.meta.url), "utf8")
+  ) as { version: string }
+).version;
+
 const runCli = Command.runWith(command, {
-  version: packageJson.version,
+  version: packageVersion,
 });
 
 const formatPullBytes = (bytes: number) => {
