@@ -1,7 +1,20 @@
+diff --git a/iroh-js/Cargo.toml b/iroh-js/Cargo.toml
+index 899bf8a..c2e3caa 100644
+--- a/iroh-js/Cargo.toml
++++ b/iroh-js/Cargo.toml
+@@ -20,6 +20,7 @@ iroh-metrics = "1.0.0"
+ iroh-relay = { version = "1.0.0", default-features = false }
+ iroh-services = { version = "1.0.0", default-features = false }
+ iroh-tickets = "1.0.0"
++rustls-pki-types = "1"
+ n0-future = "0.3"
+ tokio = "1.25.0"
+ url = "2.4"
 diff --git a/iroh-js/index.d.ts b/iroh-js/index.d.ts
+index d1e2eb1..4c29d00 100644
 --- a/iroh-js/index.d.ts
 +++ b/iroh-js/index.d.ts
-@@ -145,6 +145,10 @@ export declare class EndpointBuilder {
+@@ -145,6 +145,20 @@ export declare class EndpointBuilder {
    alpns(alpns: Array<Array<number>>): void
    /** Set the relay mode. */
    relayMode(mode: RelayMode): void
@@ -9,19 +22,27 @@ diff --git a/iroh-js/index.d.ts b/iroh-js/index.d.ts
 +  proxyFromEnv(): void
 +  /** Configure an explicit HTTP(S) proxy URL. */
 +  proxyUrl(url: string): void
++  /**
++   * Add extra trusted CA root certificates (PEM) for non-iroh TLS.
++   *
++   * Trust is additive: the embedded WebPKI/Mozilla roots stay trusted and the
++   * PEM-encoded certificates are layered on top. This covers TLS-intercepting
++   * proxies that present a private MITM CA (the same rustls config verifies the
++   * proxy's TLS and the relay TLS inside the CONNECT tunnel). Native iroh
++   * connections are unaffected — they use iroh's own cryptographic auth.
++   */
++  caExtraRootsPem(pem: string): void
    /** Set the address the endpoint binds to (`host:port`). */
    bindAddr(addr: string): void
    /** Bind the endpoint. */
 diff --git a/iroh-js/src/endpoint.rs b/iroh-js/src/endpoint.rs
+index d4fb502..01e064b 100644
 --- a/iroh-js/src/endpoint.rs
 +++ b/iroh-js/src/endpoint.rs
-@@ -83,8 +83,22 @@ impl EndpointBuilder {
-     pub fn relay_mode(&self, mode: &RelayMode) {
-         let mode = mode.0.clone();
+@@ -85,6 +85,42 @@ impl EndpointBuilder {
          self.map(|b| b.relay_mode(mode));
      }
--
-+
+ 
 +    /// Configure HTTP(S) proxying from standard proxy environment variables.
 +    #[napi]
 +    pub fn proxy_from_env(&self) {
@@ -33,6 +54,28 @@ diff --git a/iroh-js/src/endpoint.rs b/iroh-js/src/endpoint.rs
 +    pub fn proxy_url(&self, url: String) -> Result<()> {
 +        let url = url::Url::parse(&url).map_err(anyhow::Error::from)?;
 +        self.map(|b| b.proxy_url(url));
++        Ok(())
++    }
++
++    /// Add extra trusted CA root certificates (PEM) for non-iroh TLS.
++    ///
++    /// Trust is additive: the embedded WebPKI/Mozilla roots stay trusted and the
++    /// PEM-encoded certificates are layered on top. This covers TLS-intercepting
++    /// proxies that present a private MITM CA (the same rustls config verifies the
++    /// proxy's TLS and the relay TLS inside the CONNECT tunnel). Native iroh
++    /// connections are unaffected — they use iroh's own cryptographic auth.
++    #[napi]
++    pub fn ca_extra_roots_pem(&self, pem: String) -> Result<()> {
++        use rustls_pki_types::{CertificateDer, pem::PemObject};
++
++        let certs = CertificateDer::pem_slice_iter(pem.as_bytes())
++            .collect::<std::result::Result<Vec<_>, _>>()
++            .map_err(|e| anyhow::anyhow!("failed to parse CA PEM: {e}"))?;
++        if certs.is_empty() {
++            return Err(anyhow::anyhow!("no certificates found in CA PEM").into());
++        }
++        let ca = iroh::tls::CaTlsConfig::default().with_extra_roots(certs);
++        self.map(|b| b.ca_tls_config(ca));
 +        Ok(())
 +    }
 +

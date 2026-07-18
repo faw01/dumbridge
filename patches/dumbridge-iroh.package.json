@@ -1,0 +1,30 @@
+{
+  "name": "dumbridge-iroh",
+  "version": "1.0.0-proxy.0",
+  "description": "Patched iroh Node binding for dumbridge (proxyUrl + caExtraRootsPem). Drop-in for @number0/iroh@1.0.0.",
+  "type": "commonjs",
+  "main": "index.js",
+  "types": "index.d.ts",
+  "engines": {
+    "node": ">= 20.3.0"
+  },
+  "files": [
+    "index.js",
+    "index.d.ts",
+    "iroh.darwin-arm64.node",
+    "iroh.linux-x64-gnu.node",
+    "LICENSE-MIT",
+    "LICENSE-APACHE",
+    "README.md"
+  ],
+  "license": "MIT OR Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/n0-computer/iroh-ffi.git"
+  },
+  "keywords": [
+    "iroh",
+    "dumbridge",
+    "napi"
+  ]
+}
