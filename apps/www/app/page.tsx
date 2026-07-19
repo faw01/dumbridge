@@ -1,12 +1,12 @@
 import Link from "next/link";
 
 const Home = () => (
-  <main className="flex min-h-svh flex-col items-center justify-center gap-10 px-6 py-12 text-center">
+  <main className="flex min-h-svh flex-col items-center justify-center gap-8 px-6 py-10 text-center">
     {/* HERO ILLUSTRATION SLOT: replace this placeholder block with a
         hand-drawn illustration (SVG or image) when one is ready. */}
     <div
       aria-hidden="true"
-      className="flex aspect-video w-full max-w-xl items-center justify-center rounded-md bg-muted"
+      className="flex aspect-video w-full max-w-lg items-center justify-center rounded-md bg-muted"
     >
       <span className="font-mono text-muted-foreground text-sm">
         laptop ── dumb bridge ── cloud agent
