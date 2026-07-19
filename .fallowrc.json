@@ -13,8 +13,25 @@
     // CRAP scores are static estimates here (bun test emits no Istanbul
     // coverage), so the default 30 trips on ordinary partially-covered code.
     // 250 clears the estimated backlog and only fires on egregious new code.
-    "maxCrap": 250
+    "maxCrap": 250,
+    "thresholdOverrides": [
+      {
+        // Vendored shadcn/ui chart wrapper copied verbatim from the mf2
+        // scaffold; upstream owns its shape, so it stays visible under a
+        // raised ceiling instead of being rewritten locally.
+        "files": ["packages/design-system/components/ui/chart.tsx"],
+        "maxCognitive": 20,
+        "maxCrap": 600,
+        "maxCyclomatic": 30,
+        "maxUnitSize": 80,
+        "reason": "vendored mf2/shadcn chart component"
+      }
+    ]
   },
+  // The Effect language-service is loaded through tsconfig plugins
+  // (packages/typescript-config/base.json), a reference dependency
+  // scanning does not trace.
+  "ignoreDependencies": ["@effect/language-service"],
   "audit": {
     // Inherited findings stay visible in reports; only findings introduced
     // by the pull request gate the merge.
