@@ -1,11 +1,8 @@
 import "./styles.css";
 import { DesignSystemProvider } from "@repo/design-system";
 import { fonts } from "@repo/design-system/lib/fonts";
-import { cn } from "@repo/design-system/lib/utils";
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
-import { Footer } from "./components/footer";
-import { Header } from "./components/header";
 
 export const metadata: Metadata = {
   description:
@@ -19,16 +16,10 @@ interface RootLayoutProperties {
 }
 
 const RootLayout = ({ children }: RootLayoutProperties) => (
-  <html
-    className={cn(fonts, "scroll-smooth")}
-    lang="en"
-    suppressHydrationWarning
-  >
+  <html className={fonts} lang="en" suppressHydrationWarning>
     <body>
       <DesignSystemProvider defaultTheme="dark" enableSystem={false}>
-        <Header />
         {children}
-        <Footer />
       </DesignSystemProvider>
     </body>
   </html>
