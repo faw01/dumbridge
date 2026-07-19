@@ -36,16 +36,37 @@ describe("Iroh FFI proxy source patch", () => {
 
   it("pins the published fork manifest the patch was built into", async () => {
     const manifest = JSON.parse(await readFile(forkManifestUrl, "utf8")) as {
-      readonly files: readonly string[];
       readonly main: string;
       readonly name: string;
+      readonly optionalDependencies: Readonly<Record<string, string>>;
+      readonly types: string;
       readonly version: string;
     };
 
     expect(manifest.name).toBe("dumbridge-iroh");
-    expect(manifest.version).toBe("1.0.0-proxy.0");
+    expect(manifest.version).toBe("1.0.0-proxy.1");
     expect(manifest.main).toBe("index.js");
-    expect(manifest.files).toContain("iroh.darwin-arm64.node");
-    expect(manifest.files).toContain("iroh.linux-x64-gnu.node");
+    expect(manifest.types).toBe("index.d.ts");
+    // The multi-platform release carries its native binaries as the same
+    // eleven per-target packages stock @number0/iroh ships, which is what
+    // clears the release gate that kept the fork off `latest`.
+    expect(Object.keys(manifest.optionalDependencies).sort()).toEqual([
+      "dumbridge-iroh-android-arm-eabi",
+      "dumbridge-iroh-android-arm64",
+      "dumbridge-iroh-darwin-arm64",
+      "dumbridge-iroh-linux-arm-gnueabihf",
+      "dumbridge-iroh-linux-arm-musleabihf",
+      "dumbridge-iroh-linux-arm64-gnu",
+      "dumbridge-iroh-linux-arm64-musl",
+      "dumbridge-iroh-linux-x64-gnu",
+      "dumbridge-iroh-linux-x64-musl",
+      "dumbridge-iroh-win32-arm64-msvc",
+      "dumbridge-iroh-win32-x64-msvc",
+    ]);
+    expect(
+      Object.values(manifest.optionalDependencies).every(
+        (pinned) => pinned === manifest.version
+      )
+    ).toBe(true);
   });
 });

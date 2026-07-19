@@ -327,9 +327,10 @@ describe("Iroh bridge transport", () => {
     expect(
       irohBindingSupportsCaTrust({ caExtraRootsPem: () => undefined })
     ).toBe(true);
-    // The published @number0/iroh binding omits the CA trust builder method;
-    // this pins the gap that keeps the client's CA trust disabled on stock.
-    expect(irohBindingSupportsCaTrust()).toBe(false);
+    // The installed binding is the patched dumbridge-iroh fork, so the CA
+    // trust builder method is present; this pins that the alias actually
+    // delivers a CA-trust-capable binding to the client.
+    expect(irohBindingSupportsCaTrust()).toBe(true);
     const broken = new Proxy(
       {},
       {
@@ -423,9 +424,10 @@ describe("Iroh bridge transport", () => {
   it("answers whether a binding can route through a proxy", () => {
     expect(irohBindingSupportsProxy({})).toBe(false);
     expect(irohBindingSupportsProxy({ proxyUrl: () => undefined })).toBe(true);
-    // The published @number0/iroh binding omits the proxy builder methods;
-    // this pins the gap that makes the client's proxy fallback necessary.
-    expect(irohBindingSupportsProxy()).toBe(false);
+    // The installed binding is the patched dumbridge-iroh fork, so the proxy
+    // builder method is present; this pins that the alias actually delivers
+    // a proxy-capable binding to the client.
+    expect(irohBindingSupportsProxy()).toBe(true);
     // A binding too broken to inspect cannot proxy either; the probe reports
     // the gap instead of throwing, and the dial's own builder creation
     // surfaces the branded construction failure.

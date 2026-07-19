@@ -17,15 +17,19 @@ logic of its own.
 source patch against `n0-computer/iroh-ffi` commit
 `66e628e0fd2b7d526d01b81269041c97fc97f7a5` (`@number0/iroh@1.0.0`).
 
-A build of this patch is published as **`dumbridge-iroh@1.0.0-proxy.0`** on
-npm, and `dumbridge@0.3.1-proxy.0` (dist-tag `proxy`, never `latest`) consumes
-it through the alias `"@number0/iroh": "npm:dumbridge-iroh@1.0.0-proxy.0"`.
+A build of this patch is published as **`dumbridge-iroh@1.0.0-proxy.1`** on
+npm across all eleven napi targets stock `@number0/iroh` ships (each native
+binary rides its own `dumbridge-iroh-<triple>` optional dependency), and
+`dumbridge` consumes it through the alias
+`"@number0/iroh": "npm:dumbridge-iroh@1.0.0-proxy.1"`.
 [`patches/dumbridge-iroh.package.json`](../../patches/dumbridge-iroh.package.json)
 pins the published fork manifest. ADR 0006 records why the fork exists, its
 guardrails, and its exit condition. To reproduce the published binding: check
-out the pinned commit, apply the patch, and build `iroh-js` with napi-rs for
-`darwin-arm64` and `linux-x64-gnu`; the packed file list must match the pinned
-manifest.
+out the pinned commit, apply the patch, and run the fork's
+`dumbridge_release.yml` workflow, which builds `iroh-js` with napi-rs for all
+eleven targets, probes the artifacts on real hardware for four architectures,
+and refuses to publish unless every artifact is staged; the published manifest
+must match the pinned one.
 
 The patch exposes three capabilities that already exist on Iroh's Rust
 endpoint builder:
@@ -43,8 +47,9 @@ endpoint builder:
   PEM framing and malformed DER inside is silently ignored by rustls's
   best-effort root loading (`add_parsable_certificates`), so such input can
   succeed while adding no trust anchor. A stricter per-certificate validation
-  belongs in the next binding build and the upstream iroh-ffi PR; this patch
-  stays byte-identical to `dumbridge-iroh@1.0.0-proxy.0`.
+  belongs in a future binding build and the upstream iroh-ffi PR;
+  `dumbridge-iroh@1.0.0-proxy.1` repackages the same patched source for all
+  targets without changing it, so the limitation carries over unchanged.
 
 No proxy is implemented in dumbridge, and the patch does not add a network
 service. It only makes Iroh's existing HTTP(S)-proxy and CA-trust
@@ -77,16 +82,16 @@ in public typed errors.
 
 ## External release gate
 
-Proxy support is not shippable on `latest` merely because this source patch
-applies and a prerelease exists. `dumbridge-iroh@1.0.0-proxy.0` ships two
-native targets (`darwin-arm64`, `linux-x64-gnu`) where stock `@number0/iroh`
-ships eleven, so pointing `latest` at the alias would break Windows, musl, and
-arm installs that work today. The remaining external gate is to build, test,
-and publish patched native packages for every supported Iroh Node target,
-point dumbridge at that release, and then prove a relay connection from each
-supported hosted-agent network through its real HTTP/HTTPS proxy. That proof
-must include any required `iroh.link` relay allowlist. Until both the native
-package matrix and hosted-network proof exist, the `proxy` dist-tag stays the
-only consumer of the fork and stock installs honestly report proxy
-configuration as unsupported. The gate dissolves entirely once upstream
-`@number0/iroh` ships these builder methods (the ADR 0006 exit).
+The native package matrix that kept the fork off `latest` is satisfied:
+`dumbridge-iroh@1.0.0-proxy.1` ships all eleven napi targets stock
+`@number0/iroh` ships, four of them probed on real hardware of the target
+architecture, so the alias no longer regresses Windows, musl, or arm installs.
+With that leg closed, dumbridge's stable line consumes the fork.
+
+The remaining external gate is the ADR 0006 exit: a PR to `n0-computer/iroh-ffi`
+adding the same passthrough builder methods, so a stock `@number0/iroh`
+release surfaces them and dumbridge drops the alias. Until then every upstream
+binding release costs a manual rebase, rebuild, and republish of the fork, and
+each newly supported hosted-agent network still needs its relay connection
+proven through that network's real HTTP/HTTPS proxy, including any required
+`iroh.link` relay allowlist.
