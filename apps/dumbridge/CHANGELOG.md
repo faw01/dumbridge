@@ -1,5 +1,21 @@
 # dumbridge
 
+## 1.0.0
+
+### Major Changes
+
+- 5e9978c: Ship 1.0.0 on the stable line by pointing the `@number0/iroh` alias at `dumbridge-iroh@1.0.0`, the patched iroh binding rebuilt for all eleven napi targets stock `@number0/iroh` ships. Every install now gets a binding that can route the relay WebSocket through an HTTP(S) proxy and trust extra CA roots for TLS-intercepting proxies, so proxy-jailed cloud agents (Claude Code on the web, Codex Cloud) work from the default install instead of a quarantined `proxy` dist-tag prerelease. The client keeps feature-detecting the builder methods rather than pinning to the fork, so the ADR 0006 exit — dropping the alias once upstream ships them — stays a dependency-line swap.
+
+### Minor Changes
+
+- ddc0c01: Trust extra CA roots for TLS-intercepting proxies end-to-end behind the bridge transport seam. When run or pull commits to an HTTP(S) proxy, the client resolves an extra CA certificate from `DUMBRIDGE_CA_FILE`, `CODEX_PROXY_CERT`, or `SSL_CERT_FILE` (in that precedence) and passes its PEM contents to a CA-trust-capable iroh binding; trust is additive only and the roots vouch for the relay TLS inside the proxy's CONNECT tunnel. A stock binding or an unreadable file degrades with one stderr notice and connects without the extra roots — never a pre-network dead-end — and `doctor` gains a `ca-trust` check mirroring exactly what run and pull do. This is the dumbridge half that Codex Cloud's Envoy MITM proxy needs; the binding half already ships in `dumbridge-iroh@1.0.0-proxy.0`.
+
+### Patch Changes
+
+- 5e9978c: Add npm keywords to the package manifest so the package is discoverable by the cloud-agent audience searching the registry.
+- ddc0c01: Thread the proxy environment through the bridge transport seam as a required value instead of an ambient `process.env` default, so a dial always reads the same environment the proxy commitment was made with. The proxy environment variable list now lives in one shared predicate consumed by both the client's transport selection and the doctor diagnosis.
+- ddc0c01: Report the installed package's version from its manifest at startup instead of a constant inlined at bundle time, so `--version` stays truthful when a release or prerelease re-versions `package.json` after `dist/cli.js` was built. The tarball verification now proves it.
+
 ## 0.3.0
 
 ### Minor Changes
