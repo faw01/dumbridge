@@ -17,11 +17,11 @@ logic of its own.
 source patch against `n0-computer/iroh-ffi` commit
 `66e628e0fd2b7d526d01b81269041c97fc97f7a5` (`@number0/iroh@1.0.0`).
 
-A build of this patch is published as **`dumbridge-iroh@1.0.0-proxy.1`** on
-npm across all eleven napi targets stock `@number0/iroh` ships (each native
-binary rides its own `dumbridge-iroh-<triple>` optional dependency), and
-`dumbridge` consumes it through the alias
-`"@number0/iroh": "npm:dumbridge-iroh@1.0.0-proxy.1"`.
+A build of this patch is published as **`dumbridge-iroh@1.0.0`** on npm
+(matching the patched upstream version) across all eleven napi targets stock
+`@number0/iroh` ships (each native binary rides its own
+`dumbridge-iroh-<triple>` optional dependency), and `dumbridge` consumes it
+through the alias `"@number0/iroh": "npm:dumbridge-iroh@1.0.0"`.
 [`patches/dumbridge-iroh.package.json`](../../patches/dumbridge-iroh.package.json)
 pins the published fork manifest. ADR 0006 records why the fork exists, its
 guardrails, and its exit condition. To reproduce the published binding: check
@@ -48,8 +48,8 @@ endpoint builder:
   best-effort root loading (`add_parsable_certificates`), so such input can
   succeed while adding no trust anchor. A stricter per-certificate validation
   belongs in a future binding build and the upstream iroh-ffi PR;
-  `dumbridge-iroh@1.0.0-proxy.1` repackages the same patched source for all
-  targets without changing it, so the limitation carries over unchanged.
+  `dumbridge-iroh@1.0.0` repackages the same patched source for all targets
+  without changing it, so the limitation carries over unchanged.
 
 No proxy is implemented in dumbridge, and the patch does not add a network
 service. It only makes Iroh's existing HTTP(S)-proxy and CA-trust
@@ -83,9 +83,9 @@ in public typed errors.
 ## External release gate
 
 The native package matrix that kept the fork off `latest` is satisfied:
-`dumbridge-iroh@1.0.0-proxy.1` ships all eleven napi targets stock
-`@number0/iroh` ships, four of them probed on real hardware of the target
-architecture, so the alias no longer regresses Windows, musl, or arm installs.
+`dumbridge-iroh@1.0.0` ships all eleven napi targets stock `@number0/iroh`
+ships, four of them probed on real hardware of the target architecture, so
+the alias no longer regresses Windows, musl, or arm installs.
 With that leg closed, dumbridge's stable line consumes the fork.
 
 The remaining external gate is the ADR 0006 exit: a PR to `n0-computer/iroh-ffi`

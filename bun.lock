@@ -21,7 +21,7 @@
       },
       "dependencies": {
         "@effect/platform-bun": "4.0.0-beta.98",
-        "@number0/iroh": "npm:dumbridge-iroh@1.0.0-proxy.1",
+        "@number0/iroh": "npm:dumbridge-iroh@1.0.0",
         "effect": "4.0.0-beta.98",
         "just-bash": "3.1.0",
       },
@@ -55,7 +55,7 @@
       "name": "@dumbridge/bridge-transport",
       "version": "0.1.0",
       "dependencies": {
-        "@number0/iroh": "npm:dumbridge-iroh@1.0.0-proxy.1",
+        "@number0/iroh": "npm:dumbridge-iroh@1.0.0",
         "effect": "4.0.0-beta.98",
       },
       "devDependencies": {
@@ -303,7 +303,7 @@
 
     "@nodelib/fs.walk": ["@nodelib/fs.walk@1.2.8", "", { "dependencies": { "@nodelib/fs.scandir": "2.1.5", "fastq": "^1.6.0" } }, "sha512-oGB+UxlgWcgQkgwo8GcEGwemoTFt3FIO9ababBmaGwXIoBKZ+GTy0pP185beGg7Llih/NSHSV2XAs1lnznocSg=="],
 
-    "@number0/iroh": ["dumbridge-iroh@1.0.0-proxy.1", "", { "optionalDependencies": { "dumbridge-iroh-android-arm-eabi": "1.0.0-proxy.1", "dumbridge-iroh-android-arm64": "1.0.0-proxy.1", "dumbridge-iroh-darwin-arm64": "1.0.0-proxy.1", "dumbridge-iroh-linux-arm-gnueabihf": "1.0.0-proxy.1", "dumbridge-iroh-linux-arm-musleabihf": "1.0.0-proxy.1", "dumbridge-iroh-linux-arm64-gnu": "1.0.0-proxy.1", "dumbridge-iroh-linux-arm64-musl": "1.0.0-proxy.1", "dumbridge-iroh-linux-x64-gnu": "1.0.0-proxy.1", "dumbridge-iroh-linux-x64-musl": "1.0.0-proxy.1", "dumbridge-iroh-win32-arm64-msvc": "1.0.0-proxy.1", "dumbridge-iroh-win32-x64-msvc": "1.0.0-proxy.1" } }, "sha512-45FeBCFRmEFBlDepk/bXla/9k8lA11WoJlbgak8DwjAZr3LaL5JhfVV6uqPBTx1TQIU6LUIl3bSndRdUExnhqA=="],
+    "@number0/iroh": ["dumbridge-iroh@1.0.0", "", { "optionalDependencies": { "dumbridge-iroh-android-arm-eabi": "1.0.0", "dumbridge-iroh-android-arm64": "1.0.0", "dumbridge-iroh-darwin-arm64": "1.0.0", "dumbridge-iroh-linux-arm-gnueabihf": "1.0.0", "dumbridge-iroh-linux-arm-musleabihf": "1.0.0", "dumbridge-iroh-linux-arm64-gnu": "1.0.0", "dumbridge-iroh-linux-arm64-musl": "1.0.0", "dumbridge-iroh-linux-x64-gnu": "1.0.0", "dumbridge-iroh-linux-x64-musl": "1.0.0", "dumbridge-iroh-win32-arm64-msvc": "1.0.0", "dumbridge-iroh-win32-x64-msvc": "1.0.0" } }, "sha512-BTtofO/PMtd/4Abw7YhR7CzoZoXhXrPX8Wgeiw+Tqtz6GFwbcyH6b0Pf8V7ZEeE86zYa/lTav1zpgCnUnhSmnA=="],
 
     "@oxc-project/types": ["@oxc-project/types@0.139.0", "", {}, "sha512-r9gHphtCs+1M7J0pw6Sn/hh/Wpa/iQrOOkrNAlVLF/gHq+/CJmHIWKKUUhdWjcD6CIa8idarspCsASiXCXvFUw=="],
 
@@ -511,27 +511,27 @@
 
     "dumbridge": ["dumbridge@workspace:apps/dumbridge"],
 
-    "dumbridge-iroh-android-arm-eabi": ["dumbridge-iroh-android-arm-eabi@1.0.0-proxy.1", "", { "os": "android", "cpu": "arm" }, "sha512-kEbXiKfozsOjIMfiEciaTkhW9KwLj5Z1LDDSSLPhxwUd7LzisP+Ox0+Tjz7/FIWJR6RY8LdIMR7bpyYOScq4Zg=="],
+    "dumbridge-iroh-android-arm-eabi": ["dumbridge-iroh-android-arm-eabi@1.0.0", "", { "os": "android", "cpu": "arm" }, "sha512-PJ1uFn8hfO6+iLDjpzHK99Z/E+TjAdcKQHchtbkth6nLn9CskwBZz5WiV1U5H8knc46nkCLMR7upkYGRANtiTg=="],
 
-    "dumbridge-iroh-android-arm64": ["dumbridge-iroh-android-arm64@1.0.0-proxy.1", "", { "os": "android", "cpu": "arm64" }, "sha512-nyz3z4ZTdmnJNTp752aePwQG7gphMUaGUxtqOL1IgQDldiUCKqKnQkDnZf/kIikJo/SXrPD7VherKQSOqBeY+Q=="],
+    "dumbridge-iroh-android-arm64": ["dumbridge-iroh-android-arm64@1.0.0", "", { "os": "android", "cpu": "arm64" }, "sha512-QBqWGZ/pUEjM3DtAziOdxybVOfGwbw+lng52C8J0sE/xNaCoBtYxRqJZ0exV57aagxw4hPoWuWLuwhzcKQlCKA=="],
 
-    "dumbridge-iroh-darwin-arm64": ["dumbridge-iroh-darwin-arm64@1.0.0-proxy.1", "", { "os": "darwin", "cpu": "arm64" }, "sha512-j6vkvbeJK7woNIqUpXlh6TFhPqYv3XIIzNsVwh9+R6/Ni2p+hREmZJ9gpDS23aXjnPzVAOw3o87fEBI9GK+AjQ=="],
+    "dumbridge-iroh-darwin-arm64": ["dumbridge-iroh-darwin-arm64@1.0.0", "", { "os": "darwin", "cpu": "arm64" }, "sha512-gZtnzDu4MSh0JPCapXU+PGyT6kBfzUBHgMMjlji2foS8a4tEN4RYbSxQo/el0JfFVJZcLnptXEJpNOu2SVD8JQ=="],
 
-    "dumbridge-iroh-linux-arm-gnueabihf": ["dumbridge-iroh-linux-arm-gnueabihf@1.0.0-proxy.1", "", { "os": "linux", "cpu": "arm" }, "sha512-2o96KL1w/fvBozYXBArgXivgfKIBmdoaAOd8alOHATJiRkvbU73xTjE8i5sN9qrua7uFhMDdhZnhfE+EwqBQBQ=="],
+    "dumbridge-iroh-linux-arm-gnueabihf": ["dumbridge-iroh-linux-arm-gnueabihf@1.0.0", "", { "os": "linux", "cpu": "arm" }, "sha512-xZRC63BumljJ3ap+0lr1XUFpn7g5gH4AN5ZD1+jiVq9iWbOeP5HUnGeyqa9hj5WodDoi5/bk/JaVT9vdduuldg=="],
 
-    "dumbridge-iroh-linux-arm-musleabihf": ["dumbridge-iroh-linux-arm-musleabihf@1.0.0-proxy.1", "", { "os": "linux", "cpu": "arm" }, "sha512-r7ytngYoI8ZUeKYtZseX8DbkE3yvwUrmwXvc7K1HGAhhdjKoaLKOF/SD6Owz/nbsdLAYHArSeVffTLyvscfZkw=="],
+    "dumbridge-iroh-linux-arm-musleabihf": ["dumbridge-iroh-linux-arm-musleabihf@1.0.0", "", { "os": "linux", "cpu": "arm" }, "sha512-JguLMZRDBwF/2DSzTTdkPU+dAQSb/QTdT/CqqyX0D6URidPIVXhf0qSdlLsxwiumYEpfxSUcQumb4QNL421w7Q=="],
 
-    "dumbridge-iroh-linux-arm64-gnu": ["dumbridge-iroh-linux-arm64-gnu@1.0.0-proxy.1", "", { "os": "linux", "cpu": "arm64" }, "sha512-AiCsYmDiXRP6UDH/JvcAeYZKQIoGO+YqiHDBN3D9DeYEItvLJXLYbGaOaRWpYv6QJD8rEYvNIIGKvCrIqfeBkQ=="],
+    "dumbridge-iroh-linux-arm64-gnu": ["dumbridge-iroh-linux-arm64-gnu@1.0.0", "", { "os": "linux", "cpu": "arm64" }, "sha512-i608riTij7oDBxeFf1C9WjTotU6r4xpAdWuxCg191K+XDYzcEAzQALV8AIPdl2yTkt6STX66AMAAmzSU4WtUQQ=="],
 
-    "dumbridge-iroh-linux-arm64-musl": ["dumbridge-iroh-linux-arm64-musl@1.0.0-proxy.1", "", { "os": "linux", "cpu": "arm64" }, "sha512-YvLss5lcAVpYNm+e4HoAZ7x/QcgjMHb9cPwwbFygcA6xqf9r0Caq0vWwNgCKMyxzWpoZtmOzHWl9xFZPpIBhfg=="],
+    "dumbridge-iroh-linux-arm64-musl": ["dumbridge-iroh-linux-arm64-musl@1.0.0", "", { "os": "linux", "cpu": "arm64" }, "sha512-bIPYzIv1BPK3PhG57say2iMGoIm/kAh7GVV1SKVo0hM2TjCBZFRdwI25R0kEEtufLBha3eiuKlELCIGUvDCusA=="],
 
-    "dumbridge-iroh-linux-x64-gnu": ["dumbridge-iroh-linux-x64-gnu@1.0.0-proxy.1", "", { "os": "linux", "cpu": "x64" }, "sha512-wccKDR/6Iv5Mr4y9YYm2WBlu6VziwGXEzHfoqPwfD9Pv0YQbxDXrFi0Eob5s6G3HjKgSE/MJEiSqogxh5bDqzQ=="],
+    "dumbridge-iroh-linux-x64-gnu": ["dumbridge-iroh-linux-x64-gnu@1.0.0", "", { "os": "linux", "cpu": "x64" }, "sha512-zr2KTDxTD81pRreqa7/1Rc0eUW8LhqkIMdKOkhUjO+8Fy5wOtpMV20H3qOYXK1m8rsDXqckyoF9c/W8Wn4T3Zw=="],
 
-    "dumbridge-iroh-linux-x64-musl": ["dumbridge-iroh-linux-x64-musl@1.0.0-proxy.1", "", { "os": "linux", "cpu": "x64" }, "sha512-+vVQ8XjW0Mor8utD1NQHdSN9O5FTvIuMfb5HZ1kNKDnYWzgKnNk7EeZ/h4rHvTsDqag/eQNqfnVVbfo6pusOaw=="],
+    "dumbridge-iroh-linux-x64-musl": ["dumbridge-iroh-linux-x64-musl@1.0.0", "", { "os": "linux", "cpu": "x64" }, "sha512-3MxxkXDwL+txzvCxsqPQg4/Od5hYPIx6RWz4xAqHVcS7IxpyOZGNaqE0a+4nJeAoOKoD80XppLKssRLHlDVyWw=="],
 
-    "dumbridge-iroh-win32-arm64-msvc": ["dumbridge-iroh-win32-arm64-msvc@1.0.0-proxy.1", "", { "os": "win32", "cpu": "arm64" }, "sha512-7w3pfr9Ba1Xg2LMnvxC3uzRO54xvP6je3LsGXHzjdA+vg/iDCte5FO+BQV2Dqd2r8Nir2o7l+snWPcwPe5+8ZQ=="],
+    "dumbridge-iroh-win32-arm64-msvc": ["dumbridge-iroh-win32-arm64-msvc@1.0.0", "", { "os": "win32", "cpu": "arm64" }, "sha512-VnXDRWc4wj7CxyGFd3VcdY9ixXjDrG375Vdq4heb6Ei+OtxLMg6nN2sodqjLfuJNljtjSKhqXHYqPrKOyFrkMw=="],
 
-    "dumbridge-iroh-win32-x64-msvc": ["dumbridge-iroh-win32-x64-msvc@1.0.0-proxy.1", "", { "os": "win32", "cpu": "x64" }, "sha512-MmNjOdWi56VyvQziwuB399GMFNfny7A2NpfMVRpB8qmj1cteL2CPGISFsnyq99OadImcCBGbjT0u5B31MLivrA=="],
+    "dumbridge-iroh-win32-x64-msvc": ["dumbridge-iroh-win32-x64-msvc@1.0.0", "", { "os": "win32", "cpu": "x64" }, "sha512-UoRFAIrXPrYeC7dU25nv5Nzeivfwf+skFDF3RV18kQs3SCnl3iA49oIxc4Z2ikP5KuJva/xMoxvNsO4eVvTstw=="],
 
     "effect": ["effect@4.0.0-beta.98", "", { "dependencies": { "@standard-schema/spec": "^1.1.0", "fast-check": "^4.9.0", "find-my-way-ts": "^0.1.6", "ini": "^7.0.0", "kubernetes-types": "^1.30.0", "msgpackr": "^2.0.4", "multipasta": "^0.2.8", "toml": "^4.1.2", "uuid": "^14.0.1", "yaml": "^2.9.0" } }, "sha512-oz+bsG5h+6RNrw4t5GMfQrk/xBS8ROoqkYsuvRhBr5O7mCOrpvH/hbw+QrDzvKIpX4HJClwm86F94c87W0sJxg=="],
 
