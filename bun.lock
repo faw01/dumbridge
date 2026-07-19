@@ -15,12 +15,13 @@
     },
     "apps/dumbridge": {
       "name": "dumbridge",
-      "version": "0.3.0",
+      "version": "1.0.0",
       "bin": {
         "dumbridge": "dist/cli.js",
       },
       "dependencies": {
         "@effect/platform-bun": "4.0.0-beta.98",
+        "@effect/platform-node-shared": "4.0.0-beta.98",
         "@number0/iroh": "npm:dumbridge-iroh@1.0.0",
         "effect": "4.0.0-beta.98",
         "just-bash": "3.1.0",
@@ -53,7 +54,7 @@
     },
     "packages/bridge-transport": {
       "name": "@dumbridge/bridge-transport",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "dependencies": {
         "@number0/iroh": "npm:dumbridge-iroh@1.0.0",
         "effect": "4.0.0-beta.98",
