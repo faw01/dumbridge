@@ -22,6 +22,16 @@
   },
   "overrides": [
     {
+      // Vendored shadcn/ui kit copied verbatim from the mf2 scaffold.
+      // apps/www consumes components on demand, so most files have no
+      // importer yet; keeping the kit intact is deliberate.
+      "files": ["packages/design-system/**"],
+      "rules": {
+        "unused-files": "off",
+        "unused-exports": "off"
+      }
+    },
+    {
       // dist/cli.js externalizes @number0/iroh and just-bash, so apps/dumbridge
       // declares them for the published artifact while only bundled workspace
       // packages import them. Scoped to this manifest so unused- and
