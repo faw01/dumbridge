@@ -11,7 +11,12 @@
       "!.turbo",
       "!dist",
       "!coverage",
-      "!patches"
+      "!patches",
+      // Vendored shadcn/ui code copied from the mf2 scaffold; its generator
+      // owns the formatting, mirroring the upstream mf2 biome config.
+      "!packages/design-system/components/ui",
+      "!packages/design-system/lib",
+      "!packages/design-system/hooks"
     ]
   },
   "javascript": {
