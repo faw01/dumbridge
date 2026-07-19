@@ -356,7 +356,11 @@ describe("dumbridge CLI", () => {
     );
   });
 
-  test("warns once about an unusable proxy without leaking its URL", async () => {
+  test("commits to a configured proxy without a fallback warning", async () => {
+    // The installed binding is the proxy-capable dumbridge-iroh fork, so a
+    // proxied environment commits to the proxy instead of degrading; the
+    // fallback notice belongs to stock bindings only (pinned above through
+    // the injected capability probe) and the URL still never leaks.
     const link = mintKeyExpiringAt(1);
     const result = await invokeCli({
       args: ["run", "true"],
@@ -368,7 +372,8 @@ describe("dumbridge CLI", () => {
 
     expect(result.exitCode).toBe(1);
     expect(result.stdout).toBe("");
-    expect(result.stderr).toBe(`${proxyFallbackNotice}${expiredKeyMessage(1)}`);
+    expect(result.stderr).toBe(expiredKeyMessage(1));
+    expect(result.stderr).not.toContain(proxyFallbackNotice);
     expect(result.stderr).not.toContain("proxy-secret");
     expect(result.stderr).not.toContain("proxy.example");
   });

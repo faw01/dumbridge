@@ -229,7 +229,12 @@ describe("dumbridge CLI bridge", () => {
     }
   }, 40_000);
 
-  test("reports an unreachable direct-only bridge by cause with the proxy noted", async () => {
+  test("rejects a direct-only key when the environment commits to a proxy", async () => {
+    // The installed binding is the proxy-capable dumbridge-iroh fork, so a
+    // proxied environment commits to the proxy and to relay-only
+    // reachability (an HTTP CONNECT tunnel carries TCP only). A direct-only
+    // key has no relay to dial through, so the run fails before any network
+    // attempt — and never falls back around the proxy commitment.
     const id = EndpointId.fromBytes(new Array<number>(32).fill(1));
     const unreachable = new EndpointAddr(id, null, ["192.0.2.1:1"]);
     const key = encodeBridgeKey({
@@ -253,9 +258,9 @@ describe("dumbridge CLI bridge", () => {
     expect(run.exitCode).toBe(1);
     expect(run.stdout).toBe("");
     expect(run.stderr).toContain(
-      "dumbridge: No viable network path to the bridge: the direct connection failed (this network may block UDP) and the bridge locator allows no relay fallback. This environment sets a proxy that the installed iroh binding cannot use, so the connection was attempted without it; if this network allows egress only through that proxy, no direct or relay path can succeed.\n"
+      "dumbridge: The bridge transport locator has no relay.\n"
     );
-    expect(run.stderr).toContain("bridge dial: failed");
+    expect(run.stderr).not.toContain("attempting a direct connection instead");
     expect(run.stderr).not.toContain(key.success);
     expect(run.stderr).not.toContain("proxy-secret");
     expect(run.stderr).not.toContain("proxy.example");
@@ -274,10 +279,9 @@ describe("dumbridge CLI bridge", () => {
         5000
       );
       await writeFile(join(servedRoot, "debugged.txt"), "debug run\n");
-      const environment = cleanEnvironment({
-        DUMBRIDGE_KEY: link,
-        HTTPS_PROXY: "http://user:proxy-secret@proxy.example:3128",
-      });
+      // No proxy variables: the proxy-capable binding would commit this run
+      // to the (nonexistent) proxy instead of dialing the local bridge.
+      const environment = cleanEnvironment({ DUMBRIDGE_KEY: link });
 
       const run = await runCli(
         ["run", "--log-level", "debug", "cat debugged.txt"],
@@ -288,8 +292,6 @@ describe("dumbridge CLI bridge", () => {
       expect(run.stderr).toContain("bridge dial: attempting");
       expect(run.stderr).toContain("bridge dial: connected");
       expect(run.stderr).not.toContain(link);
-      expect(run.stderr).not.toContain("proxy-secret");
-      expect(run.stderr).not.toContain("proxy.example");
 
       const quiet = await runCli(["run", "cat debugged.txt"], environment);
       expect(quiet.exitCode).toBe(0);
@@ -300,39 +302,41 @@ describe("dumbridge CLI bridge", () => {
     }
   }, 40_000);
 
-  test("run succeeds under an unusable proxy by warning and dialing direct", async () => {
-    const server = Bun.spawn([process.execPath, cli, "serve", servedRoot], {
-      env: cleanEnvironment(),
-      stderr: "pipe",
-      stdout: "pipe",
+  test("commits a relay-carrying key to the proxy and reports the relay by cause", async () => {
+    // The proxy-capable binding commits the dial to the configured proxy and
+    // relay-only reachability. With a proxy that cannot carry any traffic,
+    // the relay link never comes up, so the dial spends its connect deadline
+    // and reports the relay host as unreachable — a genuine network failure,
+    // never the old stock-binding fallback notice, and never the proxy URL,
+    // which may carry credentials.
+    const id = EndpointId.fromBytes(new Array<number>(32).fill(1));
+    const relayed = new EndpointAddr(id, "https://relay.invalid/", [
+      "192.0.2.1:1",
+    ]);
+    const key = encodeBridgeKey({
+      capability: mintCapability(),
+      expiresAt: Number.MAX_SAFE_INTEGER,
+      locator: EndpointTicket.fromAddr(relayed).toString(),
+      transport: "iroh",
+    });
+    if (Result.isFailure(key)) {
+      throw key.failure;
+    }
+    const environment = cleanEnvironment({
+      DUMBRIDGE_KEY: key.success,
+      HTTPS_PROXY: "http://user:proxy-secret@proxy.example:3128",
     });
 
-    try {
-      const { link } = await withTimeout(
-        readBridgeStartup(server.stdout),
-        5000
-      );
-      await writeFile(join(servedRoot, "proxied.txt"), "despite the proxy\n");
-      const environment = cleanEnvironment({
-        DUMBRIDGE_KEY: link,
-        HTTPS_PROXY: "http://user:proxy-secret@proxy.example:3128",
-      });
-
-      const run = await runCli(["run", "cat proxied.txt"], environment);
-      expect(run).toMatchObject({
-        exitCode: 0,
-        stdout: "despite the proxy\n",
-      });
-      expect(run.stderr).toContain(
-        "dumbridge: this environment sets a proxy, but the installed iroh binding cannot route through it; attempting a direct connection instead\n"
-      );
-      expect(run.stderr).toMatch(pathLine);
-      expect(run.stderr).not.toContain("proxy-secret");
-      expect(run.stderr).not.toContain("proxy.example");
-    } finally {
-      server.kill();
-      await server.exited;
-    }
+    const run = await runCli(["run", "true"], environment);
+    expect(run.exitCode).toBe(1);
+    expect(run.stdout).toBe("");
+    expect(run.stderr).toContain(
+      "dumbridge: The relay at relay.invalid could not be reached"
+    );
+    expect(run.stderr).not.toContain("attempting a direct connection instead");
+    expect(run.stderr).not.toContain(key.success);
+    expect(run.stderr).not.toContain("proxy-secret");
+    expect(run.stderr).not.toContain("proxy.example");
   }, 40_000);
 
   test("serve --direct-only reports a direct connection on run and pull", async () => {
@@ -368,6 +372,10 @@ describe("dumbridge CLI bridge", () => {
       expect(pull).toMatchObject({ exitCode: 0 });
       expect(pull.stderr).toContain("dumbridge: connected directly\n");
 
+      // A proxied environment commits the proxy-capable binding to
+      // relay-only reachability, and a direct-only key carries no relay: the
+      // combination is refused up front instead of pretending the proxy
+      // could carry a direct path.
       const proxied = await runCli(
         ["run", "cat direct.txt"],
         cleanEnvironment({
@@ -375,14 +383,12 @@ describe("dumbridge CLI bridge", () => {
           HTTPS_PROXY: "http://user:proxy-secret@proxy.example:3128",
         })
       );
-      expect(proxied).toMatchObject({
-        exitCode: 0,
-        stdout: "over a direct path\n",
-      });
+      expect(proxied.exitCode).toBe(1);
       expect(proxied.stderr).toContain(
-        "dumbridge: this environment sets a proxy, but the installed iroh binding cannot route through it; attempting a direct connection instead\n"
+        "dumbridge: The bridge transport locator has no relay.\n"
       );
-      expect(proxied.stderr).toContain("dumbridge: connected directly\n");
+      expect(proxied.stderr).not.toContain("proxy-secret");
+      expect(proxied.stderr).not.toContain("proxy.example");
     } finally {
       server.kill();
       await server.exited;

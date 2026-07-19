@@ -1,29 +1,61 @@
 # dumbridge
 
-dumbridge gives a disposable cloud coding agent temporary, live, read-only access to one local directory.
+dumbridge gives a cloud coding agent temporary, live, read-only access to one local directory.
 
-## Quick start
+## Install
 
-dumbridge requires Bun 1.3.14 or newer on `PATH`; both `bunx` and `npx --yes` work.
+No install step is needed. Run it with `bunx dumbridge` or `npx --yes dumbridge`. Bun 1.3.14 or newer must be on `PATH`.
+
+## Quickstart
 
 On the computer that owns the files:
 
-```bash
-bunx dumbridge serve ~/Documents/GitHub
-```
-
-Keep that process open. Put the printed `DUMBRIDGE_KEY` value in the cloud agent's environment without logging or committing it. In the cloud agent:
+1. Start the bridge:
 
 ```bash
-npx --yes dumbridge skill
-npx --yes dumbridge run 'find . -name SKILL.md -print | sort'
-npx --yes dumbridge pull .agents/skills/wayfinder .agents/skills/wayfinder
+bunx dumbridge serve ~/projects/my-app
 ```
 
-`skill` prints the bundled agent usage guide. `run` uses a bounded Just Bash filesystem, not the host shell, and its writes disappear after the request. `pull` accepts one exact relative path, refuses symlinks and existing destinations, and verifies content before publishing it. `run` and `pull` also accept the key through `--key-file <path>` (`-` reads stdin) instead of the environment.
+2. Copy the printed `DUMBRIDGE_KEY` value.
+3. Put it in the cloud agent's environment as a secret. Do not log it or commit it.
+4. Keep the serve process running. Ctrl-C stops it and revokes access.
 
-The bridge is one-way and the key is a bearer secret. Ctrl-C on `serve` revokes access. Every key expires on a deadline fixed at mint time (default 8 hours, `serve --ttl '90 minutes'`). `serve --detach <root>` runs the same server detached from the terminal, and `serve --stop` terminates it, which revokes the key.
+In the cloud agent:
 
-## Prerelease limitation
+```bash
+npx --yes dumbridge run 'ls -la'
+npx --yes dumbridge pull src/config.json
+```
 
-Direct iroh connections and ordinary relay fallback work. Proxy-only cloud agents need a proxy-enabled native iroh binding that is not yet published with this package. Do not treat Codex or Cursor cloud connectivity as released until that native matrix has been built and tested.
+`run` evaluates one script against the served root and prints its output. `pull` copies one file or directory from the served root into the current directory.
+
+## Commands
+
+- `dumbridge serve <root>` serves one directory read-only and prints the bridge key. The key expires after 8 hours by default; set a different lifetime with `--ttl '90 minutes'`. `--detach` starts the server without a terminal, `--stop` ends a detached serve, and `--status` lists the active ones. `--direct-only` and `--relay-only` force the connection path.
+- `dumbridge run '<script>'` evaluates one Bash-shaped script against the served root in a bounded sandbox. Writes are discarded. It never runs the host shell.
+- `dumbridge pull <remote-path> [destination]` copies one file or directory from the served root. It verifies content, refuses symlinks, and never overwrites an existing destination.
+- `dumbridge doctor` diagnoses the network environment without a key and exits non-zero when a check fails.
+- `dumbridge skill` prints the bundled agent usage guide without contacting a bridge.
+
+`run` and `pull` read the bridge key from `DUMBRIDGE_KEY`, or from `--key-file <path>` (`-` reads stdin). The key is never accepted as a command argument. Failures exit non-zero with a plain message that names the cause; `--log-level debug` on `run` or `pull` logs the dial sequence on stderr without exposing the key.
+
+## What it can and cannot do
+
+- Read-only. The agent can read files below the served root. It cannot write to your machine.
+- One directory. Only the directory you pass to `serve` is visible. Reads outside it are refused.
+- No host shell. `run` uses a sandboxed interpreter, and its writes are discarded.
+- Short-lived key. The bridge key is a bearer secret: anyone holding it can read the served root while `serve` runs. It expires on a deadline fixed when `serve` mints it, and stopping `serve` revokes it immediately.
+
+## Using it from a cloud agent
+
+Put the `DUMBRIDGE_KEY` value in the agent's environment, then use `run` and `pull` as shown above. Proxy-jailed sandboxes work: the bundled iroh binding routes the relay connection through the environment's HTTP(S) proxy and can trust an extra CA certificate for TLS-intercepting proxies (`DUMBRIDGE_CA_FILE`, `CODEX_PROXY_CERT`, or `SSL_CERT_FILE`).
+
+- Claude Code on the web: set Network access to Full.
+- Codex Cloud: set the Domain allowlist to All (unrestricted).
+- Cursor: works with no extra setup.
+
+If a connection fails, run `npx --yes dumbridge doctor` in the agent to diagnose the environment.
+
+## License
+
+MIT

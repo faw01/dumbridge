@@ -14,7 +14,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@number0/iroh": "1.0.0",
+    "@number0/iroh": "npm:dumbridge-iroh@1.0.0",
     "effect": "4.0.0-beta.98"
   },
   "devDependencies": {

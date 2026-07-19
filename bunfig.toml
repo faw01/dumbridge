@@ -1,3 +1,20 @@
 [install]
 linker = "isolated"
 minimumReleaseAge = 259200
+# The dumbridge-iroh fork family is published by this project's own audited
+# workflow (faw01/iroh-ffi dumbridge_release.yml) and is consumed the moment
+# it lands, so the third-party release-age quarantine does not apply to it.
+minimumReleaseAgeExcludes = [
+  "dumbridge-iroh",
+  "dumbridge-iroh-android-arm-eabi",
+  "dumbridge-iroh-android-arm64",
+  "dumbridge-iroh-darwin-arm64",
+  "dumbridge-iroh-linux-arm-gnueabihf",
+  "dumbridge-iroh-linux-arm-musleabihf",
+  "dumbridge-iroh-linux-arm64-gnu",
+  "dumbridge-iroh-linux-arm64-musl",
+  "dumbridge-iroh-linux-x64-gnu",
+  "dumbridge-iroh-linux-x64-musl",
+  "dumbridge-iroh-win32-arm64-msvc",
+  "dumbridge-iroh-win32-x64-msvc",
+]
