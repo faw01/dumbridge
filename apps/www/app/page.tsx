@@ -1,14 +1,16 @@
-import { Demo } from "./components/demo";
+import { Features } from "./components/features";
 import { Hero } from "./components/hero";
-import { Safety } from "./components/safety";
-import { Setup } from "./components/setup";
+import { Install } from "./components/install";
+import { Problem } from "./components/problem";
+import { Walkthrough } from "./components/walkthrough";
 
 const Home = () => (
   <main>
     <Hero />
-    <Demo />
-    <Setup />
-    <Safety />
+    <Problem />
+    <Install />
+    <Walkthrough />
+    <Features />
   </main>
 );
 

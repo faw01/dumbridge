@@ -16,7 +16,10 @@
       // owns the formatting, mirroring the upstream mf2 biome config.
       "!packages/design-system/components/ui",
       "!packages/design-system/lib",
-      "!packages/design-system/hooks"
+      "!packages/design-system/hooks",
+      // Brand SVG components installed verbatim from the SVGL registry
+      // (bunx shadcn add @svgl/<name>); the registry owns their formatting.
+      "!apps/www/components/ui/svgs"
     ]
   },
   "javascript": {
