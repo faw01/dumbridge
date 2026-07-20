@@ -6,7 +6,7 @@ interface TerminalLine {
 }
 
 const Snippet = ({ lines }: { readonly lines: readonly TerminalLine[] }) => (
-  <pre className="flex-1 space-y-3 overflow-x-auto rounded-lg border bg-card p-4 font-mono text-xs leading-relaxed">
+  <pre className="space-y-3 whitespace-pre-wrap break-words rounded-lg border bg-card p-4 font-mono text-xs leading-relaxed [overflow-wrap:anywhere]">
     {lines.map((line) => (
       <span className="block" key={line.cmd}>
         <span className="block">
@@ -36,15 +36,13 @@ interface StepProperties {
 }
 
 const Step = ({ caption, children, number, title }: StepProperties) => (
-  <div className="flex flex-col gap-4">
+  <div className="grid grid-rows-[auto_auto_auto] gap-y-2 md:row-span-3 md:grid-rows-subgrid">
     {children}
-    <div className="flex flex-col gap-1">
-      <h3 className="font-semibold text-lg tracking-tight">
-        <span className="mr-2 text-muted-foreground">{number}.</span>
-        {title}
-      </h3>
-      <p className="text-muted-foreground text-sm leading-relaxed">{caption}</p>
-    </div>
+    <h3 className="mt-2 font-semibold text-lg tracking-tight">
+      <span className="mr-2 text-muted-foreground">{number}.</span>
+      {title}
+    </h3>
+    <p className="text-muted-foreground text-sm leading-relaxed">{caption}</p>
   </div>
 );
 
@@ -54,7 +52,7 @@ export const Walkthrough = () => (
       <h2 className="font-semibold text-3xl tracking-tighter md:text-5xl">
         Using dumbridge
       </h2>
-      <div className="grid grid-cols-1 gap-8 md:grid-cols-3">
+      <div className="grid grid-cols-1 gap-x-8 gap-y-10 md:grid-cols-3 md:grid-rows-[auto_auto_auto]">
         <Step
           caption="Serve one directory from your machine. dumbridge prints the key."
           number="1"
@@ -74,9 +72,11 @@ export const Walkthrough = () => (
           number="2"
           title="Ask"
         >
-          <div className="flex-1 rounded-lg rounded-br-none border bg-card p-4 text-left text-sm leading-relaxed">
+          <div className="rounded-lg rounded-br-none border bg-card p-4 text-left text-sm leading-relaxed">
             Find the SKILL.md I was drafting. I never committed it. Key:{" "}
-            <code className="font-mono text-[13px]">dumbridge1_9f3c...</code>
+            <code className="break-words font-mono text-[13px] [overflow-wrap:anywhere]">
+              dumbridge1_9f3c...
+            </code>
           </div>
         </Step>
         <Step
