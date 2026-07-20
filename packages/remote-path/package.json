@@ -17,7 +17,7 @@
   },
   "devDependencies": {
     "@dumbridge/typescript-config": "workspace:*",
-    "@effect/vitest": "4.0.0-beta.98",
+    "@effect/vitest": "4.0.0-beta.99",
     "@types/bun": "1.3.14",
     "vitest": "4.1.10"
   }
