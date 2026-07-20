@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { DashedLine } from "./dashed-line";
 
 interface TerminalLine {
   readonly cmd: string;
@@ -67,13 +68,14 @@ const cloudNotes = [
 ];
 
 export const Walkthrough = () => (
-  <section className="border-t">
+  <section className="relative">
+    <DashedLine direction="top" />
     <div className="mx-auto flex w-full max-w-5xl flex-col gap-14 px-6 py-20 md:py-28">
       <h2 className="font-semibold text-3xl tracking-tighter md:text-5xl">
         Using dumbridge
       </h2>
       <Step
-        description="On your machine, point serve at the one directory the agent may read. It prints a bridge key and keeps serving until you press Ctrl-C, which revokes the key instantly."
+        description="Run serve on your machine. Pass the one directory the agent may read. serve prints the key and keeps serving. Press Ctrl-C to stop serve and revoke the key."
         number="1"
         title="Serve"
       >
@@ -94,8 +96,8 @@ export const Walkthrough = () => (
           <div className="flex flex-col gap-3">
             <p>
               Paste <code className="font-mono text-sm">DUMBRIDGE_KEY</code>{" "}
-              into the cloud agent's environment. The key carries everything the
-              agent needs to find your machine.
+              into the agent's environment. The key tells the agent how to reach
+              your machine.
             </p>
             <ul className="flex flex-col gap-1 text-sm">
               {cloudNotes.map((cloud) => (
@@ -120,7 +122,7 @@ export const Walkthrough = () => (
         />
       </Step>
       <Step
-        description="Inside the agent, run and pull read your local files over the bridge, live. Nothing was uploaded ahead of time; each read fetches the file as it sits on your disk at that moment."
+        description="In the agent, run and pull read your files over the bridge. Each read fetches the file from your disk at that moment. Nothing is uploaded in advance."
         number="3"
         title="Read"
       >
