@@ -38,29 +38,29 @@ interface StepProperties {
 const cloudNotes = [
   {
     name: "Claude Code on the web",
-    note: "Set Network access to Full.",
+    note: "set Network access to Full.",
     shot: {
       alt: "Claude Code on the web settings with Network access set to Full",
-      height: 120,
+      height: 240,
       hoverScale: "group-hover:scale-125 md:group-hover:scale-150",
       src: "/setup/claude-network.png",
-      width: 290,
+      width: 580,
     },
   },
   {
     name: "Codex Cloud",
-    note: "Set the Domain allowlist to All.",
+    note: "set the Domain allowlist to All.",
     shot: {
       alt: "Codex Cloud settings with the Domain allowlist set to All",
-      height: 170,
+      height: 340,
       hoverScale: "group-hover:scale-125 md:group-hover:scale-[1.8]",
       src: "/setup/codex-allowlist.png",
-      width: 360,
+      width: 720,
     },
   },
   {
     name: "Cursor",
-    note: "No setup needed.",
+    note: "no setup needed.",
     shot: undefined,
   },
 ];
@@ -128,31 +128,26 @@ export const Walkthrough = () => (
           />
         </Step>
       </div>
-      <div className="flex flex-col gap-4">
-        <p className="text-muted-foreground text-sm leading-relaxed">
-          In a cloud sandbox, set network access once.
-        </p>
-        <div className="grid grid-cols-1 gap-6 sm:grid-cols-3">
-          {cloudNotes.map((cloud) => (
-            <div className="group flex flex-col gap-2" key={cloud.name}>
-              <p className="text-sm">
-                <span className="font-medium tracking-tight">{cloud.name}</span>{" "}
-                <span className="text-muted-foreground">{cloud.note}</span>
-              </p>
-              {cloud.shot && (
-                <img
-                  alt={cloud.shot.alt}
-                  className={`relative z-0 w-48 max-w-full origin-bottom-left rounded-md border transition-transform duration-200 group-hover:z-10 group-hover:shadow-lg ${cloud.shot.hoverScale}`}
-                  height={cloud.shot.height}
-                  loading="lazy"
-                  src={cloud.shot.src}
-                  width={cloud.shot.width}
-                />
-              )}
-            </div>
-          ))}
-        </div>
-      </div>
+      <ul className="flex flex-col gap-5">
+        {cloudNotes.map((cloud) => (
+          <li className="group flex flex-col gap-2" key={cloud.name}>
+            <p className="text-sm">
+              <span className="font-medium tracking-tight">{cloud.name}:</span>{" "}
+              <span className="text-muted-foreground">{cloud.note}</span>
+            </p>
+            {cloud.shot && (
+              <img
+                alt={cloud.shot.alt}
+                className={`relative z-0 w-48 max-w-full origin-top-left rounded-md border transition-transform duration-200 group-hover:z-10 group-hover:shadow-lg ${cloud.shot.hoverScale}`}
+                height={cloud.shot.height}
+                loading="lazy"
+                src={cloud.shot.src}
+                width={cloud.shot.width}
+              />
+            )}
+          </li>
+        ))}
+      </ul>
     </div>
   </section>
 );
