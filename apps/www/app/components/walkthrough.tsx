@@ -1,5 +1,10 @@
-import type { ReactNode } from "react";
-import { DashedLine } from "./dashed-line";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@repo/design-system/components/ui/card";
 
 interface TerminalLine {
   readonly cmd: string;
@@ -7,16 +12,16 @@ interface TerminalLine {
 }
 
 const Terminal = ({ lines }: { readonly lines: readonly TerminalLine[] }) => (
-  <div className="overflow-hidden rounded-lg border bg-card">
+  <div className="overflow-hidden rounded-lg border bg-background/60">
     <div
       aria-hidden="true"
-      className="flex items-center gap-1.5 border-b px-4 py-3"
+      className="flex items-center gap-1.5 border-b px-4 py-2.5"
     >
       <span className="size-2.5 rounded-full bg-muted" />
       <span className="size-2.5 rounded-full bg-muted" />
       <span className="size-2.5 rounded-full bg-muted" />
     </div>
-    <pre className="space-y-3 overflow-x-auto p-5 font-mono text-[13px] leading-relaxed">
+    <pre className="space-y-3 overflow-x-auto p-4 font-mono text-[13px] leading-relaxed">
       {lines.map((line) => (
         <span className="block" key={line.cmd}>
           <span className="block">
@@ -39,106 +44,103 @@ const Terminal = ({ lines }: { readonly lines: readonly TerminalLine[] }) => (
   </div>
 );
 
-interface StepProperties {
-  readonly children: ReactNode;
-  readonly description: ReactNode;
+const StepTitle = ({
+  number,
+  title,
+}: {
   readonly number: string;
   readonly title: string;
-}
-
-const Step = ({ children, description, number, title }: StepProperties) => (
-  <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-2 lg:gap-12">
-    <div className="flex flex-col gap-3">
-      <h3 className="font-semibold text-xl tracking-tight md:text-2xl">
-        <span className="mr-3 text-muted-foreground">{number}.</span>
-        {title}
-      </h3>
-      <div className="text-muted-foreground leading-relaxed tracking-tight">
-        {description}
-      </div>
-    </div>
-    {children}
-  </div>
+}) => (
+  <CardTitle className="text-lg tracking-tight">
+    <span className="mr-2.5 text-muted-foreground">{number}.</span>
+    {title}
+  </CardTitle>
 );
 
 const cloudNotes = [
-  { name: "Claude Code on the web", note: "set Network access to Full" },
-  { name: "Codex Cloud", note: "set the Domain allowlist to All" },
-  { name: "Cursor", note: "no setup needed" },
+  { name: "Claude Code on the web", note: "Set Network access to Full." },
+  { name: "Codex Cloud", note: "Set the Domain allowlist to All." },
+  { name: "Cursor", note: "No setup needed." },
 ];
 
 export const Walkthrough = () => (
-  <section className="relative">
-    <DashedLine direction="top" />
-    <div className="mx-auto flex w-full max-w-5xl flex-col gap-14 px-6 py-20 md:py-28">
+  <section className="border-t">
+    <div className="mx-auto flex w-full max-w-5xl flex-col gap-10 px-6 py-20 md:py-28">
       <h2 className="font-semibold text-3xl tracking-tighter md:text-5xl">
         Using dumbridge
       </h2>
-      <Step
-        description="Run serve on your machine. Pass the one directory the agent may read. serve prints the key and keeps serving. Press Ctrl-C to stop serve and revoke the key."
-        number="1"
-        title="Serve"
-      >
-        <Terminal
-          lines={[
-            {
-              cmd: "dumbridge serve ~/project",
-              out: [
-                "Serving the selected directory read-only until Ctrl-C.",
-                "DUMBRIDGE_KEY=dumbridge1_...",
-              ],
-            },
-          ]}
-        />
-      </Step>
-      <Step
-        description={
-          <div className="flex flex-col gap-3">
-            <p>
-              Paste <code className="font-mono text-sm">DUMBRIDGE_KEY</code>{" "}
-              into the agent's environment. The key tells the agent how to reach
-              your machine.
-            </p>
-            <ul className="flex flex-col gap-1 text-sm">
-              {cloudNotes.map((cloud) => (
-                <li key={cloud.name}>
-                  <span className="text-foreground">{cloud.name}</span> —{" "}
-                  {cloud.note}
-                </li>
-              ))}
-            </ul>
-          </div>
-        }
-        number="2"
-        title="Share the key"
-      >
-        <Terminal
-          lines={[
-            {
-              cmd: "export DUMBRIDGE_KEY=dumbridge1_...",
-              out: [],
-            },
-          ]}
-        />
-      </Step>
-      <Step
-        description="In the agent, run and pull read your files over the bridge. Each read fetches the file from your disk at that moment. Nothing is uploaded in advance."
-        number="3"
-        title="Read"
-      >
-        <Terminal
-          lines={[
-            {
-              cmd: "dumbridge run 'ls'",
-              out: ["bridge: project (read-only)", "notes.md", "src"],
-            },
-            {
-              cmd: "dumbridge pull notes.md",
-              out: ["pulled notes.md"],
-            },
-          ]}
-        />
-      </Step>
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+        <Card className="md:col-span-2">
+          <CardHeader>
+            <StepTitle number="1" title="Serve" />
+            <CardDescription className="leading-relaxed">
+              Run serve on your machine. Pass the one directory the agent may
+              read. serve prints the key and keeps serving. Press Ctrl-C to stop
+              serve and revoke the key.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Terminal
+              lines={[
+                {
+                  cmd: "dumbridge serve ~/project",
+                  out: [
+                    "Serving the selected directory read-only until Ctrl-C.",
+                    "DUMBRIDGE_KEY=dumbridge1_...",
+                  ],
+                },
+              ]}
+            />
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader>
+            <StepTitle number="2" title="Share the key" />
+            <CardDescription className="leading-relaxed">
+              Paste <code className="font-mono">DUMBRIDGE_KEY</code> into the
+              agent's environment. The key tells the agent how to reach your
+              machine.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-2.5">
+            {cloudNotes.map((cloud) => (
+              <div
+                className="rounded-lg border bg-background/60 px-4 py-3"
+                key={cloud.name}
+              >
+                <p className="font-medium text-sm tracking-tight">
+                  {cloud.name}
+                </p>
+                <p className="text-muted-foreground text-sm">{cloud.note}</p>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+        <Card className="md:col-span-3">
+          <CardContent className="grid grid-cols-1 items-center gap-6 md:grid-cols-2">
+            <div className="flex flex-col gap-1.5">
+              <StepTitle number="3" title="Read" />
+              <CardDescription className="leading-relaxed">
+                In the agent, run and pull read your files over the bridge. Each
+                read fetches the file from your disk at that moment. Nothing is
+                uploaded in advance.
+              </CardDescription>
+            </div>
+            <Terminal
+              lines={[
+                {
+                  cmd: "dumbridge run 'ls'",
+                  out: ["bridge: project (read-only)", "notes.md", "src"],
+                },
+                {
+                  cmd: "dumbridge pull notes.md",
+                  out: ["pulled notes.md"],
+                },
+              ]}
+            />
+          </CardContent>
+        </Card>
+      </div>
     </div>
   </section>
 );

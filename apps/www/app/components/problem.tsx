@@ -1,8 +1,5 @@
-import { DashedLine } from "./dashed-line";
-
 export const Problem = () => (
-  <section className="relative">
-    <DashedLine direction="top" />
+  <section className="border-t">
     <div className="mx-auto flex w-full max-w-5xl flex-col gap-6 px-6 py-20 md:py-28">
       <h2 className="max-w-3xl text-4xl tracking-tighter md:text-6xl">
         <span className="block text-muted-foreground">

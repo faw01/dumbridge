@@ -19,7 +19,10 @@
       "!packages/design-system/hooks",
       // Brand SVG components installed verbatim from the SVGL registry
       // (bunx shadcn add @svgl/<name>); the registry owns their formatting.
-      "!apps/www/components/ui/svgs"
+      "!apps/www/components/ui/svgs",
+      // Vendored badtz-ui component installed verbatim through the shadcn
+      // CLI; its registry owns the formatting.
+      "!apps/www/app/components/ui"
     ]
   },
   "javascript": {
