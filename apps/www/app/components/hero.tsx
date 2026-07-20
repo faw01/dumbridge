@@ -14,10 +14,6 @@ const MARK_SIZE = 44;
 
 const OrbitSet = () => (
   <CloudOrbit className="absolute inset-0" size={0}>
-    <div
-      aria-hidden="true"
-      className="absolute top-1/2 left-1/2 size-[240px] -translate-x-1/2 -translate-y-1/2 rounded-full border border-white/10"
-    />
     {agentMarks.map((mark) => (
       <OrbitingImage
         images={[{ name: mark.name, url: mark.url }]}
@@ -42,7 +38,7 @@ export const Hero = () => (
           src="/hero.png"
           width={1536}
         />
-        <div className="absolute top-[61%] left-[81%] -translate-x-1/2 -translate-y-1/2">
+        <div className="absolute top-[65%] left-[83%] -translate-x-1/2 -translate-y-1/2">
           <div className="scale-[0.55] sm:scale-[0.85] md:scale-100">
             <OrbitSet />
           </div>
