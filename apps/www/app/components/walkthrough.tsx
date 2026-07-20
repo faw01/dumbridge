@@ -35,6 +35,36 @@ interface StepProperties {
   readonly title: string;
 }
 
+const cloudNotes = [
+  {
+    name: "Claude Code on the web",
+    note: "Set Network access to Full.",
+    shot: {
+      alt: "Claude Code on the web settings with Network access set to Full",
+      height: 120,
+      hoverScale: "group-hover:scale-125 md:group-hover:scale-150",
+      src: "/setup/claude-network.png",
+      width: 290,
+    },
+  },
+  {
+    name: "Codex Cloud",
+    note: "Set the Domain allowlist to All.",
+    shot: {
+      alt: "Codex Cloud settings with the Domain allowlist set to All",
+      height: 170,
+      hoverScale: "group-hover:scale-125 md:group-hover:scale-[1.8]",
+      src: "/setup/codex-allowlist.png",
+      width: 360,
+    },
+  },
+  {
+    name: "Cursor",
+    note: "No setup needed.",
+    shot: undefined,
+  },
+];
+
 const Step = ({ caption, children, number, title }: StepProperties) => (
   <div className="grid grid-rows-[auto_auto_auto] gap-y-2 md:row-span-3 md:grid-rows-subgrid">
     {children}
@@ -98,11 +128,31 @@ export const Walkthrough = () => (
           />
         </Step>
       </div>
-      <p className="max-w-3xl text-muted-foreground text-sm leading-relaxed">
-        In a cloud sandbox: Claude Code on the web needs Network access set to
-        Full. Codex Cloud needs the Domain allowlist set to All. Cursor needs no
-        setup.
-      </p>
+      <div className="flex flex-col gap-4">
+        <p className="text-muted-foreground text-sm leading-relaxed">
+          In a cloud sandbox, set network access once.
+        </p>
+        <div className="grid grid-cols-1 gap-6 sm:grid-cols-3">
+          {cloudNotes.map((cloud) => (
+            <div className="group flex flex-col gap-2" key={cloud.name}>
+              <p className="text-sm">
+                <span className="font-medium tracking-tight">{cloud.name}</span>{" "}
+                <span className="text-muted-foreground">{cloud.note}</span>
+              </p>
+              {cloud.shot && (
+                <img
+                  alt={cloud.shot.alt}
+                  className={`relative z-0 w-48 max-w-full origin-bottom-left rounded-md border transition-transform duration-200 group-hover:z-10 group-hover:shadow-lg ${cloud.shot.hoverScale}`}
+                  height={cloud.shot.height}
+                  loading="lazy"
+                  src={cloud.shot.src}
+                  width={cloud.shot.width}
+                />
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
     </div>
   </section>
 );
