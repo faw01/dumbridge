@@ -37,6 +37,11 @@
     // by the pull request gate the merge.
     "gate": "new-only"
   },
+  // apps/dumbridge pins @effect/platform-node-shared so published installs
+  // resolve one effect instance (its caret range otherwise floats to a newer
+  // beta whose effect peer range the pinned beta fails). Nothing imports it
+  // directly, so fallow cannot observe the usage.
+  "ignoreDependencies": ["@effect/platform-node-shared"],
   "overrides": [
     {
       // Vendored shadcn/ui kit copied verbatim from the mf2 scaffold.
