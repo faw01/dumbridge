@@ -9,7 +9,7 @@ const agentMarks = [
   { name: "Cursor", startAt: 2 / 3, url: "/marks/cursor.svg" },
 ];
 
-const ORBIT_RADIUS = 110;
+const ORBIT_RADIUS = 100;
 const MARK_SIZE = 44;
 
 const OrbitSet = () => (
@@ -38,7 +38,7 @@ export const Hero = () => (
           src="/hero.png"
           width={1536}
         />
-        <div className="absolute top-[74%] left-[72%] -translate-x-1/2 -translate-y-1/2">
+        <div className="absolute top-[77%] left-[77%] -translate-x-1/2 -translate-y-1/2">
           <div className="scale-[0.55] sm:scale-[0.85] md:scale-100">
             <OrbitSet />
           </div>
