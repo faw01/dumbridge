@@ -28,20 +28,21 @@
       }
     ]
   },
-  // The Effect language-service is loaded through tsconfig plugins
-  // (packages/typescript-config/base.json), a reference dependency
-  // scanning does not trace.
-  "ignoreDependencies": ["@effect/language-service"],
+  // @effect/language-service loads through tsconfig plugins
+  // (packages/typescript-config/base.json), a reference dependency scanning
+  // does not trace. @effect/platform-node-shared is pinned by apps/dumbridge
+  // so published installs resolve one effect instance (its caret range
+  // otherwise floats to a newer beta whose effect peer range the pinned beta
+  // fails); nothing imports it directly, so fallow cannot observe the usage.
+  "ignoreDependencies": [
+    "@effect/language-service",
+    "@effect/platform-node-shared"
+  ],
   "audit": {
     // Inherited findings stay visible in reports; only findings introduced
     // by the pull request gate the merge.
     "gate": "new-only"
   },
-  // apps/dumbridge pins @effect/platform-node-shared so published installs
-  // resolve one effect instance (its caret range otherwise floats to a newer
-  // beta whose effect peer range the pinned beta fails). Nothing imports it
-  // directly, so fallow cannot observe the usage.
-  "ignoreDependencies": ["@effect/platform-node-shared"],
   "overrides": [
     {
       // Vendored shadcn/ui kit copied verbatim from the mf2 scaffold.
