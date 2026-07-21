@@ -1,5 +1,11 @@
 # dumbridge
 
+## 1.0.2
+
+### Patch Changes
+
+- e3e3b40: strip comments from published sources
+
 ## 1.0.1
 
 ### Patch Changes
