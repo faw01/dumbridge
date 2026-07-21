@@ -3,5 +3,14 @@
   "ignoreDependencies": [
     "@effect/language-service",
     "@effect/platform-node-shared"
+  ],
+  "overrides": [
+    {
+      "files": ["packages/design-system/**"],
+      "rules": {
+        "unused-files": "off",
+        "unused-exports": "off"
+      }
+    }
   ]
 }

@@ -30,12 +30,7 @@ import {
 } from "./protocol";
 import type { PullManifest } from "./pull-manifest";
 
-// fallow-ignore-next-line unused-export
-export const writeUint32 = (
-  target: Uint8Array,
-  offset: number,
-  value: number
-) => {
+const writeUint32 = (target: Uint8Array, offset: number, value: number) => {
   new DataView(target.buffer, target.byteOffset, target.byteLength).setUint32(
     offset,
     value,

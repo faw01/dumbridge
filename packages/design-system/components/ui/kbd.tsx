@@ -1,4 +1,3 @@
-// fallow-ignore-file unused-file
 import { cn } from "@repo/design-system/lib/utils"
 
 function Kbd({ className, ...props }: React.ComponentProps<"kbd">) {

@@ -1,4 +1,3 @@
-// fallow-ignore-file unused-file,unused-export
 import { cn } from "@repo/design-system/lib/utils"
 
 function Skeleton({ className, ...props }: React.ComponentProps<"div">) {

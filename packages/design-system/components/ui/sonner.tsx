@@ -37,6 +37,5 @@ const Toaster = ({ ...props }: ToasterProps) => {
   )
 }
 
-// fallow-ignore-next-line unused-export
 export { toast } from "sonner"
 export { Toaster }

@@ -1,4 +1,3 @@
-// fallow-ignore-file unused-file
 import { Loader2Icon } from "lucide-react"
 
 import { cn } from "@repo/design-system/lib/utils"

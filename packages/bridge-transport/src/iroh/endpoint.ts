@@ -11,8 +11,7 @@ import {
   BridgeLocatorInvalidError,
 } from "../index";
 
-// fallow-ignore-next-line unused-export
-export const closeReason = Array.from(
+const closeReason = Array.from(
   new TextEncoder().encode("dumbridge session closed")
 );
 
