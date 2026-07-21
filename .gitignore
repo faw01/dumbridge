@@ -3,6 +3,9 @@
 node_modules/
 dist/
 coverage/
+.next/
+out/
+next-env.d.ts
 *.tgz
 *.log
 *.tsbuildinfo

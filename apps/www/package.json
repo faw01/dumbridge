@@ -1,0 +1,27 @@
+{
+  "name": "www",
+  "private": true,
+  "scripts": {
+    "dev": "bun --bun next dev -p 3001",
+    "build": "bun --bun next build",
+    "start": "bun --bun next start",
+    "clean": "git clean -xdf .cache .turbo dist node_modules",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@repo/design-system": "workspace:*",
+    "lucide-react": "^1.23.0",
+    "motion": "^12.42.2",
+    "next": "16.2.10",
+    "react": "19.2.7",
+    "react-dom": "19.2.7"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4.3.2",
+    "@types/node": "25.7.0",
+    "@types/react": "19.2.17",
+    "@types/react-dom": "19.2.3",
+    "tailwindcss": "^4.3.2",
+    "typescript": "^6.0.3"
+  }
+}
