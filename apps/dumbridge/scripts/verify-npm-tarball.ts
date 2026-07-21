@@ -148,9 +148,6 @@ const verifyInstalledArchive = async () => {
       );
     }
 
-    // Releases and prerelease tarballs may re-version package.json after
-    // dist/cli.js was bundled; --version must follow the installed manifest,
-    // not a version constant inlined at build time.
     const installedManifestPath = join(
       consumerDirectory,
       "node_modules",

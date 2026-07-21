@@ -299,7 +299,7 @@ export class PullView {
           try {
             await directory.close();
           } catch {
-            // Preserve the primary read, limit, or cancellation failure.
+            //
           }
           throw cause;
         }

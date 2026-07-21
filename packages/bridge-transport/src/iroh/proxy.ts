@@ -16,12 +16,6 @@ interface ProxyAwareEndpointBuilder {
 
 export type ProxyEnvironment = Readonly<Record<string, string | undefined>>;
 
-// The published @number0/iroh binding omits the proxy builder methods; only
-// the patched binding exposes proxyUrl. Callers probe this before committing
-// a dial to a proxy the adapter would otherwise have to reject as a
-// configuration dead-end. A binding too broken to construct a builder cannot
-// proxy either; the dial's own builder creation then surfaces the branded
-// construction failure, so the probe stays total instead of throwing.
 export const irohBindingSupportsProxy = (builder?: object): boolean => {
   try {
     const probe = builder ?? Endpoint.builder();
@@ -40,10 +34,6 @@ const proxyEnvironmentKeys = [
   "all_proxy",
 ] as const;
 
-// Truthiness, not presence: empty proxy variables (common placeholder
-// exports) never count as a configured proxy. The CLI's transport selection
-// and the doctor diagnosis share this one predicate so the two can never
-// disagree about whether an environment is proxied.
 export const hasProxyEnvironment = (environment: ProxyEnvironment) =>
   proxyEnvironmentKeys.some((key) => Boolean(environment[key]));
 
@@ -71,7 +61,7 @@ const proxyUrlFromEnvironment = (
         return Effect.succeed(url.toString());
       }
     } catch {
-      // Try the next conventional proxy environment variable.
+      //
     }
   }
 
@@ -82,10 +72,6 @@ const proxyUrlFromEnvironment = (
   });
 };
 
-// The environment is a required value threaded from the CLI shell: a
-// process.env default here would smuggle an ambient effect through the
-// BridgeTransport seam and let a dial silently read a different environment
-// than the one the client committed to.
 export const configureIrohProxy = (
   builder: object,
   proxy: IrohProxyConfiguration,

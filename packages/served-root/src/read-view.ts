@@ -54,8 +54,6 @@ const assertHostComponentKind = (stats: Stats, isLeaf: boolean) => {
   }
 };
 
-// Unknown errno values collapse to EIO so a host read failure can never leak
-// detail beyond the allowlisted codes into shell-visible messages.
 const safeHostReadError = (error: unknown, normalizedPath: string) => {
   const { code } = error as NodeJS.ErrnoException;
   const safeCode = code && safeHostReadCodes.includes(code) ? code : "EIO";
@@ -237,13 +235,6 @@ export class RequestBudgetOverlayFs extends OverlayFs {
     return super.resolvePath("/", path);
   }
 
-  // Escape branding stays at path resolution, above the overlay: the check is
-  // purely syntactic on the normal form and never consults the host tree, so
-  // it cannot reveal what exists outside the jail. Only a read that actually
-  // missed records the escape, and a later successful write to the same path
-  // erases it again, because the shell probes a redirect target with stat
-  // before creating it; overlay scratch content outside the root (for example
-  // a script's own /tmp writes) therefore stays unbranded.
   private recordOutsideRootMiss(path: string, error: unknown) {
     if (!isMissingRead(error)) {
       return;
@@ -314,8 +305,6 @@ export class RequestBudgetOverlayFs extends OverlayFs {
     return { normalized, path: join(this.hostRoot, ...segments), segments };
   }
 
-  // Components are validated in order, without following symlinks, so a
-  // symlinked or replaced ancestor is rejected before the leaf is opened.
   private async lstatLeafIdentity(
     location: NonNullable<ReturnType<RequestBudgetOverlayFs["hostLocation"]>>
   ): Promise<HostLeafIdentity> {
@@ -348,8 +337,6 @@ export class RequestBudgetOverlayFs extends OverlayFs {
     return leafIdentity;
   }
 
-  // The opened handle must still be the regular file the component walk
-  // validated, or a swap between lstat and open would serve different bytes.
   private async verifyOpenedLeaf(
     handle: HostFileHandle,
     leaf: HostLeafIdentity

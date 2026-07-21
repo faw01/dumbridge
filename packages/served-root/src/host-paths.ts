@@ -67,7 +67,7 @@ export const pathKindFrom = (stats: Stats): PathKind => {
   return "other";
 };
 
-export const pathComponentsMatch = (
+const pathComponentsMatch = (
   expected: PathComponentSnapshot,
   observed: PathComponentSnapshot
 ) => {

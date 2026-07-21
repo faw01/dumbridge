@@ -21,8 +21,6 @@ import {
 
 const chunkSize = 64 * 1024;
 
-// Path reporting is observability only: a native snapshot failure must never
-// take down an otherwise healthy session, so it degrades to "unknown".
 const selectedConnectionPath = (connection: Connection): ConnectionPath => {
   try {
     const selected = connection.paths().find((path) => path.isSelected);

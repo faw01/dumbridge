@@ -230,11 +230,6 @@ describe("dumbridge CLI bridge", () => {
   }, 40_000);
 
   test("rejects a direct-only key when the environment commits to a proxy", async () => {
-    // The installed binding is the proxy-capable dumbridge-iroh fork, so a
-    // proxied environment commits to the proxy and to relay-only
-    // reachability (an HTTP CONNECT tunnel carries TCP only). A direct-only
-    // key has no relay to dial through, so the run fails before any network
-    // attempt — and never falls back around the proxy commitment.
     const id = EndpointId.fromBytes(new Array<number>(32).fill(1));
     const unreachable = new EndpointAddr(id, null, ["192.0.2.1:1"]);
     const key = encodeBridgeKey({
@@ -279,8 +274,6 @@ describe("dumbridge CLI bridge", () => {
         5000
       );
       await writeFile(join(servedRoot, "debugged.txt"), "debug run\n");
-      // No proxy variables: the proxy-capable binding would commit this run
-      // to the (nonexistent) proxy instead of dialing the local bridge.
       const environment = cleanEnvironment({ DUMBRIDGE_KEY: link });
 
       const run = await runCli(
@@ -303,12 +296,6 @@ describe("dumbridge CLI bridge", () => {
   }, 40_000);
 
   test("commits a relay-carrying key to the proxy and reports the relay by cause", async () => {
-    // The proxy-capable binding commits the dial to the configured proxy and
-    // relay-only reachability. With a proxy that cannot carry any traffic,
-    // the relay link never comes up, so the dial spends its connect deadline
-    // and reports the relay host as unreachable — a genuine network failure,
-    // never the old stock-binding fallback notice, and never the proxy URL,
-    // which may carry credentials.
     const id = EndpointId.fromBytes(new Array<number>(32).fill(1));
     const relayed = new EndpointAddr(id, "https://relay.invalid/", [
       "192.0.2.1:1",
@@ -372,10 +359,6 @@ describe("dumbridge CLI bridge", () => {
       expect(pull).toMatchObject({ exitCode: 0 });
       expect(pull.stderr).toContain("dumbridge: connected directly\n");
 
-      // A proxied environment commits the proxy-capable binding to
-      // relay-only reachability, and a direct-only key carries no relay: the
-      // combination is refused up front instead of pretending the proxy
-      // could carry a direct path.
       const proxied = await runCli(
         ["run", "cat direct.txt"],
         cleanEnvironment({

@@ -47,9 +47,6 @@ describe("Iroh FFI proxy source patch", () => {
     expect(manifest.version).toBe("1.0.0");
     expect(manifest.main).toBe("index.js");
     expect(manifest.types).toBe("index.d.ts");
-    // The multi-platform release carries its native binaries as the same
-    // eleven per-target packages stock @number0/iroh ships, which is what
-    // clears the release gate that kept the fork off `latest`.
     expect(Object.keys(manifest.optionalDependencies).sort()).toEqual([
       "dumbridge-iroh-android-arm-eabi",
       "dumbridge-iroh-android-arm64",

@@ -30,9 +30,6 @@ import type { SourceFileExpectation, SourceRevision } from "./source-revision";
 
 const maximumDisplayNameCharacters = 64;
 
-// The sanitized display is the only part of the host path allowed to leave
-// this module: the final component the sharer chose, stripped of terminal
-// control characters and bounded, so no message can echo the raw host path.
 const displayNameFrom = (hostPath: string) => {
   const name = basename(hostPath)
     // biome-ignore lint/suspicious/noControlCharactersInRegex: stripping control characters is the point of this sanitizer
@@ -189,8 +186,6 @@ export class ServedRoot {
     }
   }
 
-  // A symlink as the final component is only reported, never followed, but a
-  // symlinked earlier component would re-route every path below it.
   #assertObservedPath(virtualPath: string) {
     const segments = hostSegmentsFrom(virtualPath);
     if (segments === undefined) {

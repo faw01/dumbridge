@@ -170,9 +170,6 @@ const formatBytes = (bytes: number) => {
   return `${bytes} bytes`;
 };
 
-// Each message states the configured ceiling, whether it is per-file or
-// cumulative, and how to recover, because the agent on the other side of the
-// bridge sees only this one line.
 const limitMessage = (limit: ShellLimit, limits: SafeShellLimits) => {
   const detail: Record<ShellLimit, string> = {
     "file-read": `one run may read at most ${formatBytes(limits.maxFileReadBytes)} in total across every file it opens; narrow the query to fewer files or a subdirectory`,
@@ -251,7 +248,6 @@ const makeExecute = (servedRoot: ServedRoot, limits: SafeShellLimits) =>
           new Bash({
             commands: [...safeCommands],
             cwd: view.workingDirectory,
-            // Just Bash's process-wide patches conflict with Effect's stack tracing.
             defenseInDepth: false,
             env: { HOME: view.workingDirectory },
             executionLimits: {

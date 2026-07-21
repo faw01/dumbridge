@@ -2,9 +2,6 @@
   "$schema": "./node_modules/@biomejs/biome/configuration_schema.json",
   "extends": ["ultracite/biome/core"],
   "files": {
-    // patches/ mirrors externally published artifacts byte-for-byte
-    // (the iroh-ffi source patch and the dumbridge-iroh npm manifest);
-    // reformatting them would break the provenance pin.
     "includes": [
       "!.repos",
       "!node_modules",
@@ -12,16 +9,10 @@
       "!dist",
       "!coverage",
       "!patches",
-      // Vendored shadcn/ui code copied from the mf2 scaffold; its generator
-      // owns the formatting, mirroring the upstream mf2 biome config.
       "!packages/design-system/components/ui",
       "!packages/design-system/lib",
       "!packages/design-system/hooks",
-      // Brand SVG components installed verbatim from the SVGL registry
-      // (bunx shadcn add @svgl/<name>); the registry owns their formatting.
       "!apps/www/components/ui/svgs",
-      // Vendored badtz-ui component installed verbatim through the shadcn
-      // CLI; its registry owns the formatting.
       "!apps/www/app/components/ui"
     ]
   },
@@ -30,7 +21,6 @@
   },
   "overrides": [
     {
-      // Workspace package entry points re-export their public interface.
       "includes": ["packages/*/src/**/index.ts"],
       "linter": {
         "rules": {
@@ -41,7 +31,6 @@
       }
     },
     {
-      // Fallow parses .fallowrc.json as JSONC; its constraints live in comments.
       "includes": [".fallowrc.json"],
       "json": {
         "parser": {

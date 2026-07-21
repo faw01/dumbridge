@@ -327,9 +327,6 @@ describe("Iroh bridge transport", () => {
     expect(
       irohBindingSupportsCaTrust({ caExtraRootsPem: () => undefined })
     ).toBe(true);
-    // The installed binding is the patched dumbridge-iroh fork, so the CA
-    // trust builder method is present; this pins that the alias actually
-    // delivers a CA-trust-capable binding to the client.
     expect(irohBindingSupportsCaTrust()).toBe(true);
     const broken = new Proxy(
       {},
@@ -406,7 +403,6 @@ describe("Iroh bridge transport", () => {
       caTrustSourceFromEnvironment({ SSL_CERT_FILE: "/etc/certs/bundle.pem" })
     ).toEqual({ name: "SSL_CERT_FILE", path: "/etc/certs/bundle.pem" });
     expect(caTrustSourceFromEnvironment({})).toBeUndefined();
-    // Truthiness, not presence, mirroring the proxy environment predicate.
     expect(caTrustSourceFromEnvironment({ SSL_CERT_FILE: "" })).toBeUndefined();
   });
 
@@ -424,13 +420,7 @@ describe("Iroh bridge transport", () => {
   it("answers whether a binding can route through a proxy", () => {
     expect(irohBindingSupportsProxy({})).toBe(false);
     expect(irohBindingSupportsProxy({ proxyUrl: () => undefined })).toBe(true);
-    // The installed binding is the patched dumbridge-iroh fork, so the proxy
-    // builder method is present; this pins that the alias actually delivers
-    // a proxy-capable binding to the client.
     expect(irohBindingSupportsProxy()).toBe(true);
-    // A binding too broken to inspect cannot proxy either; the probe reports
-    // the gap instead of throwing, and the dial's own builder creation
-    // surfaces the branded construction failure.
     const broken = new Proxy(
       {},
       {
@@ -446,13 +436,6 @@ describe("Iroh bridge transport", () => {
     "fails a proxied environment without a direct path as a genuine connection failure",
     () =>
       Effect.gen(function* () {
-        // The Codex-like case after the proxy fallback: the client no longer
-        // requests the unusable proxy, so a dial with no working direct or
-        // relay route must spend its connect deadline and fail like any
-        // other unreachable peer — never as the pre-network
-        // BridgeProxyUnsupportedError configuration dead-end. The failure is
-        // classified: the relay link never came up, so the dial reports the
-        // relay host as unreachable instead of a generic failure.
         const transport = makeIrohTransport({
           deadlines: {
             accept: "1 second",
@@ -885,10 +868,6 @@ describe("Iroh bridge transport", () => {
           yield* client.write(Uint8Array.of(7));
           const failure = yield* Fiber.join(serverFiber);
 
-          // Close only after the join. Without a later use of `client`, GC may
-          // finalize its native send stream mid-test, which implicitly
-          // finishes the QUIC stream; the server would then read EOF instead
-          // of reaching its deadline.
           yield* client.close;
           return failure;
         })

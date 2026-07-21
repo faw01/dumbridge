@@ -11,7 +11,7 @@ import {
   BridgeLocatorInvalidError,
 } from "../index";
 
-export const closeReason = Array.from(
+const closeReason = Array.from(
   new TextEncoder().encode("dumbridge session closed")
 );
 
@@ -19,7 +19,7 @@ export const closeConnectionImmediately = (connection: Connection) => {
   try {
     connection.close(0n, closeReason);
   } catch {
-    // The connection is already closed or no longer usable.
+    //
   }
 };
 
@@ -36,7 +36,7 @@ const closeEndpointImmediately = (endpoint: Endpoint) => {
   try {
     endpoint.close().catch(() => undefined);
   } catch {
-    // The endpoint is already closed or no longer usable.
+    //
   }
 };
 
