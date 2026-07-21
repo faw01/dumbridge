@@ -9,10 +9,9 @@ export const Problem = () => (
       </h2>
       <p className="max-w-2xl text-lg text-muted-foreground leading-relaxed tracking-tight">
         A cloud coding agent runs on a remote machine. It cannot see the files
-        on your machine: the uncommitted config, the local data, the things you
-        never pushed. dumbridge gives the agent temporary, live, read-only
-        access to one directory on your machine. The agent reads your files as
-        they are right now. There is no upload, no commit, and no snapshot.
+        on your computer. dumbridge gives the agent temporary, live, read-only
+        access to one directory. The agent reads the files as they are right
+        now. There is no copy, no upload, and no snapshot.
       </p>
     </div>
   </section>
