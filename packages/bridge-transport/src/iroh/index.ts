@@ -51,8 +51,6 @@ export {
   irohBindingSupportsProxy,
 } from "./proxy";
 
-// Iroh keeps a trailing dot on relay hostnames; the reported host matches
-// what a user would put in an egress allowlist.
 const trailingDot = /\.$/;
 
 const relayHostForDisplay = (relayUrl: string) => {
@@ -73,11 +71,6 @@ const dialFailureMessages: Record<
     `The relay at ${relayHost} could not be reached: this network may block it, and no direct path to the bridge was found. Allow HTTPS to ${relayHost} and retry.`,
 };
 
-// The adapter is the only place that knows why a dial failed: it watched the
-// relay link while the dial ran. The snapshot classifies the failure into an
-// iroh-agnostic reason; ambiguity stays honest — a blocked relay hides
-// whether the peer was also offline, so the reason names only what was
-// observed.
 export const classifyDialFailure = (observed: {
   readonly cause: unknown;
   readonly relayConnected: boolean;
@@ -207,13 +200,6 @@ const listen = (options: ResolvedOptions): BridgeTransport["listen"] =>
     };
   });
 
-// addr() includes the home relay only once its link is actually up, so the
-// snapshot distinguishes a blocked relay from a silent peer, and it survives
-// the endpoint close that a timed-out dial performs first. It is a plain
-// native read: endpoint.online() would answer the same question but its
-// pending promise keeps the runtime's event loop alive after the dial, and a
-// watcher callback needs the same teardown care. A native read failure is
-// reported as "the link never came up".
 const relayLinkObserved = (endpoint: Endpoint) => {
   try {
     return endpoint.addr().relayUrl() !== null;
@@ -269,8 +255,6 @@ const connect = (
           message: "Could not open the bridge client endpoint.",
         })
     );
-    // The locator's addresses are the peer's published reachability hints,
-    // not secrets; the opaque locator ticket itself is never logged.
     yield* Effect.logDebug("bridge dial: attempting", {
       directAddresses: normalizedAddress.directAddresses(),
       relay: relayHost ?? "none",
@@ -290,19 +274,12 @@ const connect = (
     ).pipe(
       Effect.mapError((error) => {
         if (relayUrl === null) {
-          // With RelayMode.disabled there is no fallback: a dial that
-          // cannot holepunch fails or times out instead of degrading to a
-          // relay, and both shapes surface as the branded failure so
-          // callers do not retry.
           return new BridgeDirectConnectError({
             cause: error,
             message:
               "No viable network path to the bridge: the direct connection failed (this network may block UDP) and the bridge locator allows no relay fallback.",
           });
         }
-        // The snapshot is taken at failure time: a dial that fails with the
-        // relay link up points at the peer, one that fails with the link
-        // down points at the relay path.
         return classifyDialFailure({
           cause: error,
           relayConnected: relayLinkObserved(endpoint),

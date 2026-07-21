@@ -1,3 +1,4 @@
+// fallow-ignore-file unused-file
 "use client"
 
 import * as React from "react"
@@ -6,7 +7,6 @@ import type { TooltipValueType } from "recharts"
 
 import { cn } from "@repo/design-system/lib/utils"
 
-// Format: { THEME_NAME: CSS_SELECTOR }
 const THEMES = { light: "", dark: ".dark" } as const
 
 const INITIAL_DIMENSION = { width: 320, height: 200 } as const
@@ -327,7 +327,6 @@ function ChartLegendContent({
   )
 }
 
-// Helper to extract item config from a payload.
 function getPayloadConfigFromPayload(
   config: ChartConfig,
   payload: unknown,

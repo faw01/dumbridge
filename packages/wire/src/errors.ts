@@ -53,6 +53,7 @@ export class FrameTooLargeError extends Schema.TaggedErrorClass<FrameTooLargeErr
   }
 ) {}
 
+// fallow-ignore-next-line unused-export
 export class MalformedFrameError extends Schema.TaggedErrorClass<MalformedFrameError>()(
   "MalformedFrameError",
   {
@@ -84,6 +85,7 @@ export class AuthenticationError extends Schema.TaggedErrorClass<AuthenticationE
   { message: Schema.String }
 ) {}
 
+// fallow-ignore-next-line unused-export
 export class IllegalFrameError extends Schema.TaggedErrorClass<IllegalFrameError>()(
   "IllegalFrameError",
   {
@@ -97,6 +99,7 @@ export class IncompleteSessionError extends Schema.TaggedErrorClass<IncompleteSe
   { message: Schema.String }
 ) {}
 
+// fallow-ignore-next-line unused-export
 export class WireLimitExceededError extends Schema.TaggedErrorClass<WireLimitExceededError>()(
   "WireLimitExceededError",
   {

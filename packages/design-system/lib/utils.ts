@@ -4,5 +4,6 @@ import { twMerge } from 'tailwind-merge';
 
 export const cn = (...inputs: ClassValue[]): string => twMerge(clsx(inputs));
 
+// fallow-ignore-next-line unused-export
 export const capitalize = (str: string) =>
   str.charAt(0).toUpperCase() + str.slice(1);

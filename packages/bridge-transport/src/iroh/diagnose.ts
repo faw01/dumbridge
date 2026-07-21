@@ -25,8 +25,6 @@ export interface IrohDiagnosticProbes {
   readonly sendUdpProbe: () => Promise<void>;
 }
 
-// The environment is a value threaded in from the CLI shell; this module
-// never reads the ambient process environment itself.
 export interface IrohDiagnosisRequest {
   readonly environment: ProxyEnvironment;
   readonly probes: IrohDiagnosticProbes;
@@ -61,9 +59,6 @@ const partitionHosts = (
     }))
   );
 
-// An empty host list means the binding exposed no default relay
-// configuration (or reading it crashed); reporting "all 0 ok" would let
-// doctor exit clean without probing anything.
 const emptyRelayHostsDetail =
   "No iroh relay hosts could be read from the installed binding's default relay configuration.";
 
@@ -91,9 +86,6 @@ const dnsCheck = (request: {
         };
       }
       if (reached.length === 0) {
-        // A proxied relay dial resolves only the proxy host locally; the
-        // relay hostname travels inside the HTTP CONNECT request for the
-        // proxy to resolve, so blocked local DNS stays workable there.
         if (request.proxyUsable) {
           return {
             detail: `Could not resolve any of the ${total} iroh relay hosts locally; with an HTTP(S) proxy configured, the proxy resolves relay hostnames itself, a path this probe does not test.`,
@@ -162,11 +154,6 @@ const relayCheck = (request: {
           status: "warn" as const,
         };
       }
-      // In a proxy-only sandbox a direct TCP connection is expected to be
-      // refused; relay bytes can still travel through the HTTP(S) proxy, but
-      // only when the installed binding can actually use that proxy. Probing
-      // through the proxy would mean speaking HTTP CONNECT here — a parallel
-      // probing stack — so the detail names the untested path instead.
       if (request.proxyUsable) {
         return {
           detail: `No iroh relay host accepted a direct TCP connection on port ${relayPort}; with an HTTP(S) proxy configured, relay traffic must travel through the proxy, a path this probe does not test.`,
@@ -182,11 +169,6 @@ const relayCheck = (request: {
     })
   );
 
-// The capability probes run the real configuration paths against a
-// throwaway endpoint builder; their typed failures already carry
-// self-descriptive, credential-free messages. A binding too broken to
-// construct a builder cannot open any connection; that failure stays check
-// data instead of aborting the report before it prints.
 const withThrowawayBuilder = (
   name: string,
   probes: IrohDiagnosticProbes,
@@ -231,11 +213,6 @@ const proxyCheck = (request: {
         name,
         status: "ok" as const,
       }),
-      // The statuses mirror what run and pull actually do. A binding
-      // without proxy support makes them fall back to a direct connection
-      // ("warn": the udp-egress and relay-reachability checks cover that
-      // path). A capable binding commits to the environment's proxy, so
-      // proxy variables holding no usable URL block the dial ("fail").
       Effect.catchTags({
         BridgeProxyConfigurationError: (error) =>
           Effect.succeed({
@@ -254,14 +231,6 @@ const proxyCheck = (request: {
   );
 };
 
-// Extra CA roots matter only when run and pull actually tunnel through the
-// proxy: without a usable proxy there is no CONNECT tunnel whose intercepted
-// TLS the roots could vouch for, so the check reports not-applicable instead
-// of warning about common, harmless SSL_CERT_FILE exports. The statuses
-// mirror what run and pull do with a usable proxy: an unsupported binding or
-// an unreadable file makes them continue without the extra roots ("warn"),
-// while a capable binding that rejects the certificate blocks the dial
-// before any network attempt ("fail").
 const caTrustCheck = (request: {
   readonly environment: ProxyEnvironment;
   readonly probes: IrohDiagnosticProbes;
@@ -285,9 +254,6 @@ const caTrustCheck = (request: {
     });
   }
   return withThrowawayBuilder(name, request.probes, (builder) => {
-    // Support is probed before the file is touched, mirroring run and pull:
-    // a stock binding is the reported gap even when the named file is also
-    // unreadable, and the check never reads a file it would not use.
     if (!irohBindingSupportsCaTrust(builder)) {
       return Effect.succeed({
         detail: `${caTrustUnsupportedMessage} run and pull continue without the extra CA roots.`,
@@ -333,8 +299,6 @@ const caTrustCheck = (request: {
   });
 };
 
-// The proxy check runs first (it touches no network) because the relay
-// check's proxy escape hatch only applies when the proxy is actually usable.
 export const diagnoseIrohEnvironment = (
   request: IrohDiagnosisRequest
 ): Effect.Effect<readonly DiagnosisCheck[]> =>
@@ -372,12 +336,8 @@ export const diagnoseIrohEnvironment = (
 const probeTimeoutMilliseconds = 4000;
 const udpReplyTimeoutMilliseconds = 2000;
 
-// A public anycast DNS resolver: answering the probe datagram proves UDP
-// egress and a working return path without contacting any iroh host.
 const udpProbeResolver = { address: "1.1.1.1", port: 53 };
 
-// The datagram is a minimal DNS A query for example.com; its payload only
-// matters insofar as the resolver sends something back.
 const udpProbeQuery = () => {
   const encoder = new TextEncoder();
   const question = "example.com"
@@ -440,9 +400,6 @@ const sendHostUdpProbe = () =>
     );
   });
 
-// An explicit timer, not socket.setTimeout: the socket idle timer is not
-// guaranteed to cover the connect handshake, so a relay dropping SYN
-// packets could otherwise pin the probe to the OS TCP retry window.
 const openHostTcp = (host: string, port: number) =>
   new Promise<void>((resolve, reject) => {
     const socket = connect({ host, port });
@@ -482,8 +439,6 @@ const hostDiagnosticProbes: IrohDiagnosticProbes = {
 
 const trailingDot = /\.$/;
 
-// The relay hosts come from the same n0 production relay map the endpoint
-// builders apply through applyN0(), never from a hardcoded list.
 const defaultRelayHosts = (): readonly string[] =>
   RelayMode.defaultMode()
     .relayMap()
@@ -494,9 +449,6 @@ export const diagnoseHostIrohEnvironment = (
   environment: ProxyEnvironment
 ): Effect.Effect<readonly DiagnosisCheck[]> =>
   Effect.suspend(() => {
-    // A binding that cannot yield its relay map must still produce a
-    // report: the empty list becomes failing dns and relay checks instead
-    // of a crashed effect that prints nothing.
     let relayHosts: readonly string[];
     try {
       relayHosts = defaultRelayHosts();

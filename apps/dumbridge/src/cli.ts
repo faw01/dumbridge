@@ -68,18 +68,6 @@ export interface ClientTransportResolution {
   readonly proxyFallback: boolean;
 }
 
-// Cloud sandboxes such as Claude Code "Full Network" set a proxy variable the
-// published iroh binding cannot route through. Committing to that proxy would
-// fail before any network attempt, so the client degrades to the ordinary
-// direct-capable dial: no proxy is requested and no reachability is forced,
-// leaving the relay policy to the locator inside the bridge key — a
-// direct-only key stays a direct-only attempt, a relay-carrying key keeps its
-// fallback. A proxy-capable binding still commits to the proxy and to
-// relay-only reachability: an HTTP CONNECT tunnel carries TCP only, so UDP
-// holepunching can never traverse it — relay-only under a proxy is a
-// constraint of the environment, not a dumbridge policy choice. The inspected
-// environment travels inside the options so the dial reads the same
-// environment this decision was made with.
 export const resolveClientTransportOptions = (
   environment: Readonly<Record<string, string | undefined>> = process.env,
   bindingSupportsProxy: () => boolean = irohBindingSupportsProxy
@@ -107,15 +95,9 @@ export interface ClientCaTrustResolution {
 export const caTrustUnsupportedNotice =
   "dumbridge: this environment names an extra CA certificate, but the installed iroh binding cannot trust extra CA roots; connecting without it\n";
 
-// Names the variable, never its path: a sandbox path is harmless locally but
-// the notice pattern stays free of environment values, like the proxy one.
 export const caTrustUnreadableNotice = (source: CaTrustSource["name"]) =>
   `dumbridge: ${source} names an extra CA certificate file that could not be read; connecting without it\n`;
 
-// A missing or unusable CA source degrades with a notice instead of failing:
-// the extra roots are additive trust for a TLS-intercepting proxy, and only
-// the dial can tell whether this proxy actually intercepts, so a pre-network
-// dead-end here would refuse environments that would have connected fine.
 export const resolveClientCaTrust = (
   environment: Readonly<Record<string, string | undefined>> = process.env,
   bindingSupportsCaTrust: () => boolean = irohBindingSupportsCaTrust,
@@ -160,7 +142,6 @@ const write = (stream: NodeJS.WriteStream, value: string) =>
     stream.write(value);
   });
 
-// Stderr only and never the proxy URL itself, which may carry credentials.
 export const proxyFallbackNotice =
   "dumbridge: this environment sets a proxy, but the installed iroh binding cannot route through it; attempting a direct connection instead\n";
 
@@ -174,9 +155,6 @@ const clientTransport = Effect.gen(function* () {
   if (resolution.proxyFallback) {
     yield* write(process.stderr, proxyFallbackNotice);
   }
-  // Extra CA roots vouch for the TLS inside the proxy's CONNECT tunnel, so
-  // they are resolved only when the dial commits to that proxy; a common
-  // SSL_CERT_FILE export on an unproxied machine stays silent and inert.
   const caResolution =
     resolution.options.proxy?._tag === "FromEnvironment"
       ? yield* resolveClientCaTrust()
@@ -193,10 +171,6 @@ const clientTransport = Effect.gen(function* () {
   };
 });
 
-// The proxy-present-but-unusable cause fires only after the fallback dial has
-// actually failed: the warning above already named the degradation, and a
-// fallback that connects needs no cause at all. Never the proxy URL itself,
-// which may carry credentials.
 export const proxyUnusableConnectNotice =
   " This environment sets a proxy that the installed iroh binding cannot use, so the connection was attempted without it; if this network allows egress only through that proxy, no direct or relay path can succeed.";
 
@@ -573,10 +547,6 @@ const command = Command.make("dumbridge").pipe(
   Command.withSubcommands([serve, run, pull, doctor, skill])
 );
 
-// Read at startup, never inlined at bundle time: a release or prerelease may
-// re-version package.json after dist/cli.js was bundled, and --version must
-// report the installed manifest. src/cli.ts and dist/cli.js both sit one
-// level below the manifest.
 const packageVersion = (
   JSON.parse(
     readFileSync(new URL("../package.json", import.meta.url), "utf8")
@@ -604,9 +574,6 @@ const formatPullBytes = (bytes: number) => {
 
 const pullRecovery = "pull a smaller file or subdirectory";
 
-// The bridge reports only that a limit fired, never which one or what it
-// measured, so the remote message states every ceiling the protocol fixes
-// for both sides instead of fabricating a measurement.
 const remotePullLimitMessage = `The remote pull exceeded a safety limit: one pull may copy at most ${maximumManifestEntries} entries, ${formatPullBytes(maximumFileBytes)} per file, and ${formatPullBytes(maximumTransferBytes)} in total; ${pullRecovery}.`;
 
 const pullLimitMessage = (error: PullLimitError) => {

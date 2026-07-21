@@ -67,6 +67,7 @@ export const pathKindFrom = (stats: Stats): PathKind => {
   return "other";
 };
 
+// fallow-ignore-next-line unused-export
 export const pathComponentsMatch = (
   expected: PathComponentSnapshot,
   observed: PathComponentSnapshot

@@ -20,15 +20,9 @@ import {
 } from "node:path";
 import { type Duration, Effect, Result, Schema } from "effect";
 
-// One record file per served root: the name hashes the canonical root
-// (callers canonicalize before keying) so serves of different roots coexist
-// while a duplicate root collides on the same exclusive-create target.
 const recordFileName = (root: string) =>
   `detached-serve-${createHash("sha256").update(root).digest("hex")}.json`;
 const recordFilePattern = /^detached-serve-[0-9a-f]{64}\.json$/;
-// Releases before records were keyed by root stored their single detached
-// serve here; a record under this name is still honored until it is stopped
-// or reclaimed, but never written.
 const legacyRecordFileName = "detached-serve.json";
 const isRecordFileName = (name: string) =>
   recordFilePattern.test(name) || name === legacyRecordFileName;
@@ -40,19 +34,12 @@ const keyExpiryLine = /^The key expires at (\S+)\./m;
 const cliStderrPrefix = /^dumbridge: /;
 const maximumStartupStderrLength = 512;
 
-// Timestamps must fit the JavaScript Date range: the status surface renders
-// them with toISOString, so a value outside it would make one tampered record
-// poison the whole listing instead of decoding as unreadable and being
-// reclaimed like any other corrupt record.
 const EpochMilliseconds = Schema.Number.check(
   Schema.isInt(),
   Schema.isGreaterThan(0),
   Schema.isLessThanOrEqualTo(8_640_000_000_000_000)
 );
 
-// The record deliberately excludes the bridge key: the key must never land in
-// any file, and process death alone revokes it. The key's expiry deadline is
-// not the key and is persisted for status surfaces.
 const DetachedServeRecordSchema = Schema.Struct({
   expiresAtEpochMs: Schema.optionalKey(EpochMilliseconds),
   pid: Schema.Number.check(Schema.isInt(), Schema.isGreaterThan(0)),
@@ -199,15 +186,10 @@ const readRecordEntries = (
             stored: await readStoredRecord(join(stateDirectory, fileName)),
           }))
       );
-      // A record can vanish between the directory scan and its read when a
-      // concurrent stop reclaims it; a vanished record is simply not listed.
       return entries.filter(isPresent);
     },
   });
 
-// The entries that may hold the given canonical root's serve: its hashed
-// record file, plus the fixed-name file a pre-upgrade release wrote when its
-// record names the same root.
 const recordEntriesForRoot = (
   stateDirectory: string,
   root: string
@@ -221,12 +203,8 @@ const recordEntriesForRoot = (
       entries.push({ fileName, stored: keyed });
     }
     if (
-      // An unreadable legacy file belongs to no root and can only be
-      // reclaimed, so every root-scoped lookup surfaces it.
       legacy.type === "unreadable" ||
       (legacy.type === "record" &&
-        // A pre-upgrade record resolved but did not realpath its root, so a
-        // symlink spelling must be canonicalized before it can match.
         (yield* canonicalRoot(legacy.record.root)) === root)
     ) {
       entries.push({ fileName: legacyRecordFileName, stored: legacy });
@@ -295,15 +273,8 @@ const removeRecordIfUnchanged = (
     }
   });
 
-// The slack absorbs drift between the wall clock that stamped the record and
-// the uptime-derived boot time. It errs toward treating a record as live:
-// wrongly reporting a live serve as stale would leave its key valid while
-// the user believes it was revoked.
 const bootTimeSlackMs = 60_000;
 
-// A record is stale when its process is gone, or when the machine rebooted
-// after the record was written: a pid that reappears in a later boot belongs
-// to some other process and must not be signaled.
 const recordIsLive = (
   record: DetachedServeRecord,
   control: ServeProcessControl
@@ -335,9 +306,6 @@ const canonicalizeExisting = async (path: string) => {
   }
 };
 
-// The record key must match however the root is spelled — via a symlink, a
-// relative path, or its real path — because the serve process itself
-// canonicalizes the root it shares.
 const canonicalRoot = (root: string) =>
   Effect.promise(() => canonicalizeExisting(root));
 
@@ -391,8 +359,6 @@ export const detachServe = Effect.fn("DetachedServe.detach")(
         );
       }
 
-      // The child receives the same canonical root the record is keyed by,
-      // so a symlink retargeted after this point cannot make them disagree.
       const startup = yield* options.control.spawnDetachedServe({
         root,
         ...(options.reachability === undefined
@@ -509,12 +475,6 @@ export const stopDetachedServe = Effect.fn("DetachedServe.stop")(
     })
 );
 
-// The status surface (serve --status) consumes this listing. Stale records
-// whose process is provably gone (dead pid, prior boot) are reclaimed as
-// they are encountered, matching the stop path. An unreadable file is only
-// skipped, never reclaimed here: it may be a record a concurrent detach has
-// created but not yet finished writing, and unlinking it would orphan that
-// serve. An explicit stop still reclaims a genuinely corrupt file.
 export const listDetachedServes = Effect.fn("DetachedServe.list")(
   (options: {
     readonly control: ServeProcessControl;
@@ -599,8 +559,6 @@ const spawnDetachedServe = (request: DetachedSpawnRequest) =>
         });
 
         child.on("error", () => abandon(startupError("")));
-        // "close" rather than "exit": it fires after the stdio pipes drain,
-        // so a failed child's stderr is complete when the error is built.
         child.on("close", () => abandon(startupError(stderr)));
         child.stderr.on("data", (chunk: Buffer) => {
           stderr += chunk.toString();

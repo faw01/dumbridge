@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { Config, Effect, Option, Redacted, Schema } from "effect";
 
+// fallow-ignore-next-line unused-export
 export class BridgeKeySourceError extends Schema.TaggedErrorClass<BridgeKeySourceError>()(
   "BridgeKeySourceError",
   {

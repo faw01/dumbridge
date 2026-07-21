@@ -92,10 +92,6 @@ const withSessionDeadline = <A, E, R>(
     })
   );
 
-// handleRun enforces the run budget itself so an over-budget query is
-// answered with a branded failure; the session backstop gets only the grace
-// needed to deliver that answer, mirroring the bounded reject send. The
-// budget on the query is unchanged.
 const runResponseGrace: Duration.Input = "10 seconds";
 
 const runSessionBackstop = (budget: Duration.Input): Duration.Input =>
@@ -138,8 +134,6 @@ const handleSession = (session: BridgeSession, context: SessionContext) =>
     context.deadlines.request,
     readRequest(session, context.key.capability)
   ).pipe(
-    // Expiry is checked after authentication so an expired key never reaches
-    // the shell or a pull, while unauthenticated callers learn nothing.
     Effect.tap(() => ensureKeyNotExpired(context.key)),
     Effect.flatMap(
       (request): Effect.Effect<void, RequestHandlerError> =>

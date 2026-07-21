@@ -370,9 +370,6 @@ describe("Iroh environment diagnosis", () => {
 
   it.effect("reports the binding gap without touching the named file", () =>
     Effect.gen(function* () {
-      // Mirrors run and pull: they probe binding support before reading the
-      // file, so a stock binding is the reported gap even when the named
-      // file is also unreadable.
       let reads = 0;
       const [, , , , check] = yield* diagnose(
         {

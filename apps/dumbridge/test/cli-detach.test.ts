@@ -50,7 +50,7 @@ afterEach(async () => {
     try {
       process.kill(pid, "SIGKILL");
     } catch {
-      // Already stopped.
+      //
     }
   }
   await rm(fixture, { force: true, recursive: true });

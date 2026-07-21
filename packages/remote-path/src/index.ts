@@ -18,9 +18,6 @@ export class InvalidRemotePathError extends Schema.TaggedErrorClass<InvalidRemot
   { path: Schema.String }
 ) {}
 
-// The canonical form is the strict union of every rule the wire, the served
-// root, and the pull receiver enforced before consolidation. Loosening any
-// rule here widens the security boundary on all of them at once.
 const windowsDrivePattern = /^[a-z]:/i;
 const windowsForbiddenCharacterPattern = /[<>:"|?*]/;
 const windowsReservedBasePattern =

@@ -67,10 +67,6 @@ class BridgeClientError extends Schema.TaggedErrorClass<BridgeClientError>()(
   }
 ) {}
 
-// A direct-only dial counts as non-retriable: it already spent its whole
-// connect deadline holepunching, so a second attempt only doubles the wait.
-// The proxy and CA trust configuration failures fire before any network
-// attempt, so retrying them can never change the outcome either.
 type DeterministicConnectError =
   | BridgeCaTrustConfigurationError
   | BridgeCaTrustUnsupportedError
@@ -148,11 +144,6 @@ const transientConnectFailure = (error: unknown) =>
 const classifiedConnectFailure = (error: BridgeDialError) =>
   clientError("connect", error.message, error);
 
-// An unusable proxy only becomes the likely cause once the fallback dial has
-// actually failed, so the CLI asks whether the dial itself failed rather than
-// pattern-matching the client's private error class. Local configuration and
-// byte-session failures stay out: they happen before or after the network
-// path was exercised, so the proxy is no explanation for them.
 export const isDialFailure = (error: unknown): boolean =>
   error instanceof BridgeDirectConnectError ||
   (error instanceof BridgeClientError &&
@@ -189,13 +180,6 @@ const openSession = (transport: BridgeTransport, link: string) =>
 const requestSendFailure = (error: unknown) =>
   clientError("request", "Could not send the bridge request.", error);
 
-// Local encoding failures fail immediately: nothing was sent, so no reject
-// frame can be waiting. Transport failures are deferred instead, because a
-// bridge that rejects the key may stop reading mid-request and its reject
-// frame explains the refusal better than the broken write; the send failure
-// stays the root cause when no reject arrives. Finish is still attempted
-// after a failed write so the bridge sees end-of-stream rather than waiting
-// out its request deadline.
 const finishRequest = (
   session: BridgeSession,
   capability: Capability,

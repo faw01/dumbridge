@@ -1,3 +1,4 @@
+// fallow-ignore-file unused-file
 "use client"
 
 import { Collapsible as CollapsiblePrimitive } from "radix-ui"

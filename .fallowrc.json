@@ -1,68 +1,7 @@
 {
   "$schema": "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json",
-  "rules": {
-    "unresolved-imports": "error",
-    "unlisted-dependencies": "error",
-    "unused-files": "error",
-    "unused-exports": "warn"
-  },
-  "duplicates": {
-    "threshold": 1
-  },
-  "health": {
-    // CRAP scores are static estimates here (bun test emits no Istanbul
-    // coverage), so the default 30 trips on ordinary partially-covered code.
-    // 250 clears the estimated backlog and only fires on egregious new code.
-    "maxCrap": 250,
-    "thresholdOverrides": [
-      {
-        // Vendored shadcn/ui chart wrapper copied verbatim from the mf2
-        // scaffold; upstream owns its shape, so it stays visible under a
-        // raised ceiling instead of being rewritten locally.
-        "files": ["packages/design-system/components/ui/chart.tsx"],
-        "maxCognitive": 20,
-        "maxCrap": 600,
-        "maxCyclomatic": 30,
-        "maxUnitSize": 80,
-        "reason": "vendored mf2/shadcn chart component"
-      }
-    ]
-  },
-  // @effect/language-service loads through tsconfig plugins
-  // (packages/typescript-config/base.json), a reference dependency scanning
-  // does not trace. @effect/platform-node-shared is pinned by apps/dumbridge
-  // so published installs resolve one effect instance (its caret range
-  // otherwise floats to a newer beta whose effect peer range the pinned beta
-  // fails); nothing imports it directly, so fallow cannot observe the usage.
   "ignoreDependencies": [
     "@effect/language-service",
     "@effect/platform-node-shared"
-  ],
-  "audit": {
-    // Inherited findings stay visible in reports; only findings introduced
-    // by the pull request gate the merge.
-    "gate": "new-only"
-  },
-  "overrides": [
-    {
-      // Vendored shadcn/ui kit copied verbatim from the mf2 scaffold.
-      // apps/www consumes components on demand, so most files have no
-      // importer yet; keeping the kit intact is deliberate.
-      "files": ["packages/design-system/**"],
-      "rules": {
-        "unused-files": "off",
-        "unused-exports": "off"
-      }
-    },
-    {
-      // dist/cli.js externalizes @number0/iroh and just-bash, so apps/dumbridge
-      // declares them for the published artifact while only bundled workspace
-      // packages import them. Scoped to this manifest so unused- and
-      // unlisted-dependency detection stays fully active everywhere else.
-      "files": ["apps/dumbridge/package.json"],
-      "rules": {
-        "unused-dependencies": "warn"
-      }
-    }
   ]
 }

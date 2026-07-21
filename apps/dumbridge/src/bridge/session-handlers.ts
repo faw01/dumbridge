@@ -88,9 +88,6 @@ export const handleRun = (
   timeBudget: Duration.Input
 ) =>
   Effect.gen(function* () {
-    // The budget is enforced here, before any frame is sent, so an
-    // over-budget query is answered with a branded failure instead of a
-    // torn-down session the client can only report as an invalid response.
     const result = yield* executeShell(shell, script).pipe(
       Effect.timeoutOrElse({
         duration: timeBudget,

@@ -190,7 +190,7 @@ const tryLinuxPublisher = (
   try {
     return load();
   } catch {
-    // The caller tries the next ABI-compatible binding.
+    //
   }
 };
 

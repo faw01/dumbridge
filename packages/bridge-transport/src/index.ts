@@ -47,18 +47,10 @@ export class BridgeDeadlineExceededError extends Schema.TaggedErrorClass<BridgeD
   }
 ) {}
 
-// Why a dial against a relay-carrying locator failed, as far as the adapter
-// can honestly observe: "relay-unreachable" when the relay link never came up
-// before the dial failed (egress policy, DNS, or a dead relay host), and
-// "peer-offline" when the relay was reachable yet the peer never answered
-// (serve stopped or the local machine is offline).
 const BridgeDialReason = Schema.Literals(["peer-offline", "relay-unreachable"]);
 
 export type BridgeDialReason = typeof BridgeDialReason.Type;
 
-// A dial that failed after the relay reachability snapshot was taken; the
-// reason and the relay host travel with the failure so the client can report
-// the cause instead of a generic "unreachable".
 export class BridgeDialError extends Schema.TaggedErrorClass<BridgeDialError>()(
   "BridgeDialError",
   {
@@ -69,8 +61,6 @@ export class BridgeDialError extends Schema.TaggedErrorClass<BridgeDialError>()(
   }
 ) {}
 
-// A dial against a locator with no relay cannot fall back; the failure is
-// branded so callers can fail fast instead of retrying a hopeless holepunch.
 export class BridgeDirectConnectError extends Schema.TaggedErrorClass<BridgeDirectConnectError>()(
   "BridgeDirectConnectError",
   {
@@ -160,8 +150,6 @@ export interface BridgeDeadlines {
   readonly listen: Duration.Input;
 }
 
-// The path selected when the session was established. Iroh may later upgrade
-// a relayed connection to a direct one; the snapshot is not re-observed.
 export type ConnectionPath = "direct" | "relay" | "unknown";
 
 export interface DiagnosisCheck {

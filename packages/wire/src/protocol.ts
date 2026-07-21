@@ -15,8 +15,6 @@ export const maximumHeaderBytes = maximumFrameBytes - lengthPrefixBytes;
 const maximumScriptCharacters = 64 * 1024;
 const maximumServedDisplayCharacters = 64;
 
-// The served root display travels to a client terminal, so the wire refuses
-// C0 and C1 control characters that could smuggle escape sequences.
 const ServedDisplaySchema = Schema.String.check(
   Schema.isNonEmpty(),
   Schema.isMaxLength(maximumServedDisplayCharacters),

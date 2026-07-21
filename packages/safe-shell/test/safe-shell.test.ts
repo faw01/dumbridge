@@ -668,7 +668,7 @@ describe("SafeShell", () => {
           try {
             await this.fs.readFileBuffer("/workspace/overlay.txt");
           } catch {
-            // Simulate Just Bash replacing the filesystem error while unwinding.
+            //
           }
           throw new Error("EFBIG: simulated Just Bash rejection");
         });

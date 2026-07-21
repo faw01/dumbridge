@@ -302,8 +302,6 @@ const connectionPathClassification = async () => {
   return { noSelection, relaySelected, snapshotFailure };
 };
 
-// Runs in a child process so mutating the ambient environment cannot leak
-// into other tests: the ambient proxy is a decoy the dial must never read.
 const proxyEnvironmentThreading = async () =>
   Effect.runPromise(
     Effect.scoped(

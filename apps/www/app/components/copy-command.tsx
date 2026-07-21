@@ -18,7 +18,7 @@ export const CopyCommand = ({ command }: CopyCommandProperties) => {
         setTimeout(() => setCopied(false), 2000);
       })
       .catch(() => {
-        // Clipboard access can be denied; the command stays selectable.
+        //
       });
   };
 

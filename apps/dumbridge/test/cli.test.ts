@@ -209,8 +209,6 @@ describe("dumbridge CLI", () => {
   test("commits to the relay only when the binding can use the proxy", () => {
     const proxyCapable = () => true;
     const proxyIncapable = () => false;
-    // The environment travels inside the options so the dial reads the same
-    // environment the commitment decision was made with.
     expect(
       resolveClientTransportOptions(
         { HTTPS_PROXY: "http://proxy" },
@@ -329,11 +327,6 @@ describe("dumbridge CLI", () => {
     const link = mintKeyExpiringAt(1);
     const result = await invokeCli({
       args: ["run", "true"],
-      // Empty proxy variables override anything the ambient shell exports
-      // (empty never counts as a configured proxy), so the no-proxy branch
-      // is exercised regardless of the machine running the suite. The CA
-      // resolution runs before the key expiry is checked, so a CA notice
-      // would precede the expiry message if one were ever emitted.
       environment: {
         ALL_PROXY: "",
         all_proxy: "",
@@ -357,10 +350,6 @@ describe("dumbridge CLI", () => {
   });
 
   test("commits to a configured proxy without a fallback warning", async () => {
-    // The installed binding is the proxy-capable dumbridge-iroh fork, so a
-    // proxied environment commits to the proxy instead of degrading; the
-    // fallback notice belongs to stock bindings only (pinned above through
-    // the injected capability probe) and the URL still never leaks.
     const link = mintKeyExpiringAt(1);
     const result = await invokeCli({
       args: ["run", "true"],

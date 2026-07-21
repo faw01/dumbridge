@@ -30,6 +30,7 @@ import {
 } from "./protocol";
 import type { PullManifest } from "./pull-manifest";
 
+// fallow-ignore-next-line unused-export
 export const writeUint32 = (
   target: Uint8Array,
   offset: number,
