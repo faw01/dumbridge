@@ -42,7 +42,7 @@ const cloudNotes = [
     shot: {
       alt: "Claude Code on the web settings with Network access set to Full",
       height: 240,
-      hoverScale: "group-hover:scale-125 md:group-hover:scale-150",
+      hoverScale: "hover:scale-125 md:hover:scale-150",
       src: "/setup/claude-network.png",
       width: 580,
     },
@@ -53,7 +53,7 @@ const cloudNotes = [
     shot: {
       alt: "Codex Cloud settings with the Domain allowlist set to All",
       height: 340,
-      hoverScale: "group-hover:scale-125 md:group-hover:scale-[1.8]",
+      hoverScale: "hover:scale-125 md:hover:scale-[1.8]",
       src: "/setup/codex-allowlist.png",
       width: 720,
     },
@@ -84,7 +84,7 @@ export const Walkthrough = () => (
       </h2>
       <div className="grid grid-cols-1 gap-x-8 gap-y-10 md:grid-cols-3 md:grid-rows-[auto_auto_auto]">
         <Step
-          caption="Serve one directory from your machine. dumbridge prints the key."
+          caption="Serve one directory from your machine."
           number="1"
           title="Serve"
         >
@@ -110,7 +110,7 @@ export const Walkthrough = () => (
           </div>
         </Step>
         <Step
-          caption="The agent reads the file live from your disk. Nothing was committed or uploaded."
+          caption="The agent reads the file live from your computer."
           number="3"
           title="Read"
         >
@@ -130,7 +130,7 @@ export const Walkthrough = () => (
       </div>
       <ul className="flex flex-col gap-5">
         {cloudNotes.map((cloud) => (
-          <li className="group flex flex-col gap-2" key={cloud.name}>
+          <li className="flex flex-col gap-2" key={cloud.name}>
             <p className="text-sm">
               <span className="font-medium tracking-tight">{cloud.name}:</span>{" "}
               <span className="text-muted-foreground">{cloud.note}</span>
@@ -138,7 +138,7 @@ export const Walkthrough = () => (
             {cloud.shot && (
               <img
                 alt={cloud.shot.alt}
-                className={`relative z-0 w-48 max-w-full origin-top-left rounded-md border transition-transform duration-200 group-hover:z-10 group-hover:shadow-lg ${cloud.shot.hoverScale}`}
+                className={`relative z-0 w-48 max-w-full origin-top-left rounded-md border transition-transform duration-200 hover:z-10 hover:shadow-lg ${cloud.shot.hoverScale}`}
                 height={cloud.shot.height}
                 loading="lazy"
                 src={cloud.shot.src}
