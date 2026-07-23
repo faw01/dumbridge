@@ -29,7 +29,7 @@ describe("Iroh FFI proxy source patch", () => {
     expect(patch).toContain("proxyFromEnv(): void");
     expect(patch).toContain("proxyUrl(url: string): void");
     expect(patch).toContain("caExtraRootsPem(pem: string): void");
-    expect(documentation).toContain("66e628e0fd2b7d526d01b81269041c97fc97f7a5");
+    expect(documentation).toContain("bc7eb0d28a5389323abdf9a878c8f3b45bdcb499");
     expect(documentation).toContain("remaining external gate");
     expect(documentation).toContain("dumbridge-iroh");
   });
