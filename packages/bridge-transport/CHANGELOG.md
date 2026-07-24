@@ -1,5 +1,11 @@
 # @dumbridge/bridge-transport
 
+## 0.2.1
+
+### Patch Changes
+
+- c1d6f0a: repin the iroh-ffi proxy patch to upstream 1.1.0 base
+
 ## 0.2.0
 
 ### Minor Changes
