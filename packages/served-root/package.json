@@ -14,7 +14,7 @@
   },
   "dependencies": {
     "@dumbridge/remote-path": "workspace:*",
-    "effect": "4.0.0-beta.98",
+    "effect": "4.0.0-beta.101",
     "just-bash": "3.1.0"
   },
   "devDependencies": {
