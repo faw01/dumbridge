@@ -1,6 +1,6 @@
 {
   "name": "dumbridge",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "A short-lived, read-only bridge from one local directory to a cloud coding agent",
   "keywords": [
     "agent",
