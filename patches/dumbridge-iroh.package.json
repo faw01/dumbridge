@@ -7,7 +7,7 @@
     "dumbridge",
     "napi"
   ],
-  "version": "1.0.0",
+  "version": "1.1.0",
   "type": "commonjs",
   "main": "index.js",
   "types": "index.d.ts",
@@ -37,8 +37,8 @@
   },
   "license": "MIT OR Apache-2.0",
   "devDependencies": {
-    "@napi-rs/cli": "^3.6.2",
-    "typedoc": "^0.27.6",
+    "@napi-rs/cli": "^3.7.2",
+    "typedoc": "^0.28.20",
     "typescript": "~5.8.3"
   },
   "scripts": {
@@ -52,16 +52,16 @@
   },
   "packageManager": "yarn@1.22.22",
   "optionalDependencies": {
-    "dumbridge-iroh-darwin-arm64": "1.0.0",
-    "dumbridge-iroh-android-arm64": "1.0.0",
-    "dumbridge-iroh-linux-arm64-gnu": "1.0.0",
-    "dumbridge-iroh-linux-arm64-musl": "1.0.0",
-    "dumbridge-iroh-win32-arm64-msvc": "1.0.0",
-    "dumbridge-iroh-win32-x64-msvc": "1.0.0",
-    "dumbridge-iroh-linux-x64-gnu": "1.0.0",
-    "dumbridge-iroh-linux-x64-musl": "1.0.0",
-    "dumbridge-iroh-linux-arm-gnueabihf": "1.0.0",
-    "dumbridge-iroh-linux-arm-musleabihf": "1.0.0",
-    "dumbridge-iroh-android-arm-eabi": "1.0.0"
+    "dumbridge-iroh-darwin-arm64": "1.1.0",
+    "dumbridge-iroh-android-arm64": "1.1.0",
+    "dumbridge-iroh-linux-arm64-gnu": "1.1.0",
+    "dumbridge-iroh-linux-arm64-musl": "1.1.0",
+    "dumbridge-iroh-win32-arm64-msvc": "1.1.0",
+    "dumbridge-iroh-win32-x64-msvc": "1.1.0",
+    "dumbridge-iroh-linux-x64-gnu": "1.1.0",
+    "dumbridge-iroh-linux-x64-musl": "1.1.0",
+    "dumbridge-iroh-linux-arm-gnueabihf": "1.1.0",
+    "dumbridge-iroh-linux-arm-musleabihf": "1.1.0",
+    "dumbridge-iroh-android-arm-eabi": "1.1.0"
   }
 }
