@@ -46,7 +46,7 @@
     "verify:tarball": "bun scripts/verify-npm-tarball.ts"
   },
   "dependencies": {
-    "@effect/platform-bun": "4.0.0-beta.98",
+    "@effect/platform-bun": "4.0.0-beta.101",
     "@effect/platform-node-shared": "4.0.0-beta.98",
     "@number0/iroh": "npm:dumbridge-iroh@1.1.0",
     "effect": "4.0.0-beta.98",
