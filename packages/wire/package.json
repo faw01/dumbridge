@@ -15,7 +15,7 @@
   "dependencies": {
     "@dumbridge/bridge-key": "workspace:*",
     "@dumbridge/remote-path": "workspace:*",
-    "effect": "4.0.0-beta.98"
+    "effect": "4.0.0-beta.101"
   },
   "devDependencies": {
     "@dumbridge/typescript-config": "workspace:*",
