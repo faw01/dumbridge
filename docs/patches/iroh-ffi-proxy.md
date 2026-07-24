@@ -17,21 +17,19 @@ logic of its own.
 source patch against `n0-computer/iroh-ffi` commit
 `bc7eb0d28a5389323abdf9a878c8f3b45bdcb499` (`@number0/iroh@1.1.0`).
 
-A build of this patch is published as **`dumbridge-iroh@1.0.0`** on npm
-(built from the previous pin, upstream commit `66e628e0` /
-`@number0/iroh@1.0.0`) across all eleven napi targets stock
+A build of this patch is published as **`dumbridge-iroh@1.1.0`** on npm
+(matching the patched upstream version) across all eleven napi targets stock
 `@number0/iroh` ships (each native binary rides its own
 `dumbridge-iroh-<triple>` optional dependency), and `dumbridge` consumes it
-through the alias `"@number0/iroh": "npm:dumbridge-iroh@1.0.0"`.
+through the alias `"@number0/iroh": "npm:dumbridge-iroh@1.1.0"`.
 [`patches/dumbridge-iroh.package.json`](../../patches/dumbridge-iroh.package.json)
 pins the published fork manifest. ADR 0006 records why the fork exists, its
-guardrails, and its exit condition. To reproduce a binding build: check out
-the pinned commit, apply the patch, and run the fork's
+guardrails, and its exit condition. To reproduce the published binding: check
+out the pinned commit, apply the patch, and run the fork's
 `dumbridge_release.yml` workflow, which builds `iroh-js` with napi-rs for all
 eleven targets, probes the artifacts on real hardware for four architectures,
 and refuses to publish unless every artifact is staged; the published manifest
-must match the pinned one. A `dumbridge-iroh@1.1.0` rebuild against the new
-pin is a separate release decision.
+must match the pinned one.
 
 The patch exposes three capabilities that already exist on Iroh's Rust
 endpoint builder:
@@ -50,7 +48,7 @@ endpoint builder:
   best-effort root loading (`add_parsable_certificates`), so such input can
   succeed while adding no trust anchor. A stricter per-certificate validation
   belongs in a future binding build and the upstream iroh-ffi PR;
-  `dumbridge-iroh@1.0.0` repackages the same patched source for all targets
+  `dumbridge-iroh@1.1.0` repackages the same patched source for all targets
   without changing it, so the limitation carries over unchanged.
 
 No proxy is implemented in dumbridge, and the patch does not add a network

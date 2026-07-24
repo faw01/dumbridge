@@ -44,7 +44,7 @@ describe("Iroh FFI proxy source patch", () => {
     };
 
     expect(manifest.name).toBe("dumbridge-iroh");
-    expect(manifest.version).toBe("1.0.0");
+    expect(manifest.version).toBe("1.1.0");
     expect(manifest.main).toBe("index.js");
     expect(manifest.types).toBe("index.d.ts");
     expect(Object.keys(manifest.optionalDependencies).sort()).toEqual([
