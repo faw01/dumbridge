@@ -15,21 +15,23 @@ logic of its own.
 
 [`patches/iroh-ffi-proxy.patch`](../../patches/iroh-ffi-proxy.patch) is a
 source patch against `n0-computer/iroh-ffi` commit
-`66e628e0fd2b7d526d01b81269041c97fc97f7a5` (`@number0/iroh@1.0.0`).
+`bc7eb0d28a5389323abdf9a878c8f3b45bdcb499` (`@number0/iroh@1.1.0`).
 
 A build of this patch is published as **`dumbridge-iroh@1.0.0`** on npm
-(matching the patched upstream version) across all eleven napi targets stock
+(built from the previous pin, upstream commit `66e628e0` /
+`@number0/iroh@1.0.0`) across all eleven napi targets stock
 `@number0/iroh` ships (each native binary rides its own
 `dumbridge-iroh-<triple>` optional dependency), and `dumbridge` consumes it
 through the alias `"@number0/iroh": "npm:dumbridge-iroh@1.0.0"`.
 [`patches/dumbridge-iroh.package.json`](../../patches/dumbridge-iroh.package.json)
 pins the published fork manifest. ADR 0006 records why the fork exists, its
-guardrails, and its exit condition. To reproduce the published binding: check
-out the pinned commit, apply the patch, and run the fork's
+guardrails, and its exit condition. To reproduce a binding build: check out
+the pinned commit, apply the patch, and run the fork's
 `dumbridge_release.yml` workflow, which builds `iroh-js` with napi-rs for all
 eleven targets, probes the artifacts on real hardware for four architectures,
 and refuses to publish unless every artifact is staged; the published manifest
-must match the pinned one.
+must match the pinned one. A `dumbridge-iroh@1.1.0` rebuild against the new
+pin is a separate release decision.
 
 The patch exposes three capabilities that already exist on Iroh's Rust
 endpoint builder:

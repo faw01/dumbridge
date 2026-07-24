@@ -1,5 +1,5 @@
 diff --git a/iroh-js/Cargo.toml b/iroh-js/Cargo.toml
-index 899bf8a..c2e3caa 100644
+index cc85295..ee31432 100644
 --- a/iroh-js/Cargo.toml
 +++ b/iroh-js/Cargo.toml
 @@ -20,6 +20,7 @@ iroh-metrics = "1.0.0"
@@ -36,20 +36,18 @@ index d1e2eb1..4c29d00 100644
    bindAddr(addr: string): void
    /** Bind the endpoint. */
 diff --git a/iroh-js/src/endpoint.rs b/iroh-js/src/endpoint.rs
-index d4fb502..01e064b 100644
+index d4fb502..a882008 100644
 --- a/iroh-js/src/endpoint.rs
 +++ b/iroh-js/src/endpoint.rs
-@@ -85,6 +85,42 @@ impl EndpointBuilder {
+@@ -85,6 +85,33 @@ impl EndpointBuilder {
          self.map(|b| b.relay_mode(mode));
      }
  
-+    /// Configure HTTP(S) proxying from standard proxy environment variables.
 +    #[napi]
 +    pub fn proxy_from_env(&self) {
 +        self.map(|b| b.proxy_from_env());
 +    }
 +
-+    /// Configure an explicit HTTP(S) proxy URL.
 +    #[napi]
 +    pub fn proxy_url(&self, url: String) -> Result<()> {
 +        let url = url::Url::parse(&url).map_err(anyhow::Error::from)?;
@@ -57,13 +55,6 @@ index d4fb502..01e064b 100644
 +        Ok(())
 +    }
 +
-+    /// Add extra trusted CA root certificates (PEM) for non-iroh TLS.
-+    ///
-+    /// Trust is additive: the embedded WebPKI/Mozilla roots stay trusted and the
-+    /// PEM-encoded certificates are layered on top. This covers TLS-intercepting
-+    /// proxies that present a private MITM CA (the same rustls config verifies the
-+    /// proxy's TLS and the relay TLS inside the CONNECT tunnel). Native iroh
-+    /// connections are unaffected — they use iroh's own cryptographic auth.
 +    #[napi]
 +    pub fn ca_extra_roots_pem(&self, pem: String) -> Result<()> {
 +        use rustls_pki_types::{CertificateDer, pem::PemObject};
